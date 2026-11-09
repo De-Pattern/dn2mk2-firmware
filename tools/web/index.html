@@ -651,7 +651,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     }
   }
   function slotProblems() {
-    if (mode === "lib") return dev && dev.lib && toSend().length + dev.lib.rows.length > C.LIB_CAP ? `The library holds ${C.LIB_CAP} samples.` : "";
+    if (mode === "lib") return dev && dev.lib && toSend().length + dev.lib.rows.length > dev.lib.cap ? `The library holds ${dev.lib.cap.toLocaleString()} samples.` : "";
     if (mode === "fill") return items.length > C.USER_SLOTS ? `Only ${C.USER_SLOTS} slots.` : "";
     const seen = new Map();
     for (const it of items) {
@@ -733,13 +733,15 @@ if (typeof module !== "undefined") module.exports = DN2;
     /* INFO first: v0.43's sixth word is how many folders the library holds (128; 64 before) */
     const ip = (await call(C.LIB.INFO, [])).payload, iw = o => ip[o] | ip[o + 1] << 8 | ip[o + 2] << 16 | (ip[o + 3] << 24 >>> 0);
     const nf = ip.length >= 24 && iw(20) > 64 && iw(20) <= 255 ? iw(20) : 64;
+    /* v0.45: the second word is how many samples it holds (16,384; 2,048 before) */
+    const cap = ip.length >= 8 && iw(4) >= 2048 && iw(4) <= 65536 ? iw(4) : 2048;
     for (let f0 = 0; f0 < nf; f0 += 4) {
       const p = (await call(C.LIB.FOLDERS, [f0])).payload;
       for (let j = 0; j < 4; j++) { let s = ""; for (let c = 0; c < 24; c++) { const b = p[24 * j + c]; if (!b) break; s += String.fromCharCode(b); } folders.push(s); }
     }
     const rows = [];
     let count = Infinity;
-    for (let k0 = 0; k0 < C.LIB_CAP && rows.length < count; k0 += 4) {
+    for (let k0 = 0; k0 < cap && rows.length < count; k0 += 4) {
       const r = DN2.libList((await call(C.LIB.LIST, [k0 & 255, k0 >> 8])).payload);
       count = r.count;
       r.rows.forEach(e => { if (e.frames) rows.push(e); });
@@ -755,7 +757,7 @@ if (typeof module !== "undefined") module.exports = DN2;
         all.push(...DN2.libTree((await call(C.LIB.TREE, f0 ? [f0] : [])).payload).parents);
         parents = all.slice(0, nf);
       }
-    dev.lib = { rows, folders, room, used, parents, nf };
+    dev.lib = { rows, folders, room, used, parents, nf, cap };
   }
 
   /* -- files -- */
@@ -1038,7 +1040,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     all.checked = !!keys.length && nk === keys.length; all.indeterminate = nk > 0 && nk < keys.length; all.disabled = !keys.length;
     all.onchange = () => { keys.forEach(k => all.checked ? libSel.add(k) : libSel.delete(k)); refresh(); };
     const free = lr.room != null ? Math.max(0, lr.room - lr.used) : null;
-    $("libNote").textContent = `${lr.rows.length} of ${C.LIB_CAP} samples` + (free != null ? ` · ${fmtSize(free)} free` : "") + (libSel.size ? ` · ${selEntries().length} ticked` : "");
+    $("libNote").textContent = `${lr.rows.length} of ${(lr.cap || C.LIB_CAP).toLocaleString()} samples` + (free != null ? ` · ${fmtSize(free)} free` : "") + (libSel.size ? ` · ${selEntries().length} ticked` : "");
   }
   function openFolder(f) { libAt = f; libSel.clear(); refresh(); }
   function selEntries() {             /* the ticked samples, whole folders' included */

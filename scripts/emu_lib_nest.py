@@ -122,7 +122,8 @@ def run(cx):
         """as at power-on: the library read again from the +Drive"""
         m.write(syms["smp_lib_state"], bytes(4))
         st, info = sx(16)
-        return st == 0 and info and struct.unpack_from("<I", info)[0] == 2
+        okb = st == 0 and info and struct.unpack_from("<I", info)[0] == 2
+        return okb
 
     def tree():
         # v0.43: 128 folders, TREE a page of 64 at a time (rq[3] the first folder)
@@ -389,6 +390,87 @@ def run(cx):
         inner is not None and deeper is not None and pars[inner] == 100 and pars[deeper] == inner)
     notes["v043"] = {"made": len(made), "hi_writes": len(hi_writes), "inner": inner, "deeper": deeper,
                      "pars": [pars[x] for x in (inner, deeper) if x is not None]}
+    # -- 7. v0.45 (spacem0nkey: "maxed out the amount despite having 18gb of memory left"):
+    # 16,384 entries. A library whose first 2,048 entries are all used (one sector each, from
+    # LIB_DATA + 4,096): INFO says 16,384; the next send is entry 2,048, its frames clear of
+    # every extent, written to the extension below the library (LIB_X_AT: 1,792 sectors of
+    # entries, then its header last) and nowhere else; read back at boot; the next is one
+    # sector's write; the superblock untouched (an older build reads the first 2,048 as ever);
+    # and a power cut after each of the extension's writes leaves 2,048 or 2,049, never other
+    X_AT, X_N = 0x6F0000, 1792
+    disk.clear()
+    disk.update(final)
+    sb_before = disk.get(LIB)
+    full = bytearray(256 * 512)
+    for k in range(2048):
+        full[64 * k:64 * k + 64] = entry(LIB_DATA + 4096 + k, 200, 0, f"F{k:04d}", 1)
+    for s_ in range(256):
+        disk[LIB_INDEX + s_] = bytes(full[512 * s_:512 * s_ + 512])
+    ok_b = boot()
+    st, info = sx(16)
+    cap, cnt = (struct.unpack_from("<3I", info)[1:3] if st == 0 and len(info) >= 12 else (None, None))
+    facts["v0.45: INFO says 16,384 entries; 2,048 used read at boot"] = ok_b and cap == 16384 and cnt == 2048
+    io["log"] = []
+    data = bytes((j * 13) & 0xFF for j in range(2 * 3000))
+    k1 = send("NEW 2048", 0, data)
+    xlog = list(io["log"])
+    xs = [s_ for s_, _d in xlog if X_AT <= s_ < X_AT + 1 + X_N]
+    ext_ok = all(s_ >= LIB or X_AT <= s_ < X_AT + 1 + X_N for s_, _d in xlog)
+    hdr_last = [s_ for s_, _d in xlog if X_AT <= s_ < X_AT + 1 + X_N][-1:] == [X_AT]
+    covered = set()
+    for s_, d_ in xlog:
+        if X_AT < s_ <= X_AT + X_N:
+            covered.update(range(s_, s_ + len(d_) // 512))
+    facts["v0.45: the 2,049th sample is entry 2,048, written to the extension (its 1,792 sectors, the "
+          "header last) and nowhere outside the library's regions"] = (
+        k1 == 2048 and ext_ok and hdr_last and covered == set(range(X_AT + 1, X_AT + 1 + X_N)))
+    # its frames clear of every extent (the sorted search)
+    e2048 = disk.get(X_AT + 1, bytes(512))[:64]
+    at2048 = struct.unpack_from("<I", e2048)[0]
+    sec2048 = (len(data) + 511) // 512
+    facts["v0.45: its frames clear of every other sample's"] = (
+        at2048 >= LIB_DATA and not any(LIB_DATA + 4096 + k < at2048 + sec2048 and at2048 < LIB_DATA + 4096 + k + 1
+                                       for k in range(2048)))
+    sbw = struct.unpack(">4I", (disk.get(LIB) or bytes(16))[:16])
+    facts["v0.45: the superblock untouched, and as every build writes it (version 1, capacity 2,048: "
+          "an older build reads the first 2,048)"] = (
+        disk.get(LIB) == sb_before and sbw[0] == 0x444E324C and sbw[1] == 1 and sbw[2] == 2048)
+    ok_b2 = boot()
+    st, info = sx(16)
+    cnt2 = struct.unpack_from("<3I", info)[2] if st == 0 and len(info) >= 12 else None
+    _, p48 = sx(21, struct.pack("<H", 2048))
+    k48, _fr48, fo48 = struct.unpack_from("<HIB", p48, 4) if len(p48) >= 35 else (None, None, 0xFF)
+    nm48 = p48[11:35].split(b"\0")[0].decode() if len(p48) >= 35 else ""
+    facts["v0.45: after a reboot, 2,049 samples; entry 2,048 listed by its name"] = (
+        ok_b2 and cnt2 == 2049 and k48 == 2048 and fo48 == 0 and nm48 == "NEW 2048")
+    io["log"] = []
+    k2 = send("NEW 2049", 0, data[:1000])
+    one = [s_ for s_, _d in io["log"] if X_AT <= s_ < X_AT + 1 + X_N]
+    facts["v0.45: the next entry (2,049) is one extension sector's write"] = k2 == 2049 and one == [X_AT + 1]
+    # a power cut after each of the first extension's writes
+    base_state = dict(final)
+    for s_ in range(256):
+        base_state[LIB_INDEX + s_] = bytes(full[512 * s_:512 * s_ + 512])
+    bad = []
+    state = dict(base_state)
+    xi = [i for i, (s_, _d) in enumerate(xlog) if X_AT <= s_ < X_AT + 1 + X_N]
+    cuts = sorted({0, xi[0] if xi else 0, (xi[0] + xi[-1]) // 2 if xi else 0, xi[-1] if xi else 0, len(xlog)})
+    for i, (s_, d_) in enumerate(xlog + [(None, None)]):
+        if i in cuts:                           # (a few cut points: a boot reads 2,048 sectors)
+            disk.clear()
+            disk.update(state)
+            if not boot():
+                bad.append((i, "boot"))
+            else:
+                st, info = sx(16)
+                c = struct.unpack_from("<3I", info)[2] if st == 0 and len(info) >= 12 else None
+                if c not in (2048, 2049) or (c == 2049) != (i == len(xlog)):
+                    bad.append((i, c))
+        if s_ is not None:
+            for j in range(len(d_) // 512):
+                state[s_ + j] = d_[512 * j:512 * j + 512]
+    facts[f"v0.45: a power cut before the extension, during it, before and after its header: 2,048, then 2,049"] = not bad and len(cuts) >= 4
+    notes["v045"] = {"k1": k1, "k2": k2, "xs": len(xs), "bad": bad[:5], "at2048": at2048, "one": one[:3]}
     disk.clear()
     disk.update(after)
     io.pop("log", None)

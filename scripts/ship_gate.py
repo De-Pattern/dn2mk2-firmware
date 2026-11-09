@@ -59,7 +59,7 @@ failure:
 
 The SHARC runner's parts (v0.34): decode/map/voice/guard, stress (K = 3 and the memory-cost
 clock), garbage, **wipe** (the output guard really resets a poisoned voice and records it),
-smp, link/rec/pvmix/tdm, stock/ping, mnm/frame.
+smp, link/rec/pvmix/tdm, stock (ping until v0.44), mnm/frame.
 
 Only if all pass does it write `BUILD.gate.json` beside the build (the build's
 sha256, each gate's result, the date) and print `CLEARED TO FLASH`. Anything else
@@ -144,8 +144,6 @@ def code_ranges() -> dict[int, list[tuple[int, int]]]:
     lay = json.loads((ROOT / "src/dnfw/mods/waverider_code.json").read_text())["layout"]
     out = {lay["is_wr"]: [(lay["is_wr"], lay["labels"])],
            lay["c_load"]: [(lay["c_load"], lay["c_text_end"])]}      # v0.13: a chunk of its own
-    if "ping_slot" in lay:      # PING's chunk: its shims, then its list, names and table
-        out[lay["ping_slot"]] = [(lay["ping_slot"], lay["ping_code_end"])]
     if "mchunk_code_end" in lay:  # the machines chunk: the shims, then strings and tables
         out[lay["slot_shim"]] = [(lay["slot_shim"], lay["name_long_5"])]
     return out
@@ -160,7 +158,7 @@ MNM_EXC_TREES = {"src/dnfw/mnm": "c27c4179af8142a94794fcafac097b5b99edd267",
 MNM_EXC_REST = 8
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
-         "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
+         "test/test_waverider_pages.py",                    # v0.45: test_ping_coldfire/_live dropped with PING
          "test/test_shft_live.py", "test/test_mnm.py",
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
          "test/test_sources.py", "test/test_md_ui.py", "test/test_patcher.py",
@@ -196,11 +194,13 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("mnmdefaults", "Monomachine start values (ColdFire)"),
        ("alloc", "GRID allocate slice locks (ColdFire)"),
        ("multisel", "multi-select delete (ColdFire)"),
+       ("unused", "SELECT UNUSED (ColdFire)"),
        ("hooks", "overlays let go (ColdFire)"),
        ("recflow", "recorder flow (ColdFire)"),
        ("slice", "SLICE menus and SLICES keys (ColdFire)"),
        ("samplist", "sample list, browser, playhead (ColdFire)"),
        ("colsw", "MACHINE SEL columns, SYN held (ColdFire)"),
+       ("machines", "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)"),
        ("drive", "+DRIVE browser (ColdFire)"),
        ("drivenav", "+DRIVE keys and long names (ColdFire)"),
        ("jump", "DIRECT JUMP (ColdFire)"),
@@ -276,6 +276,7 @@ class Stop(Exception):
     pass
 
 
+LOWTRAP: dict[int, list[str]] = {}         # v0.46: wild reads seen, per thread (emulib/lowtrap.py)
 LIVE: list[subprocess.Popen] = []            # steps running (the SHARC runner beside the rest)
 
 
@@ -296,6 +297,9 @@ def run(name, cmd, log_dir, env=None, cwd=ROOT, trace=None):
     out, _ = proc.communicate()
     LIVE.remove(proc)
     (log_dir / f"{name}.log").write_text(out)
+    trap = [ln for ln in out.splitlines() if ln.startswith("LOWTRAP FAIL")]
+    if trap:                                    # v0.46: a wild read fails the step it ran in
+        LOWTRAP.setdefault(threading.get_ident(), []).append(f"{name}: {trap[0][:600]}")
     print(f"    rc {proc.returncode}, {round(time.time() - t)} s, log {log_dir / (name + '.log')}",
           flush=True)
     return proc.returncode, out
@@ -389,7 +393,11 @@ def main() -> int:
                   f"{len(rec['inputs'])} inputs are byte-identical now)", flush=True)
             return True, rec["detail"] + " [reused: no input changed]"
         tdir = work / "traces" / "".join(c if c.isalnum() else "_" for c in name)
+        LOWTRAP.pop(threading.get_ident(), None)
         ok, detail = body(tdir)
+        wild = LOWTRAP.pop(threading.get_ident(), None)
+        if wild:                                # v0.46: whatever the step found, a wild read fails it
+            ok, detail = False, "a read below 0x40000000 by our code (the v0.44 freeze's kind): " + "; ".join(wild)
         if ok:
             # v0.38: this script's own inputs are the same in a full run and an --only run: the
             # whole setup runs in both, and nothing after it may import a module of ours
@@ -630,9 +638,10 @@ def main() -> int:
         types = ["--machine-type", "3"] + ([x for t in mtypes for x in ("--machine-type", str(t))]
                                            + ["--machine-max", str(last)]
                                            if dsp_changed else [])
-        # v0.27: SHFT (7) and GRAN (8) removed: 7 and 8 load as Multi-Mode now
+        # v0.27: SHFT (7) and GRAN (8) removed: 7 and 8 load as Multi-Mode now; v0.45: PING (6)
+        # removed too, so the LOAD bound is stock again and every type above 5 loads as Multi-Mode
         types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",
-                                            "--filter-type", "8", "--filter-max", "6"]
+                                            "--filter-type", "8", "--filter-max", "5"]
                                            if dsp_changed else [])
         eng_cmd = [a.venv, "-u", "scripts/emu_boot_engine.py", "--build", bdir, "--frames", "8", *types]
 
@@ -652,7 +661,8 @@ def main() -> int:
         lay = W.SPEC.get("layout", {})
         snap = ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"
         EMU_ENV = {"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"]) / "section_3_MAIN_OS.bin"),
-                   "DNFW_EMU_FLAGS": '{"weakptr": false}'}
+                   "DNFW_EMU_FLAGS": '{"weakptr": false}',
+                   "DNFW_LOWTRAP": "1"}   # v0.46: every emulator step traps wild reads (emulib/lowtrap.py)
         if "smp_tdm_sent" in lay:
             syms = work / "link16_syms.json"
             syms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith("smp_")}))
@@ -1156,10 +1166,13 @@ def main() -> int:
             # (v0.40: the reference is the voice's target cell, the sound's value or the trig's
             # lock: SAMP 1 there as the sound's, as stock's sync puts it)
             st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0100", f"poke:{cell - 0x800068E4 + 0x80003AF0:#x}:0100",
-                   f"poke:{cell:#x}:2c00",
+                   f"onpc:0x400db22c:{cell:#x}:2c00",
                    f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
-                   f"poke:{cell:#x}:7e00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
-                   f"poke:{cell:#x}:0200", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
+                   f"onpc:0x400db22c:{cell:#x}:7e00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
+                   f"onpc:0x400db22c:{cell:#x}:0200", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
+            # (v0.45: smp_mod_apply sets SAMP to the target first -- a slot never glides -- and
+            # then runs the stock apply, which adds the modulation: the modulated value goes in
+            # where that apply adds it, on its entry, not before the call)
             js = work / "samplist.json"
             sl_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                       "--snapshot", snap, "--steps", ",".join(st), "--png-dir", work / "samplist", "--json", js]
@@ -1257,6 +1270,64 @@ def main() -> int:
                                   "marked ones (DELETE 2?), keeps the rest, clears the marks, hides emptied folders"
                                   if good else why)
                 later("multisel", "multi-select delete (ColdFire)", "multi-select delete (ColdFire)", [ms_cmd, sorted(EMU_ENV.items())], ms_body)
+
+            # 6i2. v0.45: SELECT UNUSED (the DT2's 13.6.6; Wolljamin). Slots 0..7 loaded. Used: pattern
+            # 0's kit, track 0 (ONESHOT) on SAMP 2 (slot 1); pattern 5's kit, track 3 on SAMP 4
+            # (slot 3); a SAMP p-lock in pattern 5's table, track 3, step 0, on SAMP 7 (slot 6).
+            # A decoy: pattern 7's track 0 is an FM machine whose slot-43 byte is 8 (slot 7):
+            # not a sample machine, so not a use. Every other kit's types poked to 0 (FM).
+            # SELECT UNUSED marks {0, 2, 4, 5, 7} (5); UNLOAD empties exactly those
+            if "smp_fb_mark_unused" in lay:
+                P0, PSTR, KSTR = 0x4121898C, 122478, 23921
+                d2 = bytearray(d[:0xC10])
+                for k in range(8):
+                    struct.pack_into("<IIfI", d2, 8 + 16 * k, 0x84001000 + 0x40000 * k, 24000, 1.0, 1)
+                us = list(base) + [f"poke:{M:#x}:{d2.hex()}"]
+                for n in range(128):
+                    for t in range(16):
+                        if n == 0 or (n, t) == (5, 3):
+                            continue
+                        us.append(f"poke:{kit + KSTR * n + 52 + 1163 * t + 0xDE:#x}:00")
+                us += [f"poke:{kit + 52 + 1163 * t + 0x6A:#x}:0000" for t in range(1, 16)]
+                us += [f"poke:{kit + 52 + 0x6A:#x}:0200",
+                       f"poke:{kit + KSTR * 5 + 52 + 1163 * 3 + 0xDE:#x}:08",
+                       f"poke:{kit + KSTR * 5 + 52 + 1163 * 3 + 0x6A:#x}:0400",
+                       f"poke:{kit + KSTR * 7 + 52 + 0xDE:#x}:00",
+                       f"poke:{kit + KSTR * 7 + 52 + 0x6A:#x}:0800"]
+                for n in range(128):                    # every pattern's SAMP index: no lock
+                    tb = P0 + PSTR * n + 97872
+                    us.append(f"poke:{tb + 20640:#x}:" + "ff" * (101 * 16))
+                tb5 = P0 + PSTR * 5 + 97872
+                us += [f"poke:{tb5 + 258 * 79:#x}:2b03" + "0700" + "ffff" * 127,
+                       f"poke:{tb5 + 20640 + 101 * 3 + 43:#x}:4f",
+                       "wait:4", f"call:{lay['smp_fb_mark_unused']:#x}"]
+                us += [f"call:{lay['smp_fb_marked']:#x}:{k}" for k in range(8)]
+                us += [f"call:{lay['smp_fb_delete']:#x}:0:0xffffffff", "wait:4"] + [mem(M + 8 + 16 * k + 4) for k in range(8)]
+                ujs, usf = work / "unused.json", work / "unused.steps"
+                usf.write_text(",".join(us))
+                us_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                          "--snapshot", snap, "--steps", f"@{usf}", "--png-dir", work / "unused", "--json", ujs]
+
+                def us_body(tdir):
+                    rc, out = run("select unused", us_cmd, logs, env=EMU_ENV, trace=tdir)
+                    why, good = out[-800:], False
+                    if rc == 0 and ujs.exists():
+                        r = json.loads(ujs.read_text())
+                        m = r["memory"]
+                        d0 = [int(str(c.get("d0")), 0) if c.get("d0") is not None else None
+                              for c in r.get("direct_calls", [])]
+                        fr = [int(m[hex(M + 8 + 16 * k + 4)], 16) for k in range(8)]
+                        facts = {"five unused marked": d0[:1] == [5],
+                                 "the marks are 0, 2, 4, 5, 7": [x & 1 for x in d0[1:9]] == [1, 0, 1, 0, 1, 1, 0, 1],
+                                 "UNLOAD empties them, keeps 1, 3, 6 (a kit's SAMP, another pattern's kit, "
+                                 "another pattern's SAMP lock; an FM track's byte ignored)":
+                                 [x != 0 for x in fr] == [False, True, False, True, False, False, True, False]}
+                        good = all(facts.values())
+                        why = f"{facts} d0={d0} frames={fr}"
+                    return good, ("SELECT UNUSED marks the loaded slots no pattern's kit or SAMP lock uses (5 of 8: a "
+                                  "kit's SAMP, another pattern's kit, a lock in another pattern, an FM track's byte "
+                                  "ignored); UNLOAD empties exactly those" if good else why)
+                later("unused", "SELECT UNUSED (ColdFire)", "SELECT UNUSED (ColdFire)", [us_cmd, sorted(EMU_ENV.items())], us_body)
 
             # 6l. v0.31: the browser's two stores and the +Drive's library. A library of three
             # samples (two in INCOMING, one in DRUMS) put in its RAM as lib.c reads it at
@@ -1854,6 +1925,39 @@ def main() -> int:
                 return good, ("MACHINE SEL: RIGHT from GRID shows the FLTR column from its top, LEFT returns "
                               "to GRID; SYN held shows the page's values" if good else why)
             later("colsw", "MACHINE SEL columns, SYN held (ColdFire)", "MACHINE SEL columns, SYN held (ColdFire)", [r_cmd, sorted(EMU_ENV.items())], r_body)
+
+        # 6s. v0.45 (v0.44's BOUNCE froze the unit on MACHINE SEL's YES, and at every power-on of
+        # a project holding a BOUNCE track: pages.py wr_label indexed past the Monomachine's label
+        # tables and walked absolute 0x000000EE, zero RAM in the emulator, nothing on the unit).
+        # Not from ui800M-v014, whose MACHINE SEL rows are v0.14's: boot400M with this build
+        # installed (its own rows), the kit given every one of our types at the UI's first draw
+        # (the newest on the active track) and booted on; then each track of ours drawn (FLTR,
+        # SYN) and every row of LIST_NEW picked through MACHINE SEL's own list. A read below
+        # 0x40000000 by code that is not stock's fails, as does EXCEPTION (scripts/emu_machine_boot.py,
+        # scripts/emu_machine_sweep.py)
+        from dnfw.waverider import coldfire as _cfm     # noqa: PLC0415
+        mb_types = sorted(_cfm.NEW_TYPES, reverse=True)
+        mb_snap, mb_js, ms_js = work / "machines-boot.snap", work / "machines-boot.json", work / "machines.json"
+        stock_sec = work / "stock_section_3_MAIN_OS.bin"
+        mb_cmd = [a.venv, "-u", "scripts/emu_machine_boot.py", "--build", bdir, "--stock", stock_sec,
+                  "--snapshot", ROOT.parent / "digikit/out/snapshots/dn2-1.11/boot400M.snap",
+                  "--types", ",".join(map(str, mb_types)), "--out", mb_snap, "--json", mb_js]
+        ms_cmd = [a.venv, "-u", "scripts/emu_machine_sweep.py", "--snapshot", mb_snap, "--stock", stock_sec,
+                  "--mod-types", ",".join(map(str, mb_types)), "--list", ",".join(map(str, _cfm.LIST_NEW)),
+                  "--png-dir", work / "machines", "--json", ms_js]
+        MB_ENV = {**EMU_ENV, "DT2_SYX": str(pathlib.Path(a.stock).resolve())}
+
+        def mb_body(tdir):
+            rc, out = run("machines: power-on", mb_cmd, logs, env=MB_ENV, trace=tdir)
+            if rc != 0 or "machine boot: PASS" not in out:
+                return False, out[-800:]
+            rc, out = run("machines: MACHINE SEL", ms_cmd, logs, env=MB_ENV, trace=tdir)
+            good = rc == 0 and "machine sweep: PASS" in out
+            return good, (f"a power-on with types {mb_types} on the tracks, each track of ours drawn, and all "
+                          f"{len(_cfm.LIST_NEW)} rows of MACHINE SEL's own list picked: no read below 0x40000000 "
+                          "by our code, no EXCEPTION" if good else out[-800:])
+        later("machines", "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)",
+              "every machine, MACHINE SEL's own list (ColdFire)", [mb_cmd, ms_cmd, sorted(MB_ENV.items())], mb_body)
 
         # 6q. v0.33: the sample pages driven at random (scripts/emu_fuzz_ui.py: SAMP turns,
         # the list, the browser and its menu, page and [TRIG] keys, MACHINE SEL, the machine

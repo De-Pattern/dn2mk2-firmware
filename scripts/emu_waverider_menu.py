@@ -37,7 +37,8 @@ play the track), `sync:T` (the track's mirror through `0x4002549c`), `sync`
 (every track through the kit-load sync `0x40025af4`), `frame:NAME` (the ISR, and
 the frame it built, with the mirror and the sixteen sounds beside it),
 `blocks:NAME:MILLIONS[:ENC:DELTA]` (every instruction address run), `mem:VA:N`,
-`poke:VA:HEX` (write bytes: a value the audio tick would have left, say),
+`poke:VA:HEX` (write bytes: a value the audio tick would have left, say), `onpc:PC:VA:HEX`
+(write them when PC next runs),
 `types` (every track's `sound+0xDE`), `call:VA[:ARG...]` (enter a routine that
 does not run here; ARG is a number, `kit`, `soundT`, `long@VA`, or `argN@VA[-OFF]`
 -- the Nth argument of the last entry to an `--args-at VA`, less OFF -- and d0 is
@@ -990,8 +991,10 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
               # (v0.38: and the per-project pools' first power-on, its superblock and legacy list:
               # their own region, csrc/sampler/pools.c, checked by the `pools` scenario)
               # (v0.43: and folders 64..127's header and four sectors, lib.c LIB_HI_AT, written
-              # when the library is made)
-              and all(s >= LIB or 0x6D0000 <= s < 0x6E0300 or 0x6FF800 <= s < 0x6FF805 for s in wrote))
+              # when the library is made; v0.45: the extension's header, lib.c LIB_X_AT, cleared then
+              # so an older library's extension never counts again)
+              and all(s >= LIB or 0x6D0000 <= s < 0x6E0300 or 0x6FF800 <= s < 0x6FF805
+                      or 0x6F0000 <= s < 0x6F0701 for s in wrote))
         # LOAD TO PROJECT: SNARE B and HAT C into the first empty pool slots (no pool yet:
         # a directory made), each slot's frames on the +Drive's pool image and sent to the DSP
         lp_ok = False
@@ -1861,7 +1864,11 @@ def main() -> int:
         uc.hook_add(UC_HOOK_CODE, isr_enter, begin=ISR, end=ISR)
         uc.hook_add(UC_HOOK_CODE, isr_leave, begin=ISR_RTE, end=ISR_RTE)
     panel.settle(a.warmup)
-    for step in [s.strip() for s in a.steps.split(",") if s.strip()]:
+    # v0.45: --steps @FILE reads them from a file (a long setup: the 128 kits' pokes would pass
+    # the kernel's 128 KB limit on one argument)
+    steps_text = pathlib.Path(a.steps[1:]).read_text() if a.steps.startswith("@") else a.steps
+    onpc_hooks = []
+    for step in [s.strip() for s in steps_text.split(",") if s.strip()]:
         step_now["name"] = step
         if step == "func-src":
             panel.hold(FUNC, 3_000_000)
@@ -2037,6 +2044,20 @@ def main() -> int:
             _, va, data = step.split(":")
             machine.write(int(va, 0), bytes.fromhex(data))
             print(f"  poke {va} = {data}")
+        elif step.startswith("onpc:"):
+            # v0.45: onpc:PC:VA:HEX: the next time PC runs, write HEX at VA, once (as code there
+            # would have: the stock modulation apply's offset on SAMP, written where it adds it)
+            _, pc_s, va, data = step.split(":")
+            pc_v, va_v, by = int(pc_s, 0), int(va, 0), bytes.fromhex(data)
+            once = {}
+
+            def onpc_hit(uc_, ad, sz, us, va_v=va_v, by=by, once=once):
+                if not once:
+                    once["h"] = 1
+                    machine.write(va_v, by)
+            once_h = uc.hook_add(UC_HOOK_CODE, onpc_hit, begin=pc_v, end=pc_v)
+            onpc_hooks.append(once_h)
+            print(f"  onpc {pc_s}: {va} = {data}")
         elif step.startswith("walk:"):
             # v0.41: walk:SCREENPTR_VA: the screen's view list (rec.c smp_question_up's walk:
             # the first node at screen + 28, +0 the next, +8 the view, the sentinel at screen +

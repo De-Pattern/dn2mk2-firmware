@@ -2795,8 +2795,36 @@ static int mod_scale(int k, int n)              /* a stock offset (+-127) -> +-n
 #define SLCE_SLOT 44                            /* SLCE's frame slot (sound + 20 + 2 x 44) */
 #define SLICE_TYPE 13
 
+/* v0.45 (the owner, v0.44: scrolling SAMP past the loaded samples, trigs played the last
+ * loaded one): the frame's smoother (0x400db12a, before this) glides every parameter toward
+ * the sound's, SAMP and SLCE too, so for a while after SAMP moves, the heard value differs
+ * from the set one -- which this code took for modulation and moved onto the loaded slots,
+ * at the end of the list clamped to the last one, every frame. A slot number (and a slice)
+ * never glides: before the modulation is added, a sample voice's SAMP and SLCE are set to
+ * the sound's (or the lock's) value, in the mirror and in the smoother's state, so what the
+ * stock apply adds on top is the modulation alone. */
+#define SMOOTH_STATE(b, s) ((volatile u32 *)(0x8000DE60u + 4u * (101u * (u32)(b) + 17u + (u32)(s))))
+
+static void snap_slots(void)
+{
+    for (u32 b = 0; b < 16; b++) {
+        u8 *snd = VOICE_SOUND(b);
+        if (!snd || snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
+            continue;
+        u16 s = *TARGET_CELL(b, SAMP_SLOT);
+        *MIRROR_CELL(b, SAMP_SLOT) = s;
+        *SMOOTH_STATE(b, SAMP_SLOT) = (u32)s << 16;
+        if (snd[SOUND_TYPE] == SLICE_TYPE) {
+            u16 c = *TARGET_CELL(b, SLCE_SLOT);
+            *MIRROR_CELL(b, SLCE_SLOT) = c;
+            *SMOOTH_STATE(b, SLCE_SLOT) = (u32)c << 16;
+        }
+    }
+}
+
 void smp_mod_apply(void *mirror)
 {
+    snap_slots();
     MOD_APPLY(mirror);
     extern void rt_frame(void);
     rt_frame();                                 /* v0.41: QPLAY switches and QREC starts on their step */

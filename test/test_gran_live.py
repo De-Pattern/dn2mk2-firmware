@@ -11,9 +11,7 @@ import re
 import sys
 
 from dnfw.grain import live as G
-from dnfw.ping import coldfire as PCF
 from dnfw.ping import live as P
-from dnfw.ping import pages as PP
 from dnfw.waverider import dsp
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -73,10 +71,10 @@ def test_grains_never_read_ahead_of_the_write_head():
 
 
 def test_gran_is_not_in_the_build():
-    # v0.28: GRAN (and SHFT) removed (owner, 2026-10-27): the filter list ends at PING, no
-    # type text or page for 8, no GRAN object in the DSP image, and PING jumps nowhere near
-    # GRAN's former code (the model above stays, for a return)
-    assert PCF.NEW_FILTERS == (6,) and 8 not in PP.TYPE_TEXT and 8 not in PP.SETS
+    # v0.28: GRAN (and SHFT) removed (owner, 2026-10-27): no GRAN object in the DSP image,
+    # and ping.asm jumps nowhere near GRAN's former code (the model above stays, for a
+    # return). v0.45: PING removed too: no filter of ours is offered (the FLTR list, names
+    # and LOAD bound are stock: test_waverider_mod), and ping.asm is the shared tail alone
     assert "gran" not in dsp.objects()
     ping = (SHARC / "ping.asm").read_text(encoding="utf-8")
     assert f"JUMP {dsp.GRAN_SW:#x};" not in ping and "wr_gran" not in ping
@@ -91,8 +89,9 @@ def test_every_generated_asm_is_what_its_generator_writes_now():
 
     def norm(text):
         return lit.sub(lambda m: (m.group(1) or m.group(2)) + "0x0;" + (m.group(3) or "")[1:], text)
-    for gen, name in (("gen_ping_asm", "ping"), ("gen_gran_asm", "gran"),
-                      ("gen_smp_asm", "smp")):          # (v0.26: RESONATOR, CZ gone)
+    # (v0.26: RESONATOR, CZ gone; v0.45: gran.asm, which is not shipped, dropped: it
+    # returned to PING's track loop, wr_p_next, which went with PING)
+    for gen, name in (("gen_ping_asm", "ping"), ("gen_smp_asm", "smp")):
         mod = importlib.import_module(gen)
         import gen_ping_asm
         gen_ping_asm.n_label[0] = 0                     # labels count from a fresh run's

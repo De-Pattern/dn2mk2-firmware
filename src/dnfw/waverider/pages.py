@@ -286,7 +286,7 @@ def smp_named(name: str) -> dict[int, tuple[str, str]]:
 
 LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "wr_id9",
               "wr_cell_tail", "labels", "descriptors")
-# PING / SHFT: every stock page cell's widget is drawn by 0x4006448a; its one exit
+# every stock page cell's widget is drawn by 0x4006448a; its one exit
 CELL_EXIT = 0x400646CA            # movem.l %sp@,%d2-%d7/%a2-%fp ; lea %sp@(80),%sp ; rts
 CELL_EXIT_STOCK = "4cd77cfc4fef00504e75"
 # W2: `labels` is where the assembly's code ends and its data (the label table, the
@@ -524,7 +524,7 @@ def md_c_header() -> str:
 def source(page_draw: int, cell: int) -> str:
     """The chunk's assembly (GNU as, ColdFire), linked at LOAD. PAGE_DRAW is the C
     renderer's entry, `wr_page_draw(view, canvas)`; CELL its `wr_cell(view, canvas, x,
-    y, id)`, run as each cell widget of a stock page finishes (PING's and SHFT's TYPE)."""
+    y, id)`, run as each cell widget of a stock page finishes (parameter slides' marks)."""
     table = "\n".join(f"    .long {rid}, lab_{rid}" for rid in LABELS)
     strings = "\n".join(f'lab_{rid}: .asciz "{name}"' for rid, name in LABELS.items())
     pages = []
@@ -538,6 +538,13 @@ def source(page_draw: int, cell: int) -> str:
                                 + "\n    .long 0" for k, lab in enumerate(MNM_LABELS))
     mstrings = "\n".join(f'mlab_{k}_{rid}: .asciz "{name}"' for k, lab in enumerate(MNM_LABELS)
                           for rid, name in lab.items())
+    # v0.45: wr_label's Monomachine dispatch, one explicit test a kind, index k into
+    # mnm_label_tables (not a range: a range let BOUNCE, kind 13, index past the table)
+    if len(MNM_KINDS) != len(MNM_LABELS):
+        raise ValueError(f"{len(MNM_KINDS)} Monomachine kinds, {len(MNM_LABELS)} label tables")
+    mnm_label_pick = "\n".join(f"    moveq   #{kd - 1},%d1\n    cmp.l   %d1,%d0\n    bne.s   wl_n{k}\n"
+                               f"    moveq   #{k},%d0\n    bra.s   wl_hit\nwl_n{k}:"
+                               for k, kd in enumerate(MNM_KINDS))
     mnm_page_data = "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
                               f"    .long {', '.join(str(e) for e in MNM_PAGE)}\n"
                               f"    .long {TAG}" for k in range(len(MNM_LABELS)))
@@ -676,14 +683,16 @@ wr_label:
     lea     labels,%a0
     subq.l  #1,%d0
     beq.s   0f
-    moveq   #3,%d1                         | d0 = kind - 1: 1, 2 and 9.. the Monomachine's,
-    cmp.l   %d1,%d0                        | 3..8 a sample machine (the stock names)
-    bcs.s   3f
-    moveq   #9,%d1
-    cmp.l   %d1,%d0
-    bcs.s   9f
-    subq.l  #6,%d0
-3:  subq.l  #1,%d0                         | the Monomachine machine's index
+| d0 = kind - 1. Only a Monomachine machine's kind (MNM_KINDS, each named below) reads
+| mnm_label_tables; every other kind -- the sample machines, BOUNCE, and any type
+| added later -- gets the stock names (wr_names swapped them in). v0.44 tested ranges
+| here (3..8 stock, 9.. "the Monomachine's"), so BOUNCE (kind 13) read entry 5 of the
+| five-entry table: the first id of table 0 (0xEE), walked as a label table from
+| absolute address 0x000000EE -- the unit froze drawing the first cell of any page of a
+| BOUNCE track (MACHINE SEL's YES; every boot of a project holding one).
+{mnm_label_pick}
+    bra.s   9f
+wl_hit:
     lsl.l   #2,%d0
     lea     mnm_label_tables,%a0
     adda.l  %d0,%a0

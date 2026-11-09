@@ -4,7 +4,7 @@
 (TRX, EFM, GND, from his Ravel firmware), one a track, chosen with TYPE; Waverider, the
 wavetable machine that held type 5 until v0.10, is gone. Also: RESONATOR (type 6,
 docs/rings.md), CZ (type 7, docs/cz.md), and the filters PING, SHFT and GRAN (types 6-8,
-docs/ping.md, docs/shft.md, docs/gran.md).
+docs/ping.md, docs/shft.md, docs/gran.md), all since removed (PING last, in v0.45).
 
 ## How it applies
 
@@ -13,7 +13,7 @@ Two sections, both from committed data:
 - **MAIN OS (3):** `waverider_code.json`, written by `scripts/gen_waverider_code.py`
   from `dnfw.waverider.coldfire` (the MACHINE SEL list, the names, the permission rows,
   the WaveTone clone, our SYN pages). Every edit's stock bytes are checked first; the
-  pages, the machines' tables and PING's lists run from RAM as platform `CODE` chunks.
+  pages, the machines' tables run from RAM as platform `CODE` chunks.
 - **The DSP boot stream (7):** `dnfw.waverider.dsp.section7`, from the committed SHARC
   objects. It refuses a section 7 that is not stock.
 
@@ -36,9 +36,9 @@ from . import RAM, Extent, ModError, Result, platform
 from ..waverider import dsp
 
 ID = "waverider"
-NAME = "PERC, the sample machines and the Monomachine machines; the PING filter"
+NAME = "PERC, the sample machines and the Monomachine machines"
 SUMMARY = ("PERC (the Machinedrum's machines), the Digitakt II sample machines and the Monomachine's "
-           "machines in MACHINE SEL; PING in the filter list. Modified DSP code.")
+           "machines in MACHINE SEL. Modified DSP code.")
 DEVICE = 0x15                      # Digitone II
 MAIN_OS, DSP_STREAM = 3, 7
 BASE = 0x40000400
@@ -88,9 +88,6 @@ def _chunks() -> list[tuple[int, bytes, str]]:
     if "machines_chunk" in SPEC:
         out.append((SPEC["machines_chunk"]["load"], bytes.fromhex(SPEC["machines_chunk"]["code"]),
                     "the machine shims, names, attributes and MACHINE SEL list (PERC, RESONATOR, CZ)"))
-    if "ping_chunk" in SPEC:
-        out.append((SPEC["ping_chunk"]["load"], bytes.fromhex(SPEC["ping_chunk"]["code"]),
-                    "PING's FLTR-list shims, list and names (P2)"))
     md = _md_ui()
     if md is not None:
         out.append(md)

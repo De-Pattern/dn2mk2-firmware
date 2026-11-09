@@ -165,8 +165,18 @@ def samp_lock_checks(machine, call, frame, trig, table, snd, lay, put16, put32):
     set_track(SAMP_SLOT, 2)
     trig(1, f0 + 100)
     frame()
-    put16(OUT + 2 * idx(V, SAMP_SLOT), (10 + 43) << 8)
-    call(lay["smp_mod_apply"], OUT)
+    # v0.45: smp_mod_apply first sets SAMP to the sound's (or the lock's) value -- a slot never
+    # glides -- and then runs the stock apply, which adds the modulation: so the offset goes in
+    # where the stock apply adds it (on entry to 0x400DB22C, LFOs off here), not before the call
+    from unicorn import UC_HOOK_CODE                       # noqa: PLC0415
+
+    def lfo_adds(uc_, ad, sz, us):
+        put16(OUT + 2 * idx(V, SAMP_SLOT), machine.word(OUT + 2 * idx(V, SAMP_SLOT)) + (43 << 8))
+    h = machine.uc.hook_add(UC_HOOK_CODE, lfo_adds, begin=0x400DB22C, end=0x400DB22C)
+    try:
+        call(lay["smp_mod_apply"], OUT)
+    finally:
+        machine.uc.hook_del(h)
     m = machine.word(OUT + 2 * idx(V, SAMP_SLOT))
     check("v0.40 SAMP lock: modulation on a locked trig steps through the loaded slots from the lock",
           m == 18 << 8, f"{m:#06x}, want {18 << 8:#06x} (from the track's SAMP 2 it would be 0x0c00)")

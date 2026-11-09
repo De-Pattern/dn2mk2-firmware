@@ -41,8 +41,6 @@ from __future__ import annotations
 import struct
 
 from . import pages
-from ..ping import coldfire as ping_cf
-from ..ping import pages as ping_pages
 from dataclasses import dataclass
 
 BASE = 0x40000400
@@ -63,9 +61,10 @@ if set(MACHINE_NAMES) != set(NEW_TYPES):
     raise ImportError(f"machine types {sorted(set(NEW_TYPES) - set(MACHINE_NAMES))} have no machine")
 # RESONATOR (2026-10-18): the shims, the name table, the attribute rows and the list
 # outgrew the three caves W5 used, so all of it is a platform CODE chunk in RAM, after
-# PING's (dnfw.ping.coldfire.LOAD) and below the platform runtime; the caves are
+# what was PING's (0x4670F000..; v0.45: PING removed) and below the platform runtime; the caves are
 # left as stock had them.
 MCHUNK = 0x4670F800
+PAGES_END = 0x4670F000                  # the pages assembly's room ends here (PING's chunk until v0.44)
 MCHUNK_END = 0x46710000
 
 # -- 1. the MACHINE SEL list -------------------------------------------------------------
@@ -73,7 +72,7 @@ LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
 # PERC, RESONATOR, CZ after Swarmer; then the Digitakt II's sample machines in its own
 # order (v0.15: all five; v0.13 offered ONESHOT and GRID); then MIDI
-LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, 8, 9, 10, 11, 13, 12, _smpm.BOUNCE_TYPE, 4)   # v0.19: SLICE before GRID, the DT2's order; v0.44 BOUNCE after them (group 3: its own divider)
+LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, 8, 9, 10, 11, 13, 12, *((_smpm.BOUNCE_TYPE,) if _smpm.BOUNCE_LISTED else ()), 4)   # v0.19: SLICE before GRID, the DT2's order; v0.44 BOUNCE after them (group 3: its own divider)
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
@@ -490,6 +489,10 @@ UI_POP_SITE = 0x4002F17E                # jsr 0x40001928: the UI queue's receive
 UI_POP_STOCK = bytes.fromhex("4eb940001928")
 SCREEN_SITE = 0x4002E4CA                # jsr 0x4011d32a(screen, canvas): the views drawn
 SCREEN_STOCK = bytes.fromhex("4eb94011d32a")
+# v0.45: the trig LEDs show recorder trigs while the BOUNCE REC panel is up (csrc/sampler/rec.c
+# bn_led_walk): the LED compose's walk of the views (0x4002c854's jsr 0x4011d3b2(screen))
+LED_SITE = 0x4002C880
+LED_STOCK = bytes.fromhex("4eb94011d3b2")
 REC_COMBO_SITE = 0x4005F008             # the VOICE case's FUNC branch: push, jsr 0x40046bfe (unison)
 REC_COMBO_STOCK = bytes.fromhex("2f2a00a44eb940046bfe")
 REC_COMBO_EXIT = 0x4005FC50             # the handler's common exit (the key offered to the base)
@@ -537,7 +540,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # the C page renderer first (the assembly calls it), at C_LOAD
     from .. import slides as SL
     from .. import modversion                   # v0.39: the mod's version (VERSION), shown at the browser's top
-    cimage, csyms, cbss = compile_c(pages.c_header() + ping_pages.c_header() + SL.c_header(stock)
+    cimage, csyms, cbss = compile_c(pages.c_header() + SL.c_header(stock)
                                     + modversion.c_define(),
                                      base=pages.C_LOAD)
     if cbss:
@@ -547,8 +550,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     ptable = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in pages.LABELS_OUT) + "\n"
     pblob = assemble(pages.source(csyms["wr_page_draw"], csyms["wr_cell"]) + ptable, base=pages.LOAD)
     asm = pblob[:-4 * len(pages.LABELS_OUT)]
-    if pages.LOAD + len(asm) > ping_cf.LOAD:
-        raise ComposeError(f"the pages assembly ({len(asm)} B) runs into PING's chunk")
+    if pages.LOAD + len(asm) > PAGES_END:
+        raise ComposeError(f"the pages assembly ({len(asm)} B) runs past {PAGES_END:#010x}")
     chunk = asm
     playout = dict(zip(pages.LABELS_OUT, struct.unpack(f">{len(pages.LABELS_OUT)}I",
                                                        pblob[-4 * len(pages.LABELS_OUT):])))
@@ -649,7 +652,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the SYN page draw: Waverider's own page for a Waverider track (M8.1)", GRID_STOCK)
     edit(pages.CELL_EXIT, bytes.fromhex("4ef9") + _long(playout["wr_cell_tail"]) + bytes.fromhex("4e714e71"),
          "a stock page cell's widget (0x4006448a): its exit through wr_cell_tail, which draws "
-         "PING's and SHFT's TYPE as a name", bytes.fromhex(pages.CELL_EXIT_STOCK))
+         "parameter slides' marks (v0.45: no longer PING's TYPE)", bytes.fromhex(pages.CELL_EXIT_STOCK))
     edit(pages.ID9_SITE, bytes.fromhex("4eb9") + _long(playout["wr_id9"]),
          "the SYN page draw: a CZ track's third page (id 9 to the draw) to wr_grid, not "
          "WaveTone's page-3 grid", bytes.fromhex(pages.ID9_STOCK))
@@ -672,6 +675,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(SCREEN_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_screen"]),
          "the UI loop's draw of its screen: stock's, then the RECORDER over it while it is up",
          SCREEN_STOCK)
+    edit(LED_SITE, bytes.fromhex("4eb9") + _long(csyms["bn_led_walk"]),
+         "the LED compose's walk of the views: bn_led_walk claims the 16 trig LEDs for the "
+         "page's recorder trigs while the BOUNCE REC panel is up, then stock's walk", LED_STOCK)
     _need(content, REC_COMBO_SITE - 4, bytes.fromhex("60000ff4"), "the VOICE case without FUNC ends just before")
     _need(content, REC_COMBO_EXIT, bytes.fromhex("2f022f0a4eb94011c674"), "the key handler's common exit")
     disp = REC_COMBO_EXIT - (REC_COMBO_SITE + 8)
@@ -832,7 +838,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot",
                  "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen", "slc_seen_draw", "slc_letgo", "slc_open_track",
                  "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get",
-                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom", "trim_head_x", "rt_on", "rt_play", "rt_rplace", "rt_rbytes", "rt_pend", "rt_cur", "rt_cur_end", "rt_manual", "rt_qrec", "rt_qplay", "rt_pos", "rt_steps", "rt_nx_place", "rt_nx_room", "rt_nx_need", "rt_w", "rt_gen", "q_gen", "q_fire", "q_cancel", "rt_fired", "rt_refused", "rt_swaps", "rt_qfired", "rt_why", "rt_why_at", "rt_trig", "rt_bounce_samp", "rt_is_bounce", "rt_buf_of", "rt_trig_get", "rt_trig_toggle", "rt_rearm", "rt_count", "rt_take_handover", "rt_regions", "rt_rsteps", "rt_last_step", "rt_used", "rt_fired_at", "rt_fired_trk", "rt_why_trk", "rt_last_key", "bn_page", "bn_yes_at", "bn_active", "bn_open", "bn_save", "bn_pages", "bn_said_at", "bn_said_n", "bn_nothing_at", "sl_ui_table_now", "smp_push_slot", "rt_frame", "rt_poll", "rt_cut", "smp_rt_sent", "sl_rec_knob", "sl_rec_held", "sl_rec_table", "rec_view", "rec_rt_take", "rec_rlen", "rec_src", "rec_chan", "rt_q_set", "rt_q_waiting", "sl_rec_page", "rt_knob", "rt_state", "smp_rec_place", "smp_slot_empty", "smp_pl_dirp", "rec_combo", "rec_overlay",
+                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_mark_unused", "smp_fb_marked", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom", "trim_head_x", "rt_on", "rt_play", "rt_rplace", "rt_rbytes", "rt_pend", "rt_cur", "rt_cur_end", "rt_manual", "rt_qrec", "rt_qplay", "rt_pos", "rt_steps", "rt_nx_place", "rt_nx_room", "rt_nx_need", "rt_w", "rt_gen", "q_gen", "q_fire", "q_cancel", "rt_fired", "rt_refused", "rt_swaps", "rt_qfired", "rt_why", "rt_why_at", "rt_trig", "rt_bounce_samp", "rt_is_bounce", "rt_buf_of", "rt_trig_get", "rt_trig_toggle", "rt_rearm", "rt_count", "rt_take_handover", "rt_regions", "rt_rsteps", "rt_last_step", "rt_used", "rt_fired_at", "rt_fired_trk", "rt_why_trk", "rt_last_key", "bn_page", "bn_yes_at", "bn_active", "bn_led_walk", "bn_led_poll", "bn_led_claims", "bn_open", "bn_save", "bn_pages", "bn_said_at", "bn_said_n", "bn_nothing_at", "sl_ui_table_now", "smp_push_slot", "rt_frame", "rt_poll", "rt_cut", "smp_rt_sent", "sl_rec_knob", "sl_rec_held", "sl_rec_table", "rec_view", "rec_rt_take", "rec_rlen", "rec_src", "rec_chan", "rt_q_set", "rt_q_waiting", "sl_rec_page", "rt_knob", "rt_state", "smp_rec_place", "smp_slot_empty", "smp_pl_dirp", "rec_combo", "rec_overlay",
                  "jmp_on", "jmp_armed", "jmp_pending", "jmp_count", "jmp_last", "jmp_loaded", "jmp_dirty",
                  "jmp_reads", "jmp_writes", "jmp_to", "jmp_from", "jmp_key", "jmp_poll", "jmp_forced",
                  # v0.38: per-project pools
@@ -850,11 +856,10 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  # v0.40: folders inside folders
                  "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
-    # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
-    pbuilt = ping_cf.compose(content, edit, assemble)
-    layout.update(pbuilt["layout"])
+    # v0.45: PING removed (owner, 2026-11-08): its chunk (the FLTR list's 'Ping', the filter
+    # names, the LOAD bound, slot_to_id, the descriptor, the curve) is no longer composed, so
+    # all of those stay stock and a sound saved with filter 6 loads as Multi-Mode
     return {"content": bytes(content), "edits": edits, "layout": layout,
             "chunk": {"load": pages.LOAD, "code": chunk},
             "c_chunk": {"load": pages.C_LOAD, "code": cimage},
-            "machines_chunk": {"load": MCHUNK, "code": bytes(mchunk)},
-            "ping_chunk": pbuilt["chunk"]}
+            "machines_chunk": {"load": MCHUNK, "code": bytes(mchunk)}}

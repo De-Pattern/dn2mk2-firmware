@@ -966,6 +966,8 @@ class _FakeLib:
                 out += struct.pack("<HIB", k, e["frames"] if e else 0, e["folder"] if e else 0xFF)
                 out += (e["name"].encode()[:24] if e else b"").ljust(24, b"\0")
             return out
+        if cmd == 16:                                   # INFO (v0.45: the host tool reads the capacity)
+            return struct.pack("<5I", 0, 16384, len(self.entries), 0, 0)
         if cmd == 23:
             f0 = rq[3]
             return b"".join((self.folders[f].encode() if f < len(self.folders) else b"").ljust(24, b"\0")

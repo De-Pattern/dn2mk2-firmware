@@ -171,7 +171,7 @@ def main() -> int:
                    help="after the engine, SAVE and LOAD a sound with this filter type "
                         "(sound+0xDF, stored+245); repeatable")
     p.add_argument("--filter-max", type=int, default=5,
-                   help="the highest filter type the build's LOAD keeps (5 stock, 6 PING)")
+                   help="the highest filter type the build's LOAD keeps (5 stock; 6 with PING, v0.27..v0.44)")
     args = p.parse_args()
 
     build = os.path.join(ROOT, args.build)
@@ -366,8 +366,8 @@ def main() -> int:
         if not ok:
             fails.append(f"machine type {v} did not round-trip as {want}")
 
-    # The filter type, the same way: PING widens the LOAD bound (0x400dd2bc) so
-    # type 6 survives; stock loads anything above 5 as 0, Multi-Mode.
+    # The filter type, the same way: PING (v0.27..v0.44) widened the LOAD bound (0x400dd2bc)
+    # so type 6 survived; stock (and v0.45, PING removed) loads anything above 5 as 0, Multi-Mode.
     for v in args.filter_type:
         base = after.long(0x800052A0)
         real = bytes(after.uc.mem_read(base + 52, SOUND_BYTES)) if base else bytes(SOUND_BYTES)

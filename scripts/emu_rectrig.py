@@ -374,6 +374,41 @@ def main() -> int:
     call(lay["sl_lock_set"], table, T, 8, 2, 0xFFFF)
     heads = [machine.read(table + REC * i, 2) for i in range(RECS)]
     check("clearing both recorder trigs frees our record", heads.count(bytes([RAM_REC, TAG | T])) == 0)
+    # ---- v0.45: SAMP never glides (the owner, v0.44: scrolling SAMP past the loaded samples,
+    # trigs played the last loaded one). Track 1 ONESHOT, slots 0..2 loaded; SAMP moves from 2 to
+    # 10 (past them) with the smoother still at 2: what the voice hears is 10 at once, not the
+    # smoother's glide mapped onto the loaded slots (slot 2, SAMP 3, before the fix)
+    T1, ONESHOT_TY, SAMP_SLOT, VOICE_SOUND = 1, 8, 43, 0x800052A8
+    MIRROR = 0x800068E4
+    import dnfw.waverider.dsp as DSPL
+    for k in range(3):
+        machine.write(DIR + 8 + 16 * k, struct.pack("<IIfI", DSPL.SMP_POOL_DDR + SM.DATA_OFFSET + 0x10000 * k,
+                                                    4800, 1.0, 1))
+    type_put(T1, ONESHOT_TY)
+    snd1 = kit + 52 + SOUND_STRIDE * T1
+    put32(VOICE_SOUND + 4 * T1, snd1)
+    tgt = SRC + 34 + 202 * T1 + 2 * SAMP_SLOT
+    mir = MIRROR + 34 + 202 * T1 + 2 * SAMP_SLOT
+    st = STATE + 4 * (101 * T1 + 17 + SAMP_SLOT)
+    ctl_put(T1, SAMP_SLOT, 2)
+    put16(tgt, 2 << 8)
+    put16(mir, 2 << 8)
+    put32(st, (2 << 8) << 16)
+    frame()
+    heard0 = struct.unpack(">H", machine.read(mir, 2))[0] >> 8
+    ctl_put(T1, SAMP_SLOT, 10)
+    put16(tgt, 10 << 8)                                # the sound's SAMP; the smoother's state still at 2
+    seen = []
+    for _ in range(6):
+        frame()
+        seen.append(struct.unpack(">H", machine.read(mir, 2))[0] >> 8)
+    check("SAMP past the loaded slots is heard at once, never a loaded one in its place "
+          "(v0.45: the smoother's glide was taken for modulation)",
+          heard0 == 2 and all(s == 10 for s in seen), f"before {heard0}, after {seen}")
+    put32(VOICE_SOUND + 4 * T1, 0)
+    type_put(T1, 0)
+    machine.write(DIR + 8, b"\x00" * 16 * 3)
+
     faults = getattr(machine.m, "faults", [])[faults0:]
     check("no memory faults", not faults, faults[:3])
 
@@ -386,6 +421,15 @@ def main() -> int:
             return ((code - 1) // 8, (code - 1) % 8)
         put32(SEQ_PLAYING, 0)
         panel.settle(5_000_000)
+        # v0.45: the trig LEDs (stock's LedManager, docs/leds.md: modes at +40, palette values at
+        # +256, 4 bytes an LED; the trig keys are ids 26..41) -- stock's before the panel opens
+        LM_PTR = 0x446478E0
+
+        def leds():
+            lm = machine.long(LM_PTR)
+            return [(machine.long(lm + 40 + 4 * i), machine.long(lm + 256 + 4 * i)) for i in range(26, 42)] if lm else []
+        led_stock = leds()
+        claims0 = L("bn_led_claims") if "bn_led_claims" in lay else None
         call(lay["rec_combo"])                              # FUNC + VOICE: the RECORDER
         panel.settle(10_000_000)
         panel.screen("bounce_recorder")
@@ -400,11 +444,20 @@ def main() -> int:
         v3 = machine.word(table + REC * [i for i in range(RECS) if machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T])][0] + 2 + 2 * 2) \
             if any(machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T]) for i in range(RECS)) else 0xFFFF
         check("[TRIG 3] on the BOUNCE RECORDER places a recorder trig on step 3 (and no note trig)", v3 == 1, f"value {v3}")
+        if claims0 is not None:
+            led3 = leds()
+            check("v0.45: the panel up, [TRIG 3]'s LED red (mode 2, palette 17), the other trig LEDs unlit "
+                  "(stock's note trigs not shown through)",
+                  L("bn_led_claims") > claims0 and led3[2] == (2, 17)
+                  and all(m_ == 1 for i, (m_, _v) in enumerate(led3) if i != 2), f"{led3[:4]} claims {L('bn_led_claims')}")
         panel.tap(key(25 + 2))
         panel.settle(10_000_000)
         v3b = machine.word(table + REC * [i for i in range(RECS) if machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T])][0] + 2 + 2 * 2) \
             if any(machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T]) for i in range(RECS)) else 0xFFFF
         check("[TRIG 3] again removes it", v3b == 0xFFFF, f"value {v3b}")
+        if claims0 is not None:
+            led3b = leds()
+            check("v0.45: removed, its LED unlit again", led3b[2:3] == [(1, 1)], f"{led3b[:4]}")
         panel.tap(key(10))                                  # YES
         panel.settle(200_000)
         panel.tap(key(10))                                  # YES again, within 0.4 s: arm
@@ -415,6 +468,12 @@ def main() -> int:
         panel.tap(key(12))                                  # NO: closes
         panel.settle(10_000_000)
         check("NO closes the RECORDER", L("rec_overlay") == 0)
+        if claims0 is not None:
+            c1 = L("bn_led_claims")
+            panel.settle(10_000_000)
+            led_after = leds()
+            check("v0.45: closed, the trig LEDs are stock's again and ours claim nothing",
+                  led_after == led_stock and L("bn_led_claims") == c1, f"{led_after[:4]} vs {led_stock[:4]}")
 
         # ---- v0.44 F1: the plain RECORDER (an ONESHOT track): CHAN as its own L/R icon over
         # SRC (the same place on the BOUNCE panel); knob B turns it L+R -> L -> R

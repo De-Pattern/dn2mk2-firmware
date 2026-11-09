@@ -32,9 +32,9 @@ def default_steps() -> list[str]:
 # beside the ColdFire steps). The parts together are exactly the runner's default steps.
 # v0.38: quickest first (v0.37's times: wipe 3 min, stock/ping 9, garbage 13, stress 15,
 # chords 16, smp 17, mnm/frame 20, decode..guard 35, link..tdm 46), so a failing part shows
-# early; ship_gate stops at the first part that fails. Each part runs in its own process, so
+# early (v0.45: ping dropped with PING; the part is stock alone); ship_gate stops at the first part that fails. Each part runs in its own process, so
 # the order changes nothing a part checks.
-GROUPS = (("wipe",), ("stock", "ping", "shft", "gran"), ("garbage",), ("stress",), ("chords",), ("smp",),
+GROUPS = (("wipe",), ("stock",), ("garbage",), ("stress",), ("chords",), ("smp",),
           ("mnm", "frame"), ("decode", "map", "voice", "guard"), ("link", "rec", "mainrec", "pvmix", "tdm"),
           ("recwhole",))          # v0.39: whole takes with the link at work (about 70 min)
 

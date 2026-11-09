@@ -396,8 +396,9 @@ def lib_list(link):
         for j in range(4):
             folders.append(p[24 * j:24 * j + 24].split(b"\0")[0].decode("ascii", "replace"))
     n = struct.unpack_from("<I", link.call(L_LIST, struct.pack("<H", 0)))[0]
+    cap = struct.unpack("<5I", link.call(L_INFO)[:20])[1] or 2048     # v0.45: 16,384 (INFO's capacity)
     seen = 0
-    for k0 in range(0, 2048, 4):
+    for k0 in range(0, cap, 4):
         if seen >= n:
             break
         p = link.call(L_LIST, struct.pack("<H", k0))

@@ -21,6 +21,10 @@ FIRST_TYPE = 8
 NAMES = ("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID", "SLICE", "BOUNCE")
 SHORT = ("ONE", "WRP", "STRE", "RPI", "GRD", "SLC", "BNC")
 BOUNCE_TYPE = 17
+# v0.45 (owner, 2026-11-08): listed again: v0.44's freeze on picking it (wr_label, pages.py) is
+# fixed, and the gate's `machines` step picks every row of the real list. False hides it
+# (still built: its type, pages and DSP path stay, so a project that holds it loads)
+BOUNCE_LISTED = True
 TYPE_OF = {n: FIRST_TYPE + k for k, n in enumerate(NAMES[:6])} | {"BOUNCE": BOUNCE_TYPE}
 TYPES = tuple(TYPE_OF[n] for n in NAMES)  # in NAMES' order
 ENGINED = NAMES                           # the machines this build renders (v0.15: all five)

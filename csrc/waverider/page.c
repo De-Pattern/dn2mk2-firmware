@@ -1,5 +1,5 @@
 /* The SYN pages of our machines on the ColdFire: PERC (type 5, docs/perc.md),
- * RESONATOR (6) and CZ (7), and the TYPE cell of PING's, SHFT's and GRAN's filter pages.
+ * RESONATOR (6) and CZ (7). (v0.45: the TYPE cell of PING's filter page went with PING.)
  *
  * The layout is Tonverk's Wavefinder page (User Manual OS 1.4.1, p. 94), on a screen of
  * the same size, drawn with our own widgets: encoders A..D are a strip above a picture,
@@ -19,7 +19,7 @@
  * the top ten rows, the level meter and track box the left 18 columns.
  *
  * One subject: drawing the page. What the controls are is `wr_gen.h`, generated
- * from dnfw.waverider.pages and dnfw.ping.pages.
+ * from dnfw.waverider.pages.
  */
 #include "wr_gen.h"
 
@@ -166,47 +166,6 @@ static void wr_names(void)
     names_on = key;
 }
 
-/* PING (src/dnfw/ping/pages.py): while the active track's filter is PING (type 6, the
- * byte at sound+0xDF), Multi-Mode's and the filter envelope's records whose meaning
- * PING changes carry PING's names; the stock pointers go back when it is not. The
- * same mechanism as wr_names, on records it does not touch. */
-static const char *ping_stock_long[PING_NAMED] __attribute__((section(".data")));
-static const char *ping_stock_short[PING_NAMED] __attribute__((section(".data")));
-static int ping_on __attribute__((section(".data"))) = -2;   /* -2: not yet run */
-
-/* -> which of ping_filters the active track's filter is (0..PING_SETS-1), or -1 */
-static int ping_active(void)
-{
-    u8 t = UI_TRACK;
-    unsigned char *kit = KIT_POINTER;
-    if (t > 15 || !kit)
-        return -1;
-    signed char f = (signed char)kit[52u + 1163u * t + 0xDFu];
-    for (int k = 0; k < PING_SETS; k++)
-        if (f == ping_filters[k])
-            return k;
-    return -1;
-}
-
-static void ping_names(void)
-{
-    int on = ping_active();
-    if (on == ping_on)
-        return;
-    for (int k = 0; k < PING_NAMED; k++) {
-        u32 id = ping_named_ids[k];
-        if (ping_on == -2) {                    /* the first call: keep the stock pointers */
-            ping_stock_long[k] = NAME_LONG(id);
-            ping_stock_short[k] = NAME_SHORT(id);
-        }
-        const char *l = on >= 0 ? ping_named_long[on][k] : 0;
-        const char *sh = on >= 0 ? ping_named_short[on][k] : 0;
-        NAME_LONG(id) = l ? l : ping_stock_long[k];
-        NAME_SHORT(id) = sh ? sh : ping_stock_short[k];
-    }
-    ping_on = on;
-}
-
 /* v0.22: the UI loop's draw of its screen (0x4011d32a(screen, canvas), at 0x4002e4ca),
  * then, while it is up, the RECORDER over all of it (rec.c, smp_page.c) */
 #define SCREEN_DRAW ((void (*)(void *, void *))0x4011D32Au)
@@ -254,7 +213,6 @@ int wr_poll(void *screen)
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
     rec_poll();
     wr_names();
-    ping_names();
     /* the RECORDER's meter and state move: a redraw asked for as stock asks (the dirty
      * byte), 25 times a second. v0.15..v0.19 answered 1 here without setting the byte:
      * the loop then pushed its other buffer undrawn (0x4011d32a draws only when the byte
@@ -517,42 +475,13 @@ static void smp_picture(void *c, void *view, int kind)
     }
 }
 
-/* PING and SHFT (src/dnfw/ping/pages.py): every cell widget of a stock page is drawn by
- * 0x4006448a(view, canvas, x, y, id, ...), and as each one finishes (wr_cell_tail) this
- * is told which. The cell of Multi-Mode's Filter Type (record 38) -- PING's TYPE, SHFT's
- * MODE -- then shows the name of what it selects, with a dot a choice under it, in place
- * of Multi-Mode's LP/BP/HP icons. The widget is x..x+23, y+8..y+23 (canvas, y up); the
- * label under it is untouched. Any other cell, and any track whose filter is neither,
- * is left as stock drew it. */
+/* Every cell widget of a stock page is drawn by 0x4006448a(view, canvas, x, y, id, ...),
+ * and as each one finishes (wr_cell_tail) this is told which: parameter slides draw their
+ * marks there. (Until v0.44 it also drew PING's TYPE cell as a name; v0.45: PING removed.) */
 void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
 {
     extern void sl_cell(void *view, void *canvas, int x, int y, u32 id);
     sl_cell(view, canvas, x0, y0, id);          /* parameter slides: SLD/SLEN on TRIG page 2 */
-    if (id != PING_TYPE_ID)
-        return;
-    int set = ping_active();
-    if (set < 0)
-        return;
-    for (int x = x0; x < x0 + 24; x++)
-        for (int y = y0 + 8; y < y0 + 24; y++)
-            SET_PIXEL(canvas, x, y, 0);
-    u8 flag;
-    const int *r = RECORD(id);
-    int n = ping_type_count[set], span = r[3] - r[2];
-    int v = GET_VALUE(view, id, &flag) - r[2];
-    int at = span > 0 ? v * n / span : 0;     /* as the DSP: trunc(v / span * n), the top clamped */
-    if (at < 0) at = 0;
-    if (at >= n) at = n - 1;
-    TEXT(canvas, FONT, x0 + 12, y0 + 14, CENTRED, "%.4s", ping_type_text[set][at]);
-    for (int j = 0; j < n; j++) {                 /* a dot a choice, the current one bold */
-        int cx = x0 + 12 + (2 * j - (n - 1)) * 3;
-        px(canvas, cx, y0 + 10);
-        if (j == at) {
-            px(canvas, cx, y0 + 11);
-            px(canvas, cx + 1, y0 + 10);
-            px(canvas, cx + 1, y0 + 11);
-        }
-    }
 }
 
 void wr_page_draw(void *view, void *canvas)

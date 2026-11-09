@@ -915,7 +915,7 @@ int smp_fb_last_store __attribute__((section(".data"))) = 0;   /* where the top'
 /* v0.43: the +Drive library's folders (lib.c LIB_FOLDERS: 64 until v0.42, 128 since; a
  * static assert in lib.c holds the two together) */
 #define SMP_LIB_FOLDERS 128
-#define LB_CAP 2048
+#define LB_CAP 16384                            /* v0.45: the library's 16,384 (lib.c) */
 static u32 lb_marks[LB_CAP / 32] __attribute__((section(".data")));
 extern int smp_lib_used(int k), smp_lib_folder_of(int k), smp_lib_slot_of(int k);
 extern const char *smp_lib_name(int k), *smp_lib_folder_name(int f);
@@ -998,12 +998,90 @@ void smp_fb_unmark_all(void)
         lb_marks[i] = 0;
 }
 
+/* v0.45: SELECT UNUSED (the DT2's, manual 13.6.6: "remove all samples that are not used in
+ * any pattern in the project from the RAM memory"; Wolljamin). The whole project is in RAM:
+ * 128 patterns at project + 0x1C, 122,478 bytes apart, and their 128 kits at project +
+ * 0xEF371C, 23,921 apart (dn2_111.h; the live kit is the active pattern's own). A slot is
+ * used if any pattern's kit has a sample machine (types 8..13) on a track with SAMP on it,
+ * or any SAMP p-lock (slot 43) of that pattern's track names it. The project's base is
+ * found from the playing pattern and the live kit, which must agree on one pattern index;
+ * if they don't, nothing is marked (never a guess that unloads a sample in use). */
+#define SEQ_PATTERN_PTR (*(u8 *volatile *)0x42C5A9A0u)
+#define KIT_LIVE (*(u8 *volatile *)0x800052A0u)
+#define PRJ_PATTERNS 0x1Cu
+#define PRJ_PATTERN_BYTES 122478u
+#define PRJ_KITS 0xEF371Cu
+#define PRJ_KIT_BYTES 23921u
+#define PAT_LOCKS 97872u                        /* the pattern's lock table (rectrig.c) */
+#define LK_RECS 80
+#define LK_REC 258u
+#define LK_INDEX 20640u
+#define SAMP_FSLOT 43                           /* SAMP's frame slot: sound + 20 + 2 x 43 */
+
+int smp_fb_unused_scan(u32 used[4])
+{
+    for (int i = 0; i < 4; i++)
+        used[i] = 0;
+    u8 *pat = SEQ_PATTERN_PTR, *kit = KIT_LIVE;
+    if (!pat || !kit)
+        return -1;
+    int d = (int)(PRJ_KITS - PRJ_PATTERNS) - (int)((u32)kit - (u32)pat);   /* = 98,557 p */
+    const int step = (int)PRJ_PATTERN_BYTES - (int)PRJ_KIT_BYTES;
+    if (d < 0 || d % step || d / step > 127)
+        return -1;
+    u8 *proj = pat - PRJ_PATTERNS - PRJ_PATTERN_BYTES * (u32)(d / step);
+    for (u32 n = 0; n < 128; n++) {
+        const u8 *k = proj + PRJ_KITS + PRJ_KIT_BYTES * n;
+        const u8 *table = proj + PRJ_PATTERNS + PRJ_PATTERN_BYTES * n + PAT_LOCKS;
+        for (u32 t = 0; t < 16; t++) {
+            const u8 *snd = k + 52u + 1163u * t;
+            u8 ty = snd[0xDE];
+            if (ty < 8 || ty > 13)
+                continue;
+            u32 s = snd[20 + 2 * SAMP_FSLOT];   /* 0 OFF, k: slot k - 1 */
+            if (s >= 1 && s <= 128)
+                used[(s - 1) >> 5] |= 1u << ((s - 1) & 31);
+            signed char r = (signed char)table[LK_INDEX + 101u * t + SAMP_FSLOT];
+            if (r < 0 || r >= LK_RECS)
+                continue;
+            const u8 *rec = table + LK_REC * (u32)r;
+            if (rec[0] != SAMP_FSLOT || rec[1] != t)
+                continue;                       /* (an index that doesn't point at its record: skip) */
+            for (u32 st = 0; st < 128; st++) {
+                u32 v = rec[2 + 2 * st];        /* the value's high byte: SAMP */
+                if (rec[2 + 2 * st] == 0xFF && rec[3 + 2 * st] == 0xFF)
+                    continue;                   /* no lock on this step */
+                if (v >= 1 && v <= 128)
+                    used[(v - 1) >> 5] |= 1u << ((v - 1) & 31);
+            }
+        }
+    }
+    return 0;
+}
+
+int smp_fb_mark_unused(void)
+{
+    u32 used[4];
+    smp_fb_unmark_all();
+    if (smp_fb_unused_scan(used))
+        return -1;
+    int n = 0;
+    for (int k = 0; k < 128; k++)
+        if (!smp_slot_empty(k) && !((used[k >> 5] >> (k & 31)) & 1u)) {
+            smp_fb_mark(k, 1);
+            n++;
+        }
+    return n;
+}
+
 int smp_fb_mark_count(void)
 {
     int n = 0;
-    if (smp_fb_store == 1) {
-        for (int k = 0; k < LB_CAP; k++)
-            n += lb_marked(k) && smp_lib_used(k);
+    if (smp_fb_store == 1) {                    /* v0.45: only the ticked bits (each redraw asks: */
+        for (int i = 0; i < LB_CAP / 32; i++)   /* 16,384 entries one by one lagged the keys) */
+            for (u32 w = lb_marks[i], b = 0; w; w >>= 1, b++)
+                if (w & 1u)
+                    n += smp_lib_used(32 * i + (int)b);
         return n;
     }
     for (int k = 0; k < 128; k++)
@@ -1122,7 +1200,9 @@ void smp_fb_delete(int slot, int folder)
                         if (smp_lib_folder_under(g, f))
                             drop[g >> 5] |= 1u << (g & 31);
             for (int k = 0; k < LB_CAP; k++)
-                if (lb_marked(k) && smp_lib_used(k)) {
+                if (!lb_marks[k >> 5])
+                    k |= 31;                    /* v0.45: a word with nothing ticked, skipped */
+                else if (lb_marked(k) && smp_lib_used(k)) {
                     int f = smp_lib_folder_of(k);
                     if (f >= 2 && f < SMP_LIB_FOLDERS)
                         drop[f >> 5] |= 1u << (f & 31);
@@ -1175,7 +1255,9 @@ int smp_fb_load_project(int slot, int folder)
         return 0;
     if (smp_fb_mark_count()) {
         for (int k = 0; k < LB_CAP; k++)
-            if (lb_marked(k) && smp_lib_used(k))
+            if (!lb_marks[k >> 5])
+                k |= 31;                        /* v0.45: a word with nothing ticked, skipped */
+            else if (lb_marked(k) && smp_lib_used(k))
                 n += smp_lib_load(k) == 0;
     } else if (slot >= 0)
         n += smp_lib_load(slot) == 0;
@@ -1193,7 +1275,8 @@ int smp_fb_load_project(int slot, int folder)
  * browser walked all 2,048 entries for its count and again for each of its six rows, every
  * redraw). Rebuilt when the folder or the library's index changes. */
 extern u32 smp_lib_rev;
-static u16 lb_list[LB_CAP] __attribute__((section(".data")));
+/* v0.45: 32 KB at 16,384 entries: in the mirror (lib.c's free part, + 0x3E0000) */
+#define lb_list ((u16 *)(SMP_MIRROR + 0x3E0000u))
 static int lb_list_n __attribute__((section(".data"))) = 0;
 static int lb_list_folder __attribute__((section(".data"))) = -100;
 static u32 lb_list_rev __attribute__((section(".data"))) = 0xFFFFFFFFu;
@@ -1361,21 +1444,21 @@ int smp_fb_nactions(int on_folder)
     signed char a[8];
     if (smp_fb_store == 1)
         return lib_actions(on_folder, a);
-    return on_folder ? 2 : 4;
+    return on_folder ? 3 : 5;                   /* v0.45: SELECT UNUSED */
 }
 
 /* the action at place A of the SAMPLE ACTION menu: 0 LOAD TO TRK, 1 RENAME, 2 DELETE (in
  * PROJECT RAM: UNLOAD), 3 SELECT ALL, 4 LOAD TO PROJECT (v0.31: +DRIVE), 5 MOVE SELECTED,
- * 6 MOVE HERE, 7 CREATE FOLDER (v0.33: +DRIVE) */
+ * 6 MOVE HERE, 7 CREATE FOLDER (v0.33: +DRIVE), 8 SELECT UNUSED (v0.45: PROJECT RAM) */
 int smp_fb_action(int on_folder, int a)
 {
-    static const signed char ram_s[4] = {0, 1, 2, 3}, ram_f[2] = {3, 2};
+    static const signed char ram_s[5] = {0, 1, 2, 3, 8}, ram_f[3] = {3, 2, 8};   /* v0.45: 8 SELECT UNUSED, last: DELETE keeps its place */
     if (smp_fb_store == 1) {
         signed char l[8];
         int n = lib_actions(on_folder, l);
         return l[a < 0 ? 0 : a > n - 1 ? n - 1 : a];
     }
-    return on_folder ? ram_f[a < 0 ? 0 : a > 1 ? 1 : a] : ram_s[a < 0 ? 0 : a > 3 ? 3 : a];
+    return on_folder ? ram_f[a < 0 ? 0 : a > 2 ? 2 : a] : ram_s[a < 0 ? 0 : a > 4 ? 4 : a];
 }
 
 /* v0.39: ERASE MOD DATA's screens (erase.c; the keys in rec.c): the two questions, the
@@ -1639,6 +1722,8 @@ void smp_fb_draw(void *c, int samp)
                 TEXT(c, FONT, 68, y, 0, "%s", "MOVE HERE");
             else if (act == 7)
                 TEXT(c, FONT, 68, y, 0, "%s", "NEW FOLDER");
+            else if (act == 8)
+                TEXT(c, FONT, 68, y, 0, "%s", "SEL UNUSED");
             else if (act == 2) {
                 if (del > 1)
                     TEXT(c, FONT, 68, y, 0, "%s %d", w, del);

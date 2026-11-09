@@ -124,7 +124,10 @@ SMP_DEC_DM = SMP_LINK_DM + 0x500                        # 16 x 48 bytes, to 0x2e
 # RESONATOR, CZ and GRAN read it here
 W2_RND_DM = 0x2E0100                                         # 256 float32 in [0, 1)
 # PING (docs/ping.md): its code (entered from machine5_live's tail), 16 x 128 bytes
-# of state, a few words of scratch, then its tables (dnfw.ping.live.tables_bytes)
+# of state, a few words of scratch, then its tables (dnfw.ping.live.tables_bytes).
+# v0.45: PING removed. Only its code address stays in use (ping.asm, now the shared tail);
+# PING_STATE_DM, PING_T_DM and PING_TABLES_DDR are no longer loaded or read by anything
+# shipped, and are kept only for the retired generators (gen_ping/gran_asm's helpers).
 PING_CODE_DM, PING_CODE_SPAN = 0x2E0500, 0x1800
 PING_SW = PING_CODE_DM // 2                                  # 0x170280
 PING_STATE_DM = PING_CODE_DM + PING_CODE_SPAN                # 0x2e1d00
@@ -285,8 +288,10 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("the recorder's staging block: 32 floats (zeros)", SMP_STAGE_DM, bytes(0x80)),
         ("the fast link's scratch and packet buffer (zeros; v0.16)", SMP_LINK_DM, bytes(0x500)),
         ("sample machines' decimators: 16 voices x 48 bytes (zeros; v0.18)", SMP_DEC_DM, bytes(16 * 48)),
-        ("ping.asm (wr_ping)", PING_CODE_DM, obj["ping"]),
-        ("PING state: 16 tracks x 128 bytes, then scratch (zeros)", PING_STATE_DM, bytes(16 * 128 + 0x40)),
+        # v0.45: PING removed: ping.asm is the shared tail alone (still at PING_SW; every
+        # machine of ours returns through it). PING's state span went with it; the stub pads
+        # with zeros to REGION's end, so those bytes still load as zeros.
+        ("ping.asm (wr_ping: the shared tail)", PING_CODE_DM, obj["ping"]),
     ]
     out = []
     for k, (what, at, payload) in enumerate(raw):
@@ -297,11 +302,6 @@ def spans() -> list[tuple[str, int, bytes]]:
             raise DspError(f"{what} leaves fewer than 64 bytes of NOP padding")
         out.append((what, dm_to_load(at), payload + bytes(end - at - len(payload))))
     return out
-
-
-def _ping_tables() -> bytes:
-    from ..ping import live as ping_live
-    return ping_live.tables_bytes()[0]
 
 
 def _shft_tables() -> bytes:
@@ -323,7 +323,7 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
     """(what, load address, payload) of each DDR span (load address = address): the
     machines' and filters' state (zeros, so fill blocks) and tables."""
     return [
-        ("PING tables", PING_TABLES_DDR, _ping_tables()),
+        # (v0.45: "PING tables" at PING_TABLES_DDR dropped with PING)
         # v0.31: PERC's amp modulation (AMD) reads SHFT's sine here (dnfw.perc.live.layout).
         # v0.28 dropped this span with SHFT, so AMD read whatever the DDR held: on the
         # instrument any AMD above 0 silenced everything until a reboot (users' reports on
