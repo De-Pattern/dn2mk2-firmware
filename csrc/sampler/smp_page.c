@@ -218,6 +218,35 @@ static void w_samp(void *c, int x, int y, int slot)
         glyph(c, gx + 4 * k, y + 6, d[k], 1);
 }
 
+/* v0.47: the RECORDER's INTO, smaller than SAMP's (the owner: "shorter and slightly less
+ * wide"): a box 20 x 11 (SAMP's 21 x 15), its left six columns filled with the bank letter cut out */
+static void w_samp_small(void *c, int x, int y, int slot)
+{
+    int cx = x + 12, x0 = cx - 9, x1 = cx + 10, y0 = y + 3, y1 = y + 13;
+    hline(c, x0 + 1, x1 - 1, y0, 0);
+    hline(c, x0 + 1, x1 - 1, y1, 0);
+    vline(c, x1, y0 + 1, y1 - 1, 0);
+    fill(c, x0, y0 + 1, x0 + 5, y1 - 1);
+    static const unsigned char bank_a[5] = {7, 5, 7, 5, 5};
+    for (int r = 0; r < 5; r++)
+        for (int b = 0; b < 3; b++)
+            if (bank_a[r] & (4 >> b))
+                SET_PIXEL(c, x0 + 2 + b, y + 10 - r, 0);
+    if (slot == 0) {
+        glyph(c, cx + 0, y + 6, '-', 1);
+        glyph(c, cx + 4, y + 6, '-', 1);
+        return;
+    }
+    char d[4];
+    int n = 0;
+    if (slot >= 100) d[n++] = '0' + slot / 100;
+    if (slot >= 10) d[n++] = '0' + slot / 10 % 10;
+    d[n++] = '0' + slot % 10;
+    int gx = cx + 2 - 2 * (n - 1);
+    for (int k = 0; k < n; k++)
+        glyph(c, gx + 4 * k, y + 6, d[k], 1);
+}
+
 /* the DT2's knob: a circle of radius 8 (its own pixels, by row from the centre) */
 static const signed char knob_x[9][2] = {
     {8, 8}, {8, 8}, {8, 8}, {7, 7}, {7, 7}, {6, 6}, {5, 5}, {3, 4}, {0, 2}};
@@ -2367,7 +2396,7 @@ void rec_screen_draw(void *c)
 
     /* the bottom row: the slot the next recording goes into (v0.33: shown, not chosen: the
      * first empty one), R.LEN, R.STRT, ARM */
-    w_samp(c, 1, 5, rec_dest < 0 ? 0 : rec_dest + 1);
+    w_samp_small(c, 1, 5, rec_dest < 0 ? 0 : rec_dest + 1);   /* v0.47: smaller */
     LABEL(c, 13, 0, "%s", "INTO");
     if (rec_rlen <= 0) {
         LABEL(c, 47, 12, "%s", "MAX");

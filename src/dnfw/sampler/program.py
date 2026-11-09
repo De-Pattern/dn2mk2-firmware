@@ -3041,7 +3041,7 @@ PREVIEW_BYTES = 10 * 48000 * 2              # its longest: the DT2's ten seconds
 
 def pvmix(p: Prog, L: Layout) -> None:
     """MIX_BUF += frames [pva, pva + 2 min(pvn, 16)) of the preview (int16 pairs, the low
-    half first) at half level (v0.37), on L and R alike; pva and pvn move on. Uses R0..R3,
+    half first) at a quarter level (v0.47; half from v0.37), on L and R alike; pva and pvn move on. Uses R0..R3,
     R12, R13, I1."""
     C = L.C
     # v0.37: first the whole mix, as the master mix call takes it, to the recorder's MAIN tap
@@ -3086,9 +3086,14 @@ def pvmix(p: Prog, L: Layout) -> None:
                 p.iop(2, 2, "AND", 12)        # the second, on top
                 # v0.37: at half (-6 dB): int16 / 65536. At full scale the preview sat ~6 dB
                 # over a sample track at its default VOL and LEVEL ((0.78)^2 x 0.79 = 0.48),
-                # which the preview skips (\x0x/, paQ: "really high", "at least 6dB")
-                p.iconst(12, -32)
-                p.float_(3, 3, 12)            # int16 / 65536
+                # which the preview skips (\x0x/, paQ: "really high", "at least 6dB").
+                # v0.47: a quarter (-12 dB): int16 / 131072. v0.40 normalised every take to full
+                # scale (it was -6 dBFS since v0.30), which put TRIM's preview of a take 6 dB
+                # over where it sat from v0.37 to v0.39 (the owner: "too loud again", "blown
+                # out"; L2: the +DRIVE preview "roughly 12 dB louder" than the sample on a
+                # track). A take's preview peaks at -12 dBFS again, as on v0.37..v0.39
+                p.iconst(12, -33)
+                p.float_(3, 3, 12)            # int16 / 131072
                 p.float_(2, 2, 12)
                 p.lsh(12, 1, 3)
                 p.iconst(13, SM.MIX_BUF)

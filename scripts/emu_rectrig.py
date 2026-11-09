@@ -552,6 +552,58 @@ def main() -> int:
         f_s = machine.long(REC244 + 0x34)
         check("v0.46: record 244's text is stock's on every other machine", f_o == stock_f and f_s == stock_f,
               f"oneshot {f_o:#x}, stock {f_s:#x}, want {stock_f:#x}")
+    # v0.47: the Monomachine's TUNE (knob H, record 240): its header text a signed knob
+    # (-64..+63, 0 in tune), not stock's percentage; FUNC + turn steps by semitones (32)
+    if "smp_quant" in lay:
+        REC240 = 0x401F7F94 + 60 * 240
+        stock_t = machine.long(REC240 + 0x34)
+        call(lay["smp_formats"], 2)                          # SID 6581 (type 6, kind 2)
+        f_t = machine.long(REC240 + 0x34)
+        tt = []
+        for v in (0, 25, 50, 75, 100):
+            machine.write(SENTINEL + 0x100, bytes(16))
+            call(f_t, v << 8, SENTINEL + 0x100)
+            tt.append(machine.read(SENTINEL + 0x100, 8).split(b"\0")[0].decode("latin-1"))
+        check("v0.47: the Monomachine's TUNE reads -64..+63, 0 in tune (not a percentage)",
+              f_t != stock_t and tt == ["-64", "-32", "0", "+31", "+63"], f"{tt}")
+        call(lay["smp_formats"], 1)                          # PERC (record 240 is its PD1)
+        f_p = machine.long(REC240 + 0x34)
+        call(lay["smp_formats"], 0)
+        f_s = machine.long(REC240 + 0x34)
+        check("v0.47: record 240's text is stock's on PERC and stock machines", f_p == stock_t and f_s == stock_t,
+              f"perc {f_p:#x}, stock {f_s:#x}, want {stock_t:#x}")
+        snd = SENTINEL + 0x200                               # a sound: type SID, TUNE (slot 29) in tune
+        machine.write(snd, bytes(0x100))
+        machine.write(snd + 0xDE, bytes([6]))
+        TSLOT = 29
+
+        def func_turn(d, v):
+            put16(snd + 0x14 + 2 * TSLOT, v)
+            put32(lay["smp_func_held"], 1)
+            put32(lay["smp_knob_d"], d & 0xFFFFFFFF)
+            put32(lay["smp_knob_at"], machine.long(FRAMES))
+            r = call(lay["smp_quant"], snd, TSLOT, (v + (0x100 if d > 0 else -0x100)) & 0xFFFF, 240)[0] & 0xFFFF
+            put32(lay["smp_func_held"], 0)
+            return r
+
+        def kn(v):
+            c = v >> 8
+            return (c * 254 + 100) // 200 - 64
+        v, up, down = 50 << 8, [], []
+        for _ in range(3):
+            v = func_turn(1, v)
+            up.append(kn(v))
+        for _ in range(5):
+            v = func_turn(-1, v)
+            down.append(kn(v))
+        check("v0.47: FUNC + turn on the Monomachine's TUNE steps by semitones (+1 semitone is the knob "
+              "+33 or +31: the record has no +32)", up == [33, 63, 63] and down == [31, 0, -32, -64, -64],
+              f"up {up}, down {down}")
+        put16(snd + 0x14 + 2 * TSLOT, 50 << 8)
+        put32(lay["smp_knob_d"], 1)
+        put32(lay["smp_knob_at"], machine.long(FRAMES))
+        plain = call(lay["smp_quant"], snd, TSLOT, 51 << 8, 240)[0] & 0xFFFF
+        check("v0.47: without FUNC, TUNE turns as before (the value as written)", plain == 51 << 8, f"{plain:#x}")
     ok = all(c["ok"] for c in report["checks"].values())
     report["ok"] = ok
     if a.json:

@@ -21,6 +21,8 @@ typedef unsigned char u8;
 #define CHOICE_DETENTS 4                        /* v0.26: PLAY, MODE, BARS, GRID */
 #define SOUND_TYPE 0xDE                         /* the sound's machine type byte */
 #define SOUND_VALUES 0x14                       /* its values, a 16-bit word a slot */
+#define MNM_TUNE_J 7                            /* TUNE: knob H on every Monomachine machine */
+#define MNM_TUNE_REC 240u                       /* its record (perc_param_ids[7]) */
 #define RECORD_FMT(id) (*(void **)(0x401F7F94u + 60u * (id) + 0x34u))
 #define RECORD_LO(id) (((const int *)(0x401F7F94u + 60u * (id)))[2] >> 8)
 
@@ -67,6 +69,40 @@ static int mnm_rep(int j, int n, int c)        /* the value (coarse) in the midd
         a = b = 0;
     int k = (a + b) / 2, top = mnm_top[j];
     return mnm_lo[j] + (k * 2 * top + 127) / 254;
+}
+
+/* v0.47: the Monomachine's TUNE (owner: FUNC + turn did not snap; the header said 0%..100%).
+ * TUNE is the Monomachine's knob 0..127, 64 in tune, 32 a semitone (dnfw.mnm.machines: F =
+ * note x 2048 / 12 + TUNE x 683 / 128): -2..+2 semitones. Its record spans 0..100, and the
+ * knob is that x 127 / 100, rounded (page.c mnm_knob, the DSP's), so not every knob is there:
+ * a value is written as the record value whose knob is nearest (perc.live.knob_word). FUNC +
+ * turn moves to the next semitone the knob's way: 0, 32, 64, 96, 127. */
+static int mnm_val_for(int j, int k, int t, int dir)
+{
+    /* the record's coarse value whose knob is past K the knob's way and nearest T (a tie: the
+     * one further that way), so a click always moves */
+    int top = mnm_top[j], best = -1, bd = 1000;
+    for (int v = 0; v <= top; v++) {
+        int kv = (v * 254 + top) / (2 * top);
+        if (dir > 0 ? kv <= k : kv >= k)
+            continue;
+        int d = kv - t;
+        if (d < 0) d = -d;
+        if (d < bd || (d == bd && dir > 0)) { bd = d; best = v; }
+    }
+    return best < 0 ? -1 : mnm_lo[j] + best;
+}
+
+static int mnm_tune_step(int old, int dir)
+{
+    int k = mnm_kn(MNM_TUNE_J, old >> 8), t;
+    if (dir > 0)
+        t = k >= 127 ? 127 : (k / 32 + 1) * 32;
+    else
+        t = k <= 0 ? 0 : ((k - 1) / 32) * 32;
+    if (t > 127) t = 127;
+    int v = mnm_val_for(MNM_TUNE_J, k, t, dir);
+    return v < 0 ? old : v << 8;                /* at the end already: as it is */
 }
 
 static int fq_click __attribute__((section(".data"))) = 0;      /* v0.32: a FUNC click (+1/-1), else 0 */
@@ -124,7 +160,7 @@ extern int smp_func_held;
 extern int smp_knob_d;
 extern u32 smp_knob_at;
 #define KNOB_FRESH 150u                         /* 100 ms: the turn this write comes from */
-enum { F_OFF, F_KEEP, F_CHOICE, F_NONE };
+enum { F_OFF, F_KEEP, F_CHOICE, F_NONE, F_TUNE };
 #define OWN_REC_FIRST 238u                      /* our records (dnfw.perc / dnfw.sampler machines) */
 #define OWN_REC_LAST 260u
 
@@ -143,8 +179,11 @@ static int func_kind(u8 *s, int slot, u32 id)
     int mi = mnm_index(ty - 4);
     if (mi >= 0) {
         for (int j = 0; j < 8; j++)
-            if (mnm_slot[j] == slot)
+            if (mnm_slot[j] == slot) {
+                if (j == MNM_TUNE_J && mnm_labels[mi][j][0] == 'T' && mnm_labels[mi][j][1] == 'U')
+                    return F_TUNE;              /* v0.47: by semitones (the owner) */
                 return mnm_choices[mi][j] ? F_CHOICE : F_NONE;
+            }
         return F_NONE;
     }
     int type = SMP_IDX(ty - 4);                 /* v0.44: the sample row (BOUNCE's is 6, type 17) */
@@ -169,6 +208,8 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
     int old0 = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
     if (fk == F_NONE)
         return old0;
+    if (fk == F_TUNE)
+        return mnm_tune_step(old0, smp_knob_d > 0 ? 1 : -1);
     if (fk == F_CHOICE) {                       /* one choice a click, the knob's way: a */
         fq_click = smp_knob_d > 0 ? 1 : -1;     /* detent's worth past the old value, */
         int oc0 = old0 >> 8;                    /* each table's own step below */
@@ -358,12 +399,24 @@ static void f_buf(int v, char *buf)             /* v0.46 BOUNCE's BUF: 1..8 (dep
     put_num(buf, (b < 0 ? 0 : b > 7 ? 7 : b) + 1);
 }
 
+/* v0.47: the Monomachine's TUNE as a signed knob, -64..+63 (0 in tune, 32 a semitone),
+ * not stock's percentage of the record it sits on */
+static void f_mtune(int v, char *buf)
+{
+    int k = mnm_kn(MNM_TUNE_J, (v >> 8) & 0xFF) - 64;
+    if (k > 0) {
+        buf[0] = '+';
+        put_num(buf + 1, k);
+    } else
+        put_num(buf, k);
+}
+
 /* the records whose text is ours on a sample machine's track; 239, SLCE's and LEN's
  * records only on GRID's (ONESHOT's STRT, LOOP and CFAD are the same records) */
 static const u16 fmt_ids[] = {SMP_PLAY_REC, SMP_MODE_REC, SMP_BARS_REC, SMP_SEG_REC, SMP_GRID_REC,
-                              SMP_SAMP_REC, SMP_SLICE_ID, SMP_SLEN_ID, SMP_BUF_ID};
+                              SMP_SAMP_REC, SMP_SLICE_ID, SMP_SLEN_ID, SMP_BUF_ID, MNM_TUNE_REC};
 static void (*const fmt_fns[])(int, char *) = {f_play, f_mode, f_bars, f_seg, f_grid, f_samp,
-                                               f_slce, f_slen, f_buf};   /* (v0.22: the recorder's are a screen's now) */
+                                               f_slce, f_slen, f_buf, f_mtune};   /* (v0.22: the recorder's are a screen's now) */
 #define NFMT (int)(sizeof fmt_ids / sizeof fmt_ids[0])
 static void *stock_fmt[NFMT] __attribute__((section(".data")));
 static int fmt_saved __attribute__((section(".data"))) = 0;
@@ -380,6 +433,10 @@ void smp_formats(int kind)
     int smp = SMP_IDX(kind) >= 0;   /* (v0.26: 10.. the Monomachine's; v0.44: 13 BOUNCE) */
     for (int k = 0; k < NFMT; k++) {
         void *f = stock_fmt[k];
+        if (fmt_ids[k] == MNM_TUNE_REC) {       /* v0.47: on a Monomachine machine's track only */
+            RECORD_FMT(fmt_ids[k]) = mnm_index(kind) >= 0 ? (void *)fmt_fns[k] : f;
+            continue;
+        }
         int grid_only = fmt_ids[k] == SMP_GRID_REC;
         int slices = fmt_ids[k] == SMP_SLICE_ID || fmt_ids[k] == SMP_SLEN_ID;  /* GRID's, SLICE's */
         if (smp && (!grid_only || kind == SMP_GRID_KIND)
