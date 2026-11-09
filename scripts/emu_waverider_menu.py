@@ -1250,9 +1250,11 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         facts["the recorder's word: on the +Drive (1)"] = long("smp_rs_last") == 1
         facts["every write in the library's region or the pool's directory"] = all(
             s >= 0x700000 or STORE_SECTOR <= s < STORE_SECTOR + 1 + 64 or s in disk_before and disk_before[s] == disk[s]
+            or s in (0x6D0000, 0x6D0001)    # the per-project lists' superblock (pools.c): a directory save's
             for s in disk)
         out["diag_writes_outside"] = sorted(hex(s) for s in disk if not (
-            s >= 0x700000 or STORE_SECTOR <= s < STORE_SECTOR + 1 + 64 or s in disk_before and disk_before[s] == disk[s]))[:40]
+            s >= 0x700000 or STORE_SECTOR <= s < STORE_SECTOR + 1 + 64 or s in disk_before and disk_before[s] == disk[s]
+            or s in (0x6D0000, 0x6D0001)))[:40]
         final = dict(disk)
         bad = []
         for i, st_ in enumerate(snaps):
@@ -1293,21 +1295,25 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         facts["no room: nothing written to the library, the slot still the pool's, the word 2 (+DRV FULL)"] = (
             long("smp_rs_last") == 2 and after == before and libid(slot2) == 0 and lib_rows() == rows1)
         machine.write(BLK_SECTORS, struct.pack(">I", 0x3A00000))
-        # 4. a send from the computer while a recording goes in: refused (no room now), the recording's copy whole
-        call("smp_trim", slot2, 0, 50000)
+        # 4. a send from the computer while a recording goes in: refused (no room now), the recording's copy whole.
+        # The whole 120,000-frame take (240 KB: five 0xF000 chunks, one a pass), so the BEGIN lands mid-copy:
+        # after its first chunk is written and before it is done (checked, not assumed)
+        call("smp_trim", slot2, 0, 120000)
         run_until(lambda: False, 300)
         e2 = entry_of(slot2)
         want2 = img_at(e2[0], e2[1] * 2)
         call("smp_rec_store_named", slot2, SENTINEL + 0x3100)
         n0 = long("smp_lib_writes")
+        d0 = long("smp_rs_done")
         run_until(lambda: long("smp_lib_writes") > n0, 400)
+        mid = long("smp_rs_done") == d0 and libid(slot2) == 0
         st_b, _ = sx(18, struct.pack("<IBBI", 100, 1, 0, 0x3F800000) + b"HOST")
         run_until(lambda: libid(slot2) != 0, 4000)
         k2 = next((r[0] for r in lib_rows() if r not in rows1), -1)
-        out["diag_send"] = {"st_b": st_b, "k2": k2, "libid2": libid(slot2), "rs_last": long("smp_rs_last"),
+        out["diag_send"] = {"mid": mid, "st_b": st_b, "k2": k2, "libid2": libid(slot2), "rs_last": long("smp_rs_last"),
                             "rs_done": long("smp_rs_done"), "e2": list(e2), "rows_new": [r for r in lib_rows() if r not in rows1]}
         facts["a send's BEGIN while a recording goes in: refused; the recording's copy whole"] = (
-            st_b != 0 and k2 >= 0 and on_disk(struct.unpack_from("<I", lib_entry(k2))[0], len(want2)) == want2)
+            mid and st_b == 2 and k2 >= 0 and on_disk(struct.unpack_from("<I", lib_entry(k2))[0], len(want2)) == want2)
         uc.hook_del(hs)
         out["recstore"] = facts
         out["ok"] = all(facts.values())
