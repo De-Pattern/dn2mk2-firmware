@@ -1242,7 +1242,7 @@ def step_stress(init, sound, machines) -> dict:
     from dnfw.perc import guard as G
     from dnfw.mnm import machines as MMx
     K, P = 3, 666_667
-    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp"))
+    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp")) | set(_after_emuclk("fascia"))   # v0.47: FASCIA runs last and writes OURS_END
     efm = PM.NAMES.index("EFM-SD")
     td = PM.NAMES.index("TRX-BD")
     res = {}
@@ -1430,7 +1430,7 @@ def step_chords(init, sound, machines, need=4, cold=None) -> dict:
     from dnfw.perc import guard as G
     from dnfw.mnm import machines as MMx
     P = 666_667
-    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp"))
+    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp")) | set(_after_emuclk("fascia"))   # v0.47: FASCIA runs last and writes OURS_END
     counts, undo_counts = _count_memory()
     S = float(os.environ.get("DNFW_MEM_SCALE", "0.9"))
     notes = (0x3C00, 0x4000, 0x4300, 0x4800)      # C, E, G, C
