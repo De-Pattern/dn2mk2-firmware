@@ -206,6 +206,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("jump", "DIRECT JUMP (ColdFire)"),
        ("slides", "parameter slides (ColdFire)"),
        ("bouncegone", "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)"),
+       ("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
@@ -2154,6 +2155,24 @@ def main() -> int:
         later("bouncegone", "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)",
               "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)",
               [bg_cmd, sorted(EMU_ENV.items())], bg_body)
+
+        # v0.48 (owner, 2026-11-09): no text outside its place, every value of a control at one
+        # place and size: the RECORDER in every state of its centre box and R.LEN through its values
+        rx_js = work / "rectext.json"
+        rx_cmd = [a.venv, "-u", "scripts/emu_rectext.py", "--build", bdir, "--snapshot", snap,
+                  "--json", rx_js, "--png-dir", work / "rectext"]
+
+        def rx_body(tdir):
+            rc, out = run("recorder text", rx_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0 or not last.startswith("PASS"):
+                return False, out[-900:]
+            return True, (f"{last[6:]}: every centre-box message of the RECORDER inside its box (no "
+                          f"pixel in the gutters, the border untouched), R.LEN's MAX and step counts on "
+                          f"one line inside their column")
+        later("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)",
+              "RECORDER text inside its places, every state and R.LEN value (ColdFire)",
+              [rx_cmd, sorted(EMU_ENV.items())], rx_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()

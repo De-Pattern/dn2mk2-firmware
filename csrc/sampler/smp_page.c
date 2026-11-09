@@ -2281,12 +2281,13 @@ void rec_screen_draw(void *c)
      * first empty one), R.LEN, R.STRT, ARM */
     w_samp_small(c, 1, 5, rec_dest < 0 ? 0 : rec_dest + 1);   /* v0.47: smaller */
     LABEL(c, 13, 0, "%s", "INTO");
-    if (rec_rlen <= 0) {
-        LABEL(c, 47, 12, "%s", "MAX");
-    } else {
-        LABEL(c, 47, 12, "%d", rec_rlen);
-        LABEL(c, 47, 6, "%s", "STEPS");
-    }
+    /* v0.48 (owner: every value of a control at one place and size): R.LEN's MAX and its step
+     * counts on R.STRT's line (y 9), one line, no STEPS under some values and not others; the label
+     * says what the number is */
+    if (rec_rlen <= 0)
+        LABEL(c, 47, 9, "%s", "MAX");
+    else
+        LABEL(c, 47, 9, "%d", rec_rlen);
     LABEL(c, 47, 0, "%s", "R.LEN");
     LABEL(c, 80, 9, "%s", rec_rstrt ? "PLAY" : "THRES");
     LABEL(c, 80, 0, "%s", "R.STRT");
