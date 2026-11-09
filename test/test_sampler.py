@@ -991,7 +991,9 @@ def test_the_host_tool_sends_into_the_drive_library(tmp_path):
     assert D.lib_list(lib) == [(0, "DRUMS", "KICK", 1000)]
     assert D.lib_adler(b"abc") == 0x024D0127                      # zlib's adler32
     c = (pathlib.Path(__file__).resolve().parents[1] / "csrc" / "sampler" / "lib.c").read_text()
-    assert "cmd == 18" in c and "rate = lget(rq + 9)" in c and "rq[13 + c]" in c
+    # v0.46: BEGIN's fields read where the host tool packs them (<IBBI: frames 3, fmt 7, folder 8,
+    # rate 9, the name from 13), through the writer the recordings' copy shares
+    assert "cmd == 18" in c and "w_begin(lget(rq + 3), rq[7], rq[8], lget(rq + 9), rq + 13, n - 13, 0)" in c
 
 
 def _plays_on_dsp(h, slot):
