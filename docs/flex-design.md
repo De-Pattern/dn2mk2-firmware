@@ -54,8 +54,8 @@ Every screen 128 x 64, drawn with the existing renderer.
   tracks never feed each other). A FLEX track's cell is drawn struck until deliberately pressed in.
 - Default: every non-FLEX track in.
 - **Dry**: each block is taken after the track's amp, before pan, the track's LEVEL, the send
-  effects and the master section. Each track's LEVEL is applied in the bus (the ColdFire knows it),
-  so the balance is as heard. Send-effect returns in the bus: only after research shows they can
+  effects and the master section. **Decided (owner, 2026-11-09): each track's LEVEL is applied in the bus** (the ColdFire knows
+  it), so the recorded balance is the balance heard. Send-effect returns in the bus: only after research shows they can
   be tapped safely.
 - Stored per FLEX owner track and pattern, with the other REC SETUP values.
 
