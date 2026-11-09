@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.44** | 2026-11-07 | BOUNCE, the seventh sample machine: Octatrack-style recorder trigs placed with [TRIG] (FUNC + [TRIG] a one-shot) record into the track's own buffer (8 buffers, two halves each), play the take fitted to its steps at any tempo, switch at Q.PLAY; Q.REC; FUNC + YES saves the take to the pool and +Drive; YES YES re-arms one-shots; v0.41's REC trigs, ARM knobs and REC TRIGS page gone; the CHAN icon on every RECORDER; FILE NAME UP/DOWN scroll characters | `builds/v0.44-BOUNCE/` | yes |
+| **v0.45** | 2026-11-08 | BOUNCE fixed (v0.44 froze the unit on MACHINE SEL → BOUNCE and at power-on with a BOUNCE track) and back in MACHINE SEL; the +Drive library holds 16,384 samples; SELECT UNUSED in PROJECT RAM; recorder trigs on the [TRIG] LEDs while the BOUNCE REC panel is open; SAMP past the last loaded sample no longer plays the last one; PING removed; gate: every machine through MACHINE SEL's real list and a power-on with ours on the tracks, a wild-read trap in every emulator step | `builds/v0.45-ROOMIER/` | yes |
+| v0.44 | 2026-11-07 | **withdrawn (2026-11-08): BOUNCE froze the unit.** Use v0.45. BOUNCE, the seventh sample machine: Octatrack-style recorder trigs placed with [TRIG] (FUNC + [TRIG] a one-shot) record into the track's own buffer (8 buffers, two halves each), play the take fitted to its steps at any tempo, switch at Q.PLAY; Q.REC; FUNC + YES saves the take to the pool and +Drive; YES YES re-arms one-shots; v0.41's REC trigs, ARM knobs and REC TRIGS page gone; the CHAN icon on every RECORDER; FILE NAME UP/DOWN scroll characters | `builds/v0.44-BOUNCE/` | yes |
 | v0.43 | 2026-11-07 | 128 +Drive library folders (folders inside folders past 64; an older library as it was); the Monomachine voices 25-36 % lighter (their render scratch in L1, bit-exact); the gate's boot steps faster | `builds/v0.43-ROOM/` | yes |
 | v0.42 | 2026-11-06 | Monomachine machines re-coded, bit for bit, lighter on the DSP (DDRW -27%, SID -25%, DENS -21%, VO-6 -18%, WAVE -15%); DDRW's bit reduction exact (all 366 Monomachine references match); Machinedrum voices start clean on a machine change (the PI-HH clicks and loud spikes); the Machinedrum sample reader re-coded, identical; GRID/SLICE menus let go of other pages and tracks; a REC trig that records nothing says why; the Monomachine reference check back in the gate in full | `builds/v0.42-LEAN/` | yes |
 | v0.41 | 2026-11-06 | REC trigs (FUNC + VOICE, hold a step, H: REC 1 / REC 2), armed per track OFF / ONCE / ON; two looping buffers REC 1 and REC 2 (SAMP 124, 125) that keep playing while they re-record; QPLAY (a take heard from the next boundary) and QREC (RECORD NOW waits for the boundary); the REC TRIGS page; slides on our own machines' controls; SLEN four detents; NORMALIZING no longer sticks; no SLICE menu over a project save; a long recording can't run into the next; gate: rectrig, own-machine slides, Overbridge's code untouched | `builds/v0.41-LOOP/` | yes |
@@ -82,6 +83,66 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.45 — ROOMIER (BOUNCE fixed, a bigger +Drive library, SELECT UNUSED)
+
+`DN2mod_v0.45_ROOMIER_OS1.11.syx`
+sha256 `02e4a35ccc66a4f244a21d4676740af7822105482581d81762c26c63075b4542`
+Gate: CLEARED TO FLASH, 2026-11-08 (45 gates; 40 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit). Source: commit `6555a93` (branch `v045`). Docs: `docs/after-v045.md`, `docs/rectrig.md`, `docs/sampler.md`.
+
+Everything in v0.44, plus:
+
+**Fixed: v0.44's freeze with BOUNCE.** Picking BOUNCE in MACHINE SEL froze the unit, and a project
+holding a BOUNCE track froze it at every power-on: the label lookup (`pages.py` wr_label) chose
+the Monomachine's label table by range, so BOUNCE (kind 13) read past its end and walked address
+0x000000EE as a list. The emulator reads that low memory as zeros, which hid it. Each Monomachine
+kind is now tested by name; every other kind gets the stock names. BOUNCE is back in MACHINE SEL;
+projects saved with BOUNCE tracks load again. A unit stuck on v0.44: FUNC held at power-on, TRIG 2
+(EMPTY RESET); the +Drive is safe; then flash v0.45.
+
+**The +Drive library holds 16,384 samples** (was 2,048): an extension below the library, read as
+it is, made by the first sample past 2,048; the room search sorted (one pass); the browser's
+ticked count walks only the ticked entries (at 16,384 it lagged the keys); the import page reads
+the size from the unit; ERASE MOD DATA erases the new region too.
+
+**SELECT UNUSED** (PROJECT RAM, as on the DT2): FUNC + YES → PROJECT RAM → RIGHT → SEL UNUSED
+(last in the menu) ticks every loaded sample no kit's SAMP and no SAMP lock in the 128 patterns
+uses; UNLOAD n? empties those slots.
+
+**Recorder trigs on the [TRIG] LEDs** while the BOUNCE REC panel is open: a recorder trig red, a
+one-shot yellow (dim when spent), the playing step white, the rest dark. Closed: stock's LEDs.
+
+**Fixed:** SAMP scrolled past the last loaded sample (or onto OFF) kept playing the last one: the
+OS glides every knob and the "LFO steps through your samples" code took the glide for an LFO.
+SAMP and SLCE never glide now; an LFO on SAMP still steps.
+
+**Removed:** PING (the filter), to make room. Sounds saved with PING load with Multi-Mode; RING
+becomes Multi-Mode's resonance (check the level). FASCIA, built for this release, is out of the
+firmware (kept on the branches `fascia-saved` and `fascia-opt-wip`) until it is lighter.
+
+Gate: `machines` (a power-on with every machine of ours on the tracks, each track drawn, and all 18
+rows of MACHINE SEL's own list picked, on a snapshot booted on this build, with a trap on any read
+below 0x40000000 by our code: it fails v0.44); the same wild-read trap in every emulator step; `unused`
+(SELECT UNUSED); `rectrig` 41 checks (the LEDs); `samplist`/`slides` (SAMP never glides).
+
+**Tests**
+1. MACHINE SEL → BOUNCE: the page draws, no freeze. Save, power off and on: it boots.
+2. SAMP on a ONESHOT track with a few samples loaded: scroll past the last and play trigs: silence.
+   Scroll back: each one plays.
+3. PROJECT RAM → SEL UNUSED: only samples no pattern uses are ticked; UNLOAD n? removes just those.
+4. BOUNCE REC panel open: recorder trigs red, a one-shot yellow, the playing step white; closed:
+   normal LEDs.
+5. +DRIVE browser: tick, FUNC + YES held previews, LOAD TO PROJ, MOVE SELECTED: as quick as before.
+6. Send samples past 2,048 to the library: they keep going; reboot: all there.
+7. Everything from v0.44 (BOUNCE recording, recorder trigs, QREC/QPLAY).
+
+**Known issues**
+- BOUNCE recording itself is unproven on hardware; the take's start against the step unverified.
+- Back on an older firmware with more than 2,048 library samples, those past 2,048 are hidden, and a
+  new send there may reuse their space.
+- SELECT UNUSED doesn't see sound locks from the preset pool or the clipboard.
+- The LED colours at each LED INTENSITY are unchecked on hardware.
+- Preset pool trig locks don't work with the mod's machines yet.
 
 ## v0.44 — BOUNCE (Octatrack-style recorder trigs into a playing buffer)
 
