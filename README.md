@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.45** | 2026-11-08 | BOUNCE fixed (v0.44 froze the unit on MACHINE SEL → BOUNCE and at power-on with a BOUNCE track) and back in MACHINE SEL; the +Drive library holds 16,384 samples; SELECT UNUSED in PROJECT RAM; recorder trigs on the [TRIG] LEDs while the BOUNCE REC panel is open; SAMP past the last loaded sample no longer plays the last one; PING removed; gate: every machine through MACHINE SEL's real list and a power-on with ours on the tracks, a wild-read trap in every emulator step | `builds/v0.45-ROOMIER/` | yes |
+| **v0.46** | 2026-11-09 | recordings (RECORD NOW, a BOUNCE take saved with FUNC + YES) also copied into +DRIVE > RECORDED under their own name; FILE NAME up to 35 characters, RENAME long names, a new folder up to 30; BOUNCE's BUF reads 1..8; gate: the copy with a power cut after every step, a full +Drive, a send mid-copy | `builds/v0.46-KEEPER/` | yes |
+| v0.45 | 2026-11-08 | BOUNCE fixed (v0.44 froze the unit on MACHINE SEL → BOUNCE and at power-on with a BOUNCE track) and back in MACHINE SEL; the +Drive library holds 16,384 samples; SELECT UNUSED in PROJECT RAM; recorder trigs on the [TRIG] LEDs while the BOUNCE REC panel is open; SAMP past the last loaded sample no longer plays the last one; PING removed; gate: every machine through MACHINE SEL's real list and a power-on with ours on the tracks, a wild-read trap in every emulator step | `builds/v0.45-ROOMIER/` | yes |
 | v0.44 | 2026-11-07 | **withdrawn (2026-11-08): BOUNCE froze the unit.** Use v0.45. BOUNCE, the seventh sample machine: Octatrack-style recorder trigs placed with [TRIG] (FUNC + [TRIG] a one-shot) record into the track's own buffer (8 buffers, two halves each), play the take fitted to its steps at any tempo, switch at Q.PLAY; Q.REC; FUNC + YES saves the take to the pool and +Drive; YES YES re-arms one-shots; v0.41's REC trigs, ARM knobs and REC TRIGS page gone; the CHAN icon on every RECORDER; FILE NAME UP/DOWN scroll characters | `builds/v0.44-BOUNCE/` | yes |
 | v0.43 | 2026-11-07 | 128 +Drive library folders (folders inside folders past 64; an older library as it was); the Monomachine voices 25-36 % lighter (their render scratch in L1, bit-exact); the gate's boot steps faster | `builds/v0.43-ROOM/` | yes |
 | v0.42 | 2026-11-06 | Monomachine machines re-coded, bit for bit, lighter on the DSP (DDRW -27%, SID -25%, DENS -21%, VO-6 -18%, WAVE -15%); DDRW's bit reduction exact (all 366 Monomachine references match); Machinedrum voices start clean on a machine change (the PI-HH clicks and loud spikes); the Machinedrum sample reader re-coded, identical; GRID/SLICE menus let go of other pages and tracks; a REC trig that records nothing says why; the Monomachine reference check back in the gate in full | `builds/v0.42-LEAN/` | yes |
@@ -83,6 +84,55 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.46 — KEEPER (recordings into +DRIVE > RECORDED, long names)
+
+`DN2mod_v0.46_KEEPER_OS1.11.syx`
+sha256 `2dc196d8977de107d7b96fb4d87a18cc5a90d5a053678276e0803d84b2fba7c8`
+Gate: CLEARED TO FLASH, 2026-11-09 (45 gates; 37 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit; every emulator step with the wild-read trap on). Source: commit `0a4e421` (branch `v046`). Docs: `docs/after-v045.md`, `docs/sampler.md`.
+
+Everything in v0.45, plus:
+
+**Recordings into +DRIVE > RECORDED.** A saved recording (RECORD NOW, or a BOUNCE take with FUNC + YES)
+is saved into the project's pool as before, then copied into the +Drive library's RECORDED folder under
+the name given on FILE NAME (`link.c` rs_poll, through `lib.c`'s send writer, now shared). The copy runs a
+chunk a UI pass, only while nothing else loads, saves, switches, sends or loads to the project; the
+library entry is written last, so a power cut leaves no entry or the whole one; then the slot is marked as
+that library sample (as LOAD TO PROJECT marks it). Library full: the take stays in the pool and the
+recorder's line says +DRV FULL. The slot changed during the copy: it stops. A send from the computer
+during a copy is refused as busy (and the reverse). A +Drive that never held a library gets one, as a send
+makes it; a library the firmware does not recognise (a superblock read but not checking: another
+build's, or damaged) is left alone and the take stays in the pool. Recordings made before v0.46 are
+untouched.
+
+**Long names.** FILE NAME takes up to 35 characters for a recording (the library's), scrolls with << and
+>>; RENAME in PROJECT RAM takes long names where the pool keeps them (else 7); a new folder's name up to
+30. SAMP shows the first 7 letters. New recordings are still named REC + the slot (REC041): the DT2's
+REC0000 counter would change how projects are stored, so it waits.
+
+**Fixed:** BOUNCE's BUF read 0%..100% in the header (stock's text for the record it borrows); it reads
+1..8, and that record keeps stock's text on every other machine (depaffect).
+
+Gate: `link16`'s `recstore` (the take exact on the +Drive, under its whole name, in RECORDED; a power cut
+after every pass; the slot changed mid-copy; no room; a send's BEGIN mid-copy refused; an unrecognised
+library left alone; a blank +Drive given one); `rectrig` 43 checks (BUF's text); the wild-read trap
+(`emulib/lowtrap.py`) in every emulator step.
+
+**Tests**
+1. Record (FUNC + VOICE, RECORD NOW), TRIM, name it with a long name, YES: it plays from its slot; +DRIVE
+   browser > RECORDED: there, under the whole name, shown loaded.
+2. A new project: load it from RECORDED: it plays.
+3. A BOUNCE take saved with FUNC + YES lands in RECORDED the same way.
+4. PROJECT RAM > RENAME with a long name: SAMP shows its first 7 letters.
+5. A BOUNCE track: turn BUF: the header reads 1..8.
+6. Everything from v0.45.
+
+**Known issues**
+- The copy to RECORDED is unproven on hardware.
+- BOUNCE recording itself is unproven on hardware (a tester saw it record nothing on v0.45): next, the
+  emulator runs the ColdFire and the DSP together so the whole path is tested.
+- The name's default stays RECnnn, not the DT2's REC0000.
+- Everything listed for v0.45.
 
 ## v0.45 — ROOMIER (BOUNCE fixed, a bigger +Drive library, SELECT UNUSED)
 
