@@ -24,3 +24,21 @@
    - The SHARC runner's FASCIA clock hook (f063559 on v047's history) back with FASCIA.
 3. The emulator: the ColdFire and the DSP run together; the memory map; DSP timing.
 4. FLEX (docs/flex-design.md), built on the coupled emulator.
+
+## Later (owner, 2026-11-09)
+- **DPRO-DENS may be cut** if FLEX and mono FASCIA need the room (owner: "if it helps at all, we can
+  cut dpro dens"). First measure what it frees (it shares the Digibank waves and the decimator
+  with DDRW and WAVE); if cut, the BOUNCE way: type kept known, a DENS track in an old project loads
+  silent, a power-on test with DENS in the kit; the other four machines' bit-identity unchanged.
+- **The Monomachine machines' decimator and bit reduction** (owner: "i dont think its working
+  properly but not sure how to test that"). What is proven today: the DSP's output equals Elektron's
+  own Monomachine code for the reference cases (BR1/BR2 at 0..127 on DDRW, the decimator inside every
+  machine's render). What is not: that the knobs reach the DSP on the unit, and that the reference
+  cases cover what is heard. To do:
+  - A knob-to-sound check through the ColdFire: turn BR1/BR2 (and every machine's controls) on the
+    panel, follow the frame word to the DSP, and require the rendered output to change as the
+    reference says it should (end to end, on the coupled emulator).
+  - Reference renders at extreme settings (BR 127, high notes where the decimator's aliasing shows),
+    compared with Elektron's code, and listened to beside the owner's Monomachine if he has one.
+  - Measured: BR's effect on the real Monomachine's output is about -60 dB up to 48, -31 dB at 96,
+    -13 dB at 127 (GOLDENS-MNM): subtle by design below about 100.
