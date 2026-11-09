@@ -531,6 +531,27 @@ def main() -> int:
         put32(lay["rec_overlay"], 0)
         put32(lay["smp_overlay_dirty"], 1)
         type_put(T, BOUNCE)
+    # ---- v0.46 (depaffect: BOUNCE's BUF read 0%..100%): the header's text for BUF (record 244) on a
+    # BOUNCE track is the buffer, 1..8, over its whole range; on any other machine 244 keeps stock's
+    if "smp_formats" in lay:
+        REC244 = 0x401F7F94 + 60 * 244
+        stock_f = machine.long(REC244 + 0x34)
+        lo = struct.unpack(">i", machine.read(REC244 + 8, 4))[0] >> 8
+        call(lay["smp_formats"], 13)                         # SMP_BOUNCE_KIND (type 17 - 4)
+        f_b = machine.long(REC244 + 0x34)
+        texts = []
+        for k in range(8):
+            machine.write(SENTINEL + 0x100, bytes(16))
+            call(f_b, (lo + k) << 8, SENTINEL + 0x100)
+            texts.append(machine.read(SENTINEL + 0x100, 8).split(b"\0")[0].decode("latin-1"))
+        check("v0.46: BUF's value on a BOUNCE track reads 1..8 (not 0%..100%)",
+              f_b != stock_f and texts == [str(k) for k in range(1, 9)], f"{texts}")
+        call(lay["smp_formats"], 4)                          # ONESHOT's kind (SMP_KIND0): a sample machine without BUF
+        f_o = machine.long(REC244 + 0x34)
+        call(lay["smp_formats"], 0)                          # a stock machine
+        f_s = machine.long(REC244 + 0x34)
+        check("v0.46: record 244's text is stock's on every other machine", f_o == stock_f and f_s == stock_f,
+              f"oneshot {f_o:#x}, stock {f_s:#x}, want {stock_f:#x}")
     ok = all(c["ok"] for c in report["checks"].values())
     report["ok"] = ok
     if a.json:

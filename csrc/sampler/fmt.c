@@ -352,12 +352,18 @@ static void f_slen(int v, char *buf)            /* GRID's LEN: how many slices, 
     put_num(buf, (coarse(v, SMP_SLEN_ID) >> 1) + 1);
 }
 
+static void f_buf(int v, char *buf)             /* v0.46 BOUNCE's BUF: 1..8 (depaffect: it read 0%..100%) */
+{
+    int b = coarse(v, SMP_BUF_ID);
+    put_num(buf, (b < 0 ? 0 : b > 7 ? 7 : b) + 1);
+}
+
 /* the records whose text is ours on a sample machine's track; 239, SLCE's and LEN's
  * records only on GRID's (ONESHOT's STRT, LOOP and CFAD are the same records) */
 static const u16 fmt_ids[] = {SMP_PLAY_REC, SMP_MODE_REC, SMP_BARS_REC, SMP_SEG_REC, SMP_GRID_REC,
-                              SMP_SAMP_REC, SMP_SLICE_ID, SMP_SLEN_ID};
+                              SMP_SAMP_REC, SMP_SLICE_ID, SMP_SLEN_ID, SMP_BUF_ID};
 static void (*const fmt_fns[])(int, char *) = {f_play, f_mode, f_bars, f_seg, f_grid, f_samp,
-                                               f_slce, f_slen};   /* (v0.22: the recorder's are a screen's now) */
+                                               f_slce, f_slen, f_buf};   /* (v0.22: the recorder's are a screen's now) */
 #define NFMT (int)(sizeof fmt_ids / sizeof fmt_ids[0])
 static void *stock_fmt[NFMT] __attribute__((section(".data")));
 static int fmt_saved __attribute__((section(".data"))) = 0;
@@ -378,7 +384,8 @@ void smp_formats(int kind)
         int slices = fmt_ids[k] == SMP_SLICE_ID || fmt_ids[k] == SMP_SLEN_ID;  /* GRID's, SLICE's */
         if (smp && (!grid_only || kind == SMP_GRID_KIND)
             && (!slices || kind == SMP_GRID_KIND || kind == SMP_SLICE_KIND)
-            && (fmt_ids[k] != SMP_MODE_REC || kind == SMP_WERP_KIND))
+            && (fmt_ids[k] != SMP_MODE_REC || kind == SMP_WERP_KIND)
+            && (fmt_ids[k] != SMP_BUF_ID || kind == SMP_BOUNCE_KIND))     /* v0.46: 244 is stock's elsewhere */
             f = (void *)fmt_fns[k];
         RECORD_FMT(fmt_ids[k]) = f;
     }
