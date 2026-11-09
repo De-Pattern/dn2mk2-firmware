@@ -1251,6 +1251,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         facts["every write in the library's region or the pool's directory"] = all(
             s >= 0x700000 or STORE_SECTOR <= s < STORE_SECTOR + 1 + 64 or s in disk_before and disk_before[s] == disk[s]
             for s in disk)
+        out["diag_writes_outside"] = sorted(hex(s) for s in disk if not (
+            s >= 0x700000 or STORE_SECTOR <= s < STORE_SECTOR + 1 + 64 or s in disk_before and disk_before[s] == disk[s]))[:40]
         final = dict(disk)
         bad = []
         for i, st_ in enumerate(snaps):
@@ -1302,6 +1304,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         st_b, _ = sx(18, struct.pack("<IBBI", 100, 1, 0, 0x3F800000) + b"HOST")
         run_until(lambda: libid(slot2) != 0, 4000)
         k2 = next((r[0] for r in lib_rows() if r not in rows1), -1)
+        out["diag_send"] = {"st_b": st_b, "k2": k2, "libid2": libid(slot2), "rs_last": long("smp_rs_last"),
+                            "rs_done": long("smp_rs_done"), "e2": list(e2), "rows_new": [r for r in lib_rows() if r not in rows1]}
         facts["a send's BEGIN while a recording goes in: refused; the recording's copy whole"] = (
             st_b != 0 and k2 >= 0 and on_disk(struct.unpack_from("<I", lib_entry(k2))[0], len(want2)) == want2)
         uc.hook_del(hs)
