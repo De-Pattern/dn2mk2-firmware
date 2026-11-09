@@ -449,7 +449,7 @@ def main() -> int:
             check("v0.45: the panel up, [TRIG 3]'s LED red (mode 2, palette 17), the other trig LEDs unlit "
                   "(stock's note trigs not shown through)",
                   L("bn_led_claims") > claims0 and led3[2] == (2, 17)
-                  and all(m_ == 1 for i, (m_, _v) in enumerate(led3) if i != 2), f"{led3[:4]} claims {L('bn_led_claims')}")
+                  and all(m_ == 1 for i, (m_, _v) in enumerate(led3) if i != 2), f"{led3} claims {L('bn_led_claims')}")
         panel.tap(key(25 + 2))
         panel.settle(10_000_000)
         v3b = machine.word(table + REC * [i for i in range(RECS) if machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T])][0] + 2 + 2 * 2) \
