@@ -103,7 +103,7 @@ BODY.n += NMAX * MW
 TZR = ("mph", "cph", "ei", "eo", "ci", "fm", "d6", "ki", "ko")
 GEN = St().w("kind", "s", "k", "pn", "pinv", "en", "ph", "pe", "ep", "burst", *TZR, "ca", "sm0", "sm1",
              "sm2", "sm3", "kn", "cn", "pd", "kd", "ga", "inc0", "dinc", "kep", "vel",
-             "c_dec", "c_side", "c_utz", "c_udust", "c_DUST", "c_ubend", "f0")
+             "c_dec", "c_side", "c_utz", "c_udust", "c_DUST", "c_ubend", "f0", "tg")
 EXC = St().w("kind", "driven", "done", "t", "n_end", "atk", "lag", "latok",
              "l_dec", "l_side", "l_utz", "l_udust", "l_DUST", "l_ubend", "l_f0",
              "am", "cS", "fm", "fm2", "a0", "b00", "b01", "b02", "a1", "b10", "b11", "b12",
@@ -2233,15 +2233,7 @@ class FP(Gen):
             p.st(C["w0"], 0)
         self.icmp(kind, "EQ", 0, strike, lambda: self.icmp(kind, "EQ", 3, dust, lambda: self.icmp(
             kind, "EQ", 4, pulse, lambda: self.icmp(kind, "EQ", 5, tzfm))))
-        # TYPE_GAIN
-        self.ld(0, kind)
-        p.iconst(1, 0)
-        p.iop(0, 0, "MAX", 1)
-        p.iconst(1, len(TYPES) - 1)
-        p.iop(0, 0, "MIN", 1)
-        self.tabv(0, "TG", 0)
-        p.st(C["tmp5"], 0)
-        self.set(c("g"), (c("ws") + c("w0")) * c("tmp5"))
+        self.set(c("g"), (c("ws") + c("w0")) * gn("tg"))
 
         def burst():
             self.tz_tick()
@@ -2288,6 +2280,14 @@ class FP(Gen):
         dec = gn("c_dec")
         self.iflag(gn("burst"), lambda: self.tz_setup(gn("c_utz"), mn(dec, 0.03)))
         kind = gn("kind")
+        # TYPE_GAIN, here once (v0.45: was every sample)
+        self.ld(0, kind)
+        p.iconst(1, 0)
+        p.iop(0, 0, "MAX", 1)
+        p.iconst(1, len(TYPES) - 1)
+        p.iop(0, 0, "MIN", 1)
+        self.tabv(0, "TG", 0)
+        self.st(gn("tg"), 0)
 
         def strike():
             self.set(gn("kn"), onepole(recip(dec * Kc(0.25))))
@@ -2884,21 +2884,20 @@ class FP(Gen):
         self.iflag(bd("ogok"), ogw)
 
         def mode():
-            for f, r in (("y", 0), ("d", 1)):
-                self.ld(r, md(f))
-            for f, r in (("m", 2), ("k", 3), ("b", 4)):
-                self.ld(r, tm(f))
-            self.ld(5, md("og"))
-            self.ld(6, tm("ogp"))
-            p.fop(6, 5, "-", 6)                 # og - og_prev
-            self.ld(7, tm("ogp"))
-            # (post-modified: I4 the input, I1 the output, I2 the ramp; I2 is put back after)
-            p.ld(12, C["sel"])
-            p.seti(4, 12)
-            p.ld(12, C["best"])
-            p.seti(1, 12)
-
             def variant(inp: bool, og: int):
+                for f, r in (("y", 0), ("d", 1)):
+                    self.ld(r, md(f))
+                for f, r in (("m", 2), ("k", 3), ("b", 4)):
+                    self.ld(r, tm(f))
+                self.ld(5, md("og"))
+                self.ld(6, tm("ogp"))
+                p.fop(6, 5, "-", 6)                 # og - og_prev
+                self.ld(7, tm("ogp"))
+                # (post-modified: I4 the input, I1 the output, I2 the ramp; I2 is put back after)
+                p.ld(12, C["sel"])
+                p.seti(4, 12)
+                p.ld(12, C["best"])
+                p.seti(1, 12)
                 if og == 2:
                     p.fpass(5, 7)               # F5 = og_prev, F6 = og - og_prev
                     p.iconst(12, L.A["RJ"])
@@ -2932,15 +2931,62 @@ class FP(Gen):
             def by_og(inp):
                 p.ld(12, C["ramp"])
                 p.iconst(13, 1)
-                p.if_(12, "EQ", 13, lambda: variant(inp, 1),
-                      lambda: (p.iconst(13, 2), p.if_(12, "EQ", 13, lambda: variant(inp, 2),
-                                                       lambda: variant(inp, 0), kind="i")), kind="i")
+                p.if_(12, "EQ", 13, lambda: fast(inp, 1),
+                      lambda: (p.iconst(13, 2), p.if_(12, "EQ", 13, lambda: slow(inp),
+                                                       lambda: fast(inp, 0), kind="i")), kind="i")
+
+            def slow(inp):
+                variant(inp, 2)
+                self.ptr(2, "vbase")
+                self.ptr(3, "u0")
+                self.st(md("y"), 0)
+                self.st(md("d"), 1)
+
+            def fast(inp: bool, og: int):
+                """v0.45: the same sums, five to seven instructions a sample: the multiplies
+                beside the adds (mfop), the loads and stores beside the computes (fopm).
+                k F0, b F1, m F2, og F3, y F4, x F5, the sum F6, og y F7, d F8, out F9,
+                m d F12, k y F13, b x F14; I1 reads the output, I4 writes it a sample
+                behind (primed with its word before: rewritten as it was), I2 the input"""
+                for r_, f in ((0, "k"), (1, "b"), (2, "m")):
+                    self.ld(r_, tm(f))
+                self.ld(4, md("y"))
+                self.ld(8, md("d"))
+                if og:
+                    self.ld(3, md("og"))
+                p.ld(12, C["best"])
+                p.seti(1, 12)
+                p.iconst(13, -4)
+                p.iop(12, 12, "+", 13)
+                p.seti(4, 12)
+                p.ldi(6, -1, 1)                     # the word before: stored back unchanged
+                if inp:
+                    p.ld(12, C["sel"])
+                    p.seti(2, 12)
+                    p.ldpost(5, 2)                  # x[0]
+
+                def s():
+                    p.fopm(12, 2, "*", 8, ("st", 4, 6))          # m d; the last sum out
+                    p.mfop(13, 0, 4, 8, 8, "-", 12)              # k y; d -= m d
+                    if inp:
+                        p.mfop(14, 1, 5, 8, 8, "-", 13)          # b x; d -= k y
+                        p.fopm(8, 8, "+", 14, ("ld", 5, 2))      # d += b x; the next x
+                    else:
+                        p.fop(8, 8, "-", 13)                     # d -= k y
+                    p.fopm(4, 4, "+", 8, ("ld", 9, 1))           # y += d; out[j]
+                    if og:
+                        p.fop(7, 3, "*", 4)                      # og y
+                        p.fop(6, 9, "+", 7)
+                    else:
+                        p.fop(6, 9, "+", 4)
+                p.loop_r(10, BLOCK // 4, lambda: (s(), s(), s(), s()), one=11)
+                p.stpost(4, 6)
+                self.ptr(2, "vbase")
+                self.ptr(3, "u0")
+                self.st(md("y"), 4)
+                self.st(md("d"), 8)
             p.ld(12, C["hasxb"])
             p.ifz(12, "NE", lambda: by_og(True), lambda: by_og(False))
-            self.ptr(2, "vbase")
-            self.ptr(3, "u0")
-            self.st(md("y"), 0)
-            self.st(md("d"), 1)
         self.mloop("cnt0", mode)
         self.done_body()
 

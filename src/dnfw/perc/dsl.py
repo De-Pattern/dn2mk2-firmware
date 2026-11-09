@@ -200,6 +200,56 @@ class Prog:
                  "MIN": lambda: min(x, y), "MAX": lambda: max(x, y)}[op]()
             self.setF(d, f32(v))
 
+    def _fval(self, x: float, y: float, op: str) -> int:
+        """fop's result bits for Fx OP Fy (a NaN input: all ones)"""
+        if math.isnan(x) or math.isnan(y):
+            return 0xFFFFFFFF
+        v = {"+": lambda: x + y, "-": lambda: x - y, "*": lambda: x * y}[op]()
+        return bits(f32(v))
+
+    def mfop(self, md: int, ma: int, mb: int, ad: int, aa: int, aop: str, ab: int, note: str = "") -> None:
+        """v0.45, multifunction: Fmd = Fma * Fmb, Fad = Faa +- Fab in one instruction, both
+        from the registers as they were (the core reads every operand, then writes). The
+        operands' classes are the encoding's: Fma F0-F3, Fmb F4-F7, Faa F8-F11, Fab F12-F15."""
+        assert 0 <= ma <= 3 and 4 <= mb <= 7 and 8 <= aa <= 11 and 12 <= ab <= 15 and aop in "+-"
+        assert md != ad
+        self.e(f"F{md} = F{ma} * F{mb}, F{ad} = F{aa} {aop} F{ab};", note)
+        if not self.run:
+            for r in (md, ad):
+                self.known.pop(r, None)
+            return
+        m = self._fval(self.F(ma), self.F(mb), "*")
+        a = self._fval(self.F(aa), self.F(ab), aop)
+        self.r[md], self.r[ad] = m, a
+
+    def fopm(self, d: int, a: int, op: str, b: int, mem: tuple, note: str = "") -> None:
+        """v0.45: a compute and a post-modified access in one instruction: Fd = Fa OP Fb (+, -,
+        *) with MEM ('ld', r, i): Fr = DM(Ii, M6), or ('st', i, r): DM(Ii, M6) = Fr. The store
+        takes Fr as it was; the load lands after the compute has read its operands."""
+        kind = mem[0]
+        assert op in "+-*" and kind in ("ld", "st")
+        if kind == "ld":
+            _k, r, i = mem
+            assert r != d
+            text = f"F{d} = F{a} {op} F{b}, F{r} = DM(I{i}, M6);"
+        else:
+            _k, i, r = mem
+            text = f"F{d} = F{a} {op} F{b}, DM(I{i}, M6) = F{r};"
+        assert i in (1, 2, 4), "post-modified: I1, I2, I4 only"
+        self.e(text, note)
+        if not self.run:
+            for x in ((d, r) if kind == "ld" else (d,)):
+                self.known.pop(x, None)
+            return
+        v = self._fval(self.F(a), self.F(b), op)
+        if kind == "ld":
+            self.r[d] = v
+            self.r[r] = self.mem.get(self.i[i])
+        else:
+            self.mem.put(self.i[i], self.r[r])
+            self.r[d] = v
+        self.i[i] += 4
+
     def fpass(self, d: int, a: int, note: str = "") -> None:
         self.e(f"F{d} = PASS F{a};", note)
         if self.run:
