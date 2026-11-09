@@ -91,7 +91,9 @@ static int wr_active(void)
 #define STOCK_MASK ((u32 (*)(u32))0x400DC30Eu)
 u32 wr_lfo_mask(u32 rec)
 {
-    if (rec >= 238u && rec <= 262u && wr_active()) {
+    /* v0.45: from WR_NAMED_LO: FASCIA's sound also has FM Tone's records on slots 50..64,
+     * named "-" where it leaves them unused (dnfw.waverider.pages fsc_named) */
+    if (rec >= WR_NAMED_LO && rec <= WR_NAMED_HI && wr_active()) {
         const char *sh = NAME_SHORT(rec);
         if (sh && sh[0] == '-' && sh[1] == 0)
             return 0;
@@ -491,7 +493,7 @@ void wr_page_draw(void *view, void *canvas)
     int mi = mnm_index(kind);                   /* v0.26: a Monomachine machine's: one page */
     int mnm = mi >= 0;
     int smp = SMP_IDX(kind) >= 0;   /* a sample machine's (v0.44: BOUNCE's kind 13 too) */
-    if (page < 0 || page >= (smp ? 2 : mnm ? 1 : WR_PAGES))
+    if (page < 0 || page >= (smp ? 2 : mnm ? 1 : kind == FSC_KIND ? FSC_PAGES : WR_PAGES))
         page = 0;
     if (kind == 1) {                            /* PERC: the names TYPE has now */
         u8 flag;
@@ -507,6 +509,17 @@ void wr_page_draw(void *view, void *canvas)
     if (smp) {                                  /* the DT2's SRC pages 1 and 2 (v0.22: the recorder is FUNC + VOICE) */
         extern void smp_page_draw(void *view, void *canvas, int kind, int wave);
         smp_page_draw(view, canvas, kind, page == 1);
+        ((void (*)(void *, void *, int))method(view, 184))(view, canvas, 0);
+        int n = PAGE_COUNT(view);
+        if (n > 1)
+            PAGE_DOTS(view, canvas, n, page, 7);
+        return;
+    }
+    if (kind == FSC_KIND) {                     /* v0.45: FASCIA, the DT2/Elektron grid (smp_page.c) */
+        extern void fsc_page_draw(void *view, void *canvas, int page);
+        if (page >= FSC_PAGES)
+            page = 0;
+        fsc_page_draw(view, canvas, page);
         ((void (*)(void *, void *, int))method(view, 184))(view, canvas, 0);
         int n = PAGE_COUNT(view);
         if (n > 1)

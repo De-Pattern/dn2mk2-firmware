@@ -84,6 +84,7 @@ def main(argv=None) -> int:
             emark = assemble("entry_mark", dsp.EMARK_SW, work)
             ping = assemble("ping", dsp.PING_SW, work)
             pvmix = assemble("pvmix", dsp.PVMIX_SW, work)
+            fascia = assemble("fascia", dsp.FSC_SW, work)
             pjump = one_jump(PVMIX_LINE, dsp.PVMIX_SITE_SW, work)
             ejump = one_jump(EMARK_LINE, dsp.CALL_SITE_SW, work)
             lptr = one_jump(LOOKUP_LINE, dsp.LOOKUP_SITE_SW, work)
@@ -97,6 +98,7 @@ def main(argv=None) -> int:
             emark = committed("entry_mark")
             ping = committed("ping")
             pvmix = committed("pvmix")
+            fascia = committed("fascia")
             pjump = old["pvmix_jump"]
             ejump = old["emark_jump"]
             lptr = old["lookup_ptr"]
@@ -115,7 +117,8 @@ def main(argv=None) -> int:
             "lookup_ptr": lptr,
             "ping": {k: v for k, v in ping.items() if k != "instruction_offsets"},
             "pvmix": {k: v for k, v in pvmix.items() if k != "instruction_offsets"},
-            "pvmix_jump": pjump}
+            "pvmix_jump": pjump,
+            "fascia": {k: v for k, v in fascia.items() if k != "instruction_offsets"}}
     dsp.CODE.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {dsp.CODE.relative_to(ROOT)}: perc {len(perc['object_parcels_be']) // 2} B, ping {len(ping['object_parcels_be']) // 2} B, entry {len(jump['object_parcels_be']) // 2} B")
     return 0

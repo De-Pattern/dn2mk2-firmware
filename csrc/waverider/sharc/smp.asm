@@ -4703,7 +4703,7 @@ wr_sm_next_119.:
       IF LT JUMP 0xbf26e6;                   // -> wr_sm_slot_118.
       R8 = EMUCLK;                      // v0.32: our voices are done
       DM(0x2de028) = R8;
-      JUMP 0x170280;                    // ping.asm's wr_ping (which restores; v0.26: RESONATOR and CZ gone)
+      JUMP 0xbd8800;                    // fascia.asm's wr_fsc (v0.45), then ping.asm's tail (which restores)
 .GLOBAL wr_sm_sub_exp2.;
 wr_sm_sub_exp2.:
       R12 = 0x41800000;                 // 16.0
