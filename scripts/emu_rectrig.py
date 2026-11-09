@@ -428,7 +428,19 @@ def main() -> int:
         def leds():
             lm = machine.long(LM_PTR)
             return [(machine.long(lm + 40 + 4 * i), machine.long(lm + 256 + 4 * i)) for i in range(26, 42)] if lm else []
-        led_stock = leds()
+
+        def leds_whole():
+            """the trig LEDs once a refresh has finished (v0.46): the compose clears every LED, then
+            the views set theirs one by one, so a read inside a refresh sees the last ones (0, 0); the
+            unit shows them only after it. Up to 20 short settles until none is still cleared"""
+            got = leds()
+            for _ in range(20):
+                if got and all(v != (0, 0) for v in got):
+                    break
+                panel.settle(1_000_000)
+                got = leds()
+            return got
+        led_stock = leds_whole()
         claims0 = L("bn_led_claims") if "bn_led_claims" in lay else None
         call(lay["rec_combo"])                              # FUNC + VOICE: the RECORDER
         panel.settle(10_000_000)
@@ -445,7 +457,7 @@ def main() -> int:
             if any(machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T]) for i in range(RECS)) else 0xFFFF
         check("[TRIG 3] on the BOUNCE RECORDER places a recorder trig on step 3 (and no note trig)", v3 == 1, f"value {v3}")
         if claims0 is not None:
-            led3 = leds()
+            led3 = leds_whole()
             check("v0.45: the panel up, [TRIG 3]'s LED red (mode 2, palette 17), the other trig LEDs unlit "
                   "(stock's note trigs not shown through)",
                   L("bn_led_claims") > claims0 and led3[2] == (2, 17)
@@ -456,7 +468,7 @@ def main() -> int:
             if any(machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T]) for i in range(RECS)) else 0xFFFF
         check("[TRIG 3] again removes it", v3b == 0xFFFF, f"value {v3b}")
         if claims0 is not None:
-            led3b = leds()
+            led3b = leds_whole()
             check("v0.45: removed, its LED unlit again", led3b[2:3] == [(1, 1)], f"{led3b[:4]}")
         panel.tap(key(10))                                  # YES
         panel.settle(200_000)
@@ -471,7 +483,7 @@ def main() -> int:
         if claims0 is not None:
             c1 = L("bn_led_claims")
             panel.settle(10_000_000)
-            led_after = leds()
+            led_after = leds_whole()
             check("v0.45: closed, the trig LEDs are stock's again and ours claim nothing",
                   led_after == led_stock and L("bn_led_claims") == c1, f"{led_after[:4]} vs {led_stock[:4]}")
 
