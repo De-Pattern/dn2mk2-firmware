@@ -52,8 +52,11 @@ checks below test it.
   - a BOUNCE track loaded (type 17 in the kit) plays SAMP OFF every frame, the sequencer
     playing over recorder trigs on its steps: no command to the DSP, nothing allocated;
   - FUNC + VOICE on it opens the ordinary RECORDER (YES records into the pool as on any track);
-  - a pattern with recorder trigs (id 202) through SAVE/LOAD, copy/paste and undo keeps them
-    byte for byte, and the slides on the same steps;
+  - a pattern with recorder trigs (id 202) and a slide on the same step through SAVE and LOAD,
+    and saved again, byte for byte (copy/paste and undo of the store's records are the `slides`
+    step's, unchanged: the store's code is untouched);
+  - two passes of the pattern over the recorder trigs: nothing sent to the DSP;
+  - a recording's place and room the same with a BOUNCE track as with an ONESHOT one;
   - the LED compose's site holds stock's bytes;
   - record 244's text is stock's on every machine.
 - Everything else as always; the full gate.
@@ -62,3 +65,17 @@ checks below test it.
 
 BOUNCE removed (to be redesigned). A project with a BOUNCE track still loads; that track is
 silent (pick another machine for it). Recorder trigs saved in patterns are kept, unused.
+
+## Done (v0.48, branch v048)
+
+- Step 1 (5d1be6b): `rt_is_bounce()` 0.
+- Step 2: `rectrig.c` deleted; `rec.c` (the panel, its keys and knobs, FUNC + YES, YES YES, the LED
+  takeover, Q.REC, the buffer-take echo; H on the RECORDER is always ARM: v0.41's held-step REC
+  lock edit is gone with it), `smp_page.c` (the panel's draw, Q.REC's WAITING, the TRIG take;
+  `slot_name` reads `smp_dir_ok`, which `rt_on` copied, so SAMP 124..127 are named as before),
+  `link.c` (the allocator's buffer candidates and `rt_regions`, the TDM's REC trig packets, the
+  span drop on a buffer take, `rt_frame`; a type-17 voice's SAMP written OFF), `fmt.c` (BUF's
+  text), the build's export lists, the LED site not patched (stock's bytes). `slide.c`, the DSP
+  and every table's type 17 untouched.
+- The gate: `rectrig` replaced by `bouncegone` (`scripts/emu_bouncegone.py`), unconditional.
+- Room: USB upgrade 2,091,003 of 2,097,152 (6,149 free; v0.47 1,200).

@@ -213,7 +213,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("drivenav", "+DRIVE keys and long names (ColdFire)"),
        ("jump", "DIRECT JUMP (ColdFire)"),
        ("slides", "parameter slides (ColdFire)"),
-       ("rectrig", "BOUNCE REC trigs, buffers, QREC, QPLAY (ColdFire)"),
+       ("bouncegone", "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
@@ -2285,31 +2285,27 @@ def main() -> int:
             later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
                   [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
 
-        # v0.44 (docs/rectrig.md): BOUNCE tracks' REC trigs into their track's buffer halves
-        # (one buffer per BOUNCE track, eight), one-shot trigs armed by YES YES and spent only
-        # when a take starts, the recorder's refusals (a manual take's turn, NO ROOM), QREC's
-        # held start, QPLAY's switch on its boundary, the REC lock (id 202) through SAVE/LOAD
-        # and the step clear, and the BOUNCE REC panel ([TRIG] toggles, YES YES, NO)
-        if "rt_trig" in lay:
-            rt_js = work / "rectrig.json"
-            rt_cmd = [a.venv, "-u", "scripts/emu_rectrig.py", "--build", bdir, "--snapshot", snap,
-                      "--json", rt_js, "--png-dir", work / "rectrig"]
+        # v0.48 (docs/bounce-removal-plan.md): BOUNCE is out; it replaces v0.44..v0.47's rectrig
+        # step and keeps that step's other checks (SAMP never glides, the RECORDER's CHAN knob and
+        # FILE NAME keys, the Monomachine's TUNE). Always run: not keyed to a symbol, so it can
+        # never drop out unseen
+        bg_js = work / "bouncegone.json"
+        bg_cmd = [a.venv, "-u", "scripts/emu_bouncegone.py", "--build", bdir, "--snapshot", snap,
+                  "--json", bg_js, "--png-dir", work / "bouncegone"]
 
-            def rt_body(tdir):
-                rc, out = run("rec trigs", rt_cmd, logs, env=EMU_ENV, trace=tdir)
-                last = out.strip().splitlines()[-1] if out.strip() else ""
-                if rc != 0 or not last.startswith("PASS"):
-                    return False, out[-900:]
-                r = json.loads(rt_js.read_text())
-                return True, (f"{last[6:]}: a BOUNCE track's REC trig takes its step into the track's "
-                              f"buffer's idle half (the command ahead of the queue, never mid-repeat) and the "
-                              f"track plays it from the buffer directory, a one-shot (YES YES) fires once and "
-                              f"is spent only when its take started, a manual take's turn and NO ROOM refuse "
-                              f"it, QREC 8 holds a manual NOW to step 8, QPLAY PLEN switches on the pattern's "
-                              f"first step, the REC lock through SAVE/LOAD (id 202) and the clear, and the "
-                              f"BOUNCE REC panel's [TRIG] toggle, YES YES and NO")
-            later("rectrig", "BOUNCE REC trigs, buffers, QREC, QPLAY (ColdFire)", "BOUNCE REC trigs, buffers, QREC, QPLAY (ColdFire)",
-                  [rt_cmd, sorted(EMU_ENV.items())], rt_body)
+        def bg_body(tdir):
+            rc, out = run("bounce gone", bg_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0 or not last.startswith("PASS"):
+                return False, out[-900:]
+            return True, (f"{last[6:]}: a BOUNCE track from an older project plays SAMP OFF with the "
+                          f"sequencer over its recorder trigs, nothing sent to the DSP, nothing kept clear "
+                          f"in the recordings' area; recorder trigs and a slide through SAVE/LOAD byte for "
+                          f"byte; the LED site stock's; record 244's text stock's; FUNC + VOICE the plain "
+                          f"RECORDER; SAMP never glides; CHAN, FILE NAME; the Monomachine's TUNE")
+        later("bouncegone", "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)",
+              "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)",
+              [bg_cmd, sorted(EMU_ENV.items())], bg_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()

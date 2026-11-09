@@ -233,20 +233,9 @@ static void send(int cmd)
         if (len > rec_room / 2u)
             len = (rec_room / 2u) & ~31u;
     }
-    extern int rt_quantised(void);
-    extern void rt_cut(void);
-    if ((cmd == CMD_NOW && !rt_quantised()) || cmd == CMD_ARM || cmd == CMD_ARM_PLAY)
-        rt_cut();                               /* v0.41: a manual take's turn: a buffer take ends here */
-    if (cmd == CMD_NOW && rt_quantised()) {     /* v0.41 QREC: at the next boundary (rectrig.c) */
-        extern u32 smp_command_words(u32 *w, u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames);
-        extern void rt_q_set(const u32 *w);
-        u32 w[6];
-        sent_seq = smp_command_words(w, (u32)cmd, src, chan | (place / 512u) << 8, thr,
-                                     (u32)rec_dest << 24 | len);
-        rt_q_set(w);
-    } else
-        sent_seq = smp_command((u32)cmd, src, chan | (place / 512u) << 8, thr,
-                               (u32)rec_dest << 24 | len);
+    /* (v0.48: no buffer takes, no Q.REC: BOUNCE is out, docs/bounce-removal-plan.md) */
+    sent_seq = smp_command((u32)cmd, src, chan | (place / 512u) << 8, thr,
+                           (u32)rec_dest << 24 | len);
     sent_at = FRAMES;
     if (rec_link < 0)
         rec_link = 0;
@@ -267,147 +256,11 @@ void rec_halt(void)
         send(CMD_STOP);
 }
 
-int rec_rt_take __attribute__((section(".data"))) = 0;   /* v0.41: the DSP's take is a buffer's */
 int rec_view __attribute__((section(".data"))) = 0;      /* v0.41's REC TRIGS view; v0.44: always 0 (the
                                                          * RECORDER has one page; BOUNCE tracks their panel) */
-/* v0.44 BOUNCE (rectrig.c): on a BOUNCE track's RECORDER the sixteen [TRIG] keys are the
- * track's recorder trigs on the page shown (bn_page: PAGE steps it, the playing page when
- * the screen opens while the sequencer plays), FUNC + [TRIG] one-shots; YES YES (two within
- * 0.4 s) arms the spent one-shots again; a single YES is RECORD NOW, taken once the 0.4 s
- * have passed with no second YES */
-int bn_page __attribute__((section(".data"))) = 0;
-u32 bn_yes_at __attribute__((section(".data"))) = 0;    /* a YES waiting for a second (0: none) */
-u32 bn_said_at __attribute__((section(".data"))) = 0;   /* the line's last word, when (ARMED n) */
-int bn_said_n __attribute__((section(".data"))) = 0;
-extern int rt_is_bounce(u32 t);
-extern unsigned char *sl_ui_table_now(void);
-extern u32 rt_trig_toggle(unsigned char *table, u32 t, u32 step, int oneshot);
-extern u32 rt_rearm(unsigned char *table, u32 t);
-#define UI_TRACK_B (*(volatile unsigned char *)0x42431A6Cu)
-#define TRACK_CUR_B ((volatile unsigned char *)0x42C5A984u)
-#define SEQ_PLAYING_B (*(volatile u32 *)0x42C5A918u)
-#define SEQ_PATTERN_B (*(volatile u32 *)0x42C5A9A0u)
-
-void bn_save(void);                             /* FUNC + YES: the take into a pool slot (below) */
-
-int bn_active(void)                             /* the RECORDER of a BOUNCE track is up */
-{
-    return rec_overlay && rec_phase == 0 && rt_is_bounce(UI_TRACK_B);
-}
-
-static u32 bn_len(void)                         /* the pattern's length for the track, 1..128 */
-{
-    const unsigned char *p = (const unsigned char *)SEQ_PATTERN_B;
-    if (!p)
-        return 16;
-    int n = p[122201] == 0 ? *(const short *)(p + 122196) : *(const short *)(p + 1701u * UI_TRACK_B + 1164u);
-    return n >= 1 && n <= 128 ? (u32)n : 16u;
-}
-
-u32 bn_pages(void)
-{
-    return (bn_len() + 15u) / 16u;
-}
-
-/* v0.45 (owner: "Can't we just do a different color for rec trigs ... only visible when rec
- * window is open?"): while the BOUNCE REC panel is up, the 16 [TRIG] LEDs show the page's
- * recorder trigs (stock's LED path, docs/leds.md): the per-refresh compose (0x4002c854)
- * clears the LedManager's arrays, then walks the views (jsr 0x4011d3b2, LED_SITE), each
- * view claiming the LEDs it sets, the first write winning (0x4002c318 returns at once for an
- * LED already set this refresh). bn_led_walk is that jsr: it claims the 16 trig LEDs (logical
- * ids 26..41) first, then the walk runs as stock's, so no stock view can light them while
- * the panel is up. Closed, it does nothing and stock's LEDs are exactly stock's. Colours are
- * palette indices (2..17 red, 50..65 yellow, 98..113 white, 16 levels each, brightest last):
- * a recorder trig red, a one-shot armed yellow, spent dim yellow, the playing step white,
- * an empty step or one past the pattern unlit (stock's mode 1). */
-#define LED_WALK ((void (*)(void *))0x4011D3B2u)
-#define LED_MGR ((u32 (*)(void))0x4018AABCu)
-#define LED_SET ((void (*)(u32, u32, u32, u32))0x4002C318u)
-#define LED_DIRTY ((void (*)(void *))0x4011D314u)
-#define LED_TRIG0 26u
-#define LED_REC 17u
-#define LED_ONE 65u
-#define LED_SPENT 54u
-#define LED_HEAD 113u
-u32 bn_led_claims __attribute__((section(".data"))) = 0;      /* refreshes claimed (for the gate) */
-static u32 bn_led_sig __attribute__((section(".data"))) = 0xFFFFFFFFu;
-
-static u32 bn_led_val(u32 k, u32 *mode)         /* step k of the page shown -> palette index */
-{
-    u32 t = UI_TRACK_B, step = (u32)bn_page * 16u + k;
-    unsigned char *table = sl_ui_table_now();
-    extern u32 rt_trig_get(const unsigned char *table, u32 t, u32 step);
-    u32 v = table && step < bn_len() ? rt_trig_get(table, t, step) : 0xFFFFu;
-    int head = SEQ_PLAYING_B && t < 16 && TRACK_CUR_B[t] % bn_len() == step;
-    *mode = 2u;
-    if (v == 1)
-        return LED_REC;
-    if (v == 2)
-        return LED_ONE;
-    if (v == 3)
-        return LED_SPENT;
-    if (head)
-        return LED_HEAD;
-    *mode = 1u;
-    return 1u;
-}
-
-void bn_led_walk(void *screen)
-{
-    if (bn_active()) {
-        u32 lm = LED_MGR();
-        if (lm) {
-            for (u32 k = 0; k < 16; k++) {
-                u32 mode, val = bn_led_val(k, &mode);
-                LED_SET(lm, LED_TRIG0 + k, mode, val);
-            }
-            bn_led_claims++;
-        }
-    }
-    LED_WALK(screen);
-}
-
-/* the UI loop (rt_poll): when what the LEDs should show changes -- the panel opened or
- * closed, a trig placed, the page turned, the playing step moved -- the screen's LEDs are
- * asked for again (stock's View::ledsDirty path), so they follow at once and go back to
- * stock's the moment the panel closes */
-void bn_led_poll(void)
-{
-    extern void *wr_screen_obj;
-    u32 sig = 0x5EEDu;
-    if (bn_active()) {
-        sig = 0x1000000u | (u32)bn_page << 16;
-        for (u32 k = 0; k < 16; k++) {
-            u32 mode, val = bn_led_val(k, &mode);
-            sig = sig * 31u + val * 4u + mode;
-        }
-    }
-    if (sig != bn_led_sig && wr_screen_obj) {
-        bn_led_sig = sig;
-        LED_DIRTY(wr_screen_obj);
-    }
-}
-
-void bn_open(void)                              /* the screen opened: the page shown */
-{
-    u32 t = UI_TRACK_B;
-    bn_page = SEQ_PLAYING_B && t < 16 ? (TRACK_CUR_B[t] % bn_len()) / 16u : 0;
-    if ((u32)bn_page >= bn_pages())
-        bn_page = 0;
-    bn_yes_at = 0;
-}
-
 void rec_yes(void)
 {
-    extern int rt_q_waiting(void);
-    extern void rt_q_cancel(void);
-    if (rt_q_waiting()) {                       /* v0.41: a QREC take waiting: YES again cancels it */
-        rt_q_cancel();
-        sent_seq = 0;
-        return;
-    }
-    /* v0.41: a buffer's take is not this screen's to stop: YES records over it */
-    send(rec_state == 2 && !rec_rt_take ? CMD_STOP : CMD_NOW);
+    send(rec_state == 2 ? CMD_STOP : CMD_NOW);
 }
 
 /* v0.30: H's turn, as one action a turn (a user: "the knob acceleration is wonky on ARM":
@@ -429,41 +282,6 @@ static void rec_arm_turn(int delta)
     arm_at = now ? now : 1u;
 }
 
-/* v0.44 BOUNCE, FUNC + YES on its RECORDER: the buffer's playing take into the next empty
- * pool slot. The slot takes the take's frames where they lie (no copy: the buffer goes on
- * playing them, its next take goes elsewhere), and the take is saved to the +Drive,
- * normalised and named as a manual recording is (SAVING, NORMALIZING, TRIM, FILE NAME,
- * ASSIGN). Nothing to save, or a take still recording or waiting: the line says so */
-u32 bn_nothing_at __attribute__((section(".data"))) = 0;
-void bn_save(void)
-{
-    extern u32 rt_take_handover(u32 t, u32 *bytes, u32 *steps);
-    extern void smp_push_slot(int k);
-    u32 bytes, steps;
-    u32 place = rt_take_handover(UI_TRACK_B, &bytes, &steps);
-    if (!bytes || rec_state == 2 || rec_state == 1) {
-        bn_nothing_at = FRAMES | 1u;
-        return;
-    }
-    int slot = next_empty(0);
-    if (slot < 0 || !smp_slot_empty(slot)) {
-        bn_nothing_at = FRAMES | 1u;
-        return;
-    }
-    u32 frames = bytes / 2u;
-    smp_save_recording(slot, place, frames);
-    smp_push_slot(slot);
-    rec_saved_slot = slot;
-    rec_phase = PH_WORK;
-    work_at = FRAMES | 1u;
-    trim_slot = slot;
-    trim_n = frames;
-    trim_s = 0;
-    trim_e = frames;
-    rec_dest = next_empty(0);
-    smp_overlay_dirty = 1;
-}
-
 /* FUNC + VOICE (coldfire.py's REC_COMBO_SITE, in the main key handler's VOICE case) */
 static void preview(int on);
 void rec_combo(void)
@@ -472,8 +290,6 @@ void rec_combo(void)
     rec_overlay = !rec_overlay;
     rec_phase = PH_REC;                         /* a recording mid-TRIM keeps what it is */
     if (rec_overlay) {
-        extern void bn_open(void);
-        bn_open();                              /* v0.44 BOUNCE: the page of steps shown */
         mon_known = 0;
         rec_dest = next_empty(0);               /* v0.33: the first empty slot, shown */
         u32 room;
@@ -522,14 +338,6 @@ void rec_poll(void)
     rpt_poll();
     smp_marquee_poll();                         /* v0.39: the selected long name's marquee */
     fb_pv_poll();
-    extern void rt_poll(void);
-    extern int rt_manual, rt_q_waiting(void);
-    rt_poll();                                  /* v0.41: the REC buffers (rectrig.c) */
-    if (bn_yes_at && FRAMES - bn_yes_at >= 600u) {   /* v0.44: a single YES on a BOUNCE track */
-        bn_yes_at = 0;
-        if (bn_active())
-            rec_yes();
-    }
     if (smp_status(st)) {
         rec_state = st[0] & 3;
         rec_frames = (u32)st[2] << 6;              /* 64 frames a unit (v0.16) */
@@ -537,17 +345,10 @@ void rec_poll(void)
         rec_heard = FRAMES + 1u;
         if (sent_seq && st[1] == (u16)sent_seq)
             rec_link = 1;
-        /* v0.41: the command the DSP last took was a REC trig's (bit 15 of the echo): its take
-         * is a buffer's, not saved nor shown as this screen's (and our last command, sent
-         * before it, was taken: the link is fine) */
-        rec_rt_take = (st[1] & 0x8000u) != 0;
-        if (rec_rt_take && sent_seq && rec_link == 0)
-            rec_link = 1;
-        rt_manual = (!rec_rt_take && (rec_state == 1 || rec_state == 2)) || rt_q_waiting();
         /* a recording has ended: it is kept on the +Drive, as the DT2 keeps its
          * recordings, and is there again after a power cycle; DEST moves on (v0.41: a
          * buffer's take is not one: a manual take before it ended, and is saved) */
-        if (rec_state == 2 && !rec_rt_take) {
+        if (rec_state == 2) {
             if (!was_recording)
                 rec_wave_reset();
             rec_wave_add(rec_frames, rec_peak);
@@ -642,23 +443,7 @@ static int rec_choice_step(int index, int delta)    /* -> the choices to move */
 /* a knob on the recorder's screen: INDEX 1..8 (A..H), DELTA detents */
 static void knob(int index, int delta)
 {
-    /* v0.41 (docs/rectrig.md): a step held, H is its REC trig's lock (slide.c), on either
-     * view; on the REC TRIGS view E and F are QREC and QPLAY (rectrig.c) */
-    extern int sl_rec_knob(int delta);
-    extern void rt_knob(int index, int delta);
-    if (index == 8 && sl_rec_knob(delta))
-        return;
-    if (bn_active()) {                          /* v0.44 BOUNCE: A SRC, B CHAN, E Q.REC, F Q.PLAY, G R.LEN */
-        if (index == 5 || index == 6)
-            rt_knob(index, delta);
-        else if (index == 7)
-            rec_rlen = clamp(rec_rlen + delta, 0, 128);
-        else if (index == 1 || index == 2)
-            goto as_recorder;
-        return;
-    }
-    /* (v0.44: the REC TRIGS view is gone; REC trigs, Q.REC and Q.PLAY are the BOUNCE REC panel's) */
-as_recorder:
+    /* (v0.48: BOUNCE out; H is ARM, a held step's REC trig lock gone with it) */
     switch (index) {
     case 1: rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1); break;
     case 2: rec_chan = clamp(rec_chan + rec_choice_step(2, delta), 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
@@ -1500,48 +1285,12 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         if (it[0] != IT_KEY)
             return (u32)it;
         int press = (flags & F_PRESS) && !(flags & F_RELEASE);
-        if (bn_active() && press && code >= K_TRIG1 && code <= K_TRIG1 + 15) {   /* v0.44: a recorder trig */
-            u32 step = (u32)bn_page * 16u + (u32)(code - K_TRIG1);
-            unsigned char *table = sl_ui_table_now();
-            if (table && step < bn_len())
-                rt_trig_toggle(table, UI_TRACK_B, step, smp_func_held);
-            smp_overlay_dirty = 1;
-            eaten |= 1u << code;
-            it[0] = IT_DROP;
-            return (u32)it;
-        }
-        if (bn_active() && press && code == 22) {         /* PAGE: the next page of steps */
-            bn_page = (bn_page + 1) % (int)bn_pages();
-            smp_overlay_dirty = 1;
-            eaten |= 1u << code;
-            it[0] = IT_DROP;
-            return (u32)it;
-        }
         if (code == K_YES || code == K_NO || (code >= K_UP && code <= K_RIGHT)
             || (code >= K_ENC_A && code <= K_ENC_H)) {
-            extern int rt_q_waiting(void);
-            extern void rt_q_cancel(void);
-            if (press && code == K_YES && bn_active() && smp_func_held) {   /* v0.44: FUNC + YES saves the take */
-                extern void bn_save(void);
-                bn_save();
-            } else if (press && code == K_YES && bn_active()) {
-                u32 now = FRAMES;
-                if (bn_yes_at && now - bn_yes_at < 600u) {   /* YES YES: the one-shots armed again */
-                    unsigned char *table = sl_ui_table_now();
-                    bn_said_n = table ? (int)rt_rearm(table, UI_TRACK_B) : 0;
-                    bn_said_at = now | 1u;
-                    bn_yes_at = 0;
-                } else
-                    bn_yes_at = now | 1u;       /* a first YES: RECORD NOW once 0.4 s pass (rec_poll) */
-            } else if (press && code == K_YES)
+            if (press && code == K_YES)
                 rec_yes();
-            if (press && code == K_NO) {
-                if (rt_q_waiting()) {           /* v0.41: a QREC take waiting: NO cancels it */
-                    rt_q_cancel();
-                    sent_seq = 0;
-                } else
-                    rec_overlay = 0;            /* the screen closes; a recording goes on */
-            }
+            if (press && code == K_NO)
+                rec_overlay = 0;                /* the screen closes; a recording goes on */
             if (press && code < 32)
                 eaten |= 1u << code;
             it[0] = IT_DROP;

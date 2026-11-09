@@ -1,3 +1,6 @@
+> **v0.48: BOUNCE is out of the firmware** (docs/bounce-removal-plan.md). This page describes
+> v0.44..v0.47, for the redesign.
+
 # BOUNCE: recorder trigs, the eight buffers, QREC and QPLAY (v0.44)
 
 Octatrack-style sampling from the sequencer (owner, 2026-11-04, 11-06 and 11-07): a machine
