@@ -3029,7 +3029,16 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.jump("", other)
     p.place(body)
     from ..perc import guard as G
-    G.around(p, L.C["t"], G.COST_SMP, PP.BUFFERS, lambda: voice(p, L))   # v0.27: if it fits in the frame
+    def stop():                              # v0.49: left out twice in a note: ended until the next
+        p.ld(9, L.C["t"])
+        p.lsh(12, 9, 7)
+        p.iconst(11, L.state)
+        p.iop(12, 11, "+", 12)
+        p.seti(2, 12)
+        p.iconst(0, 0)
+        vs(p, "on", 0)
+    G.around(p, L.C["t"], G.COST_SMP, PP.BUFFERS, lambda: voice(p, L),   # v0.27: if it fits in the frame
+             struck=G.STRUCK, stop=stop)
     p.jump("", nxt)
     if any(ty not in ours for ty in SM.TYPES):
         p.place(mute)

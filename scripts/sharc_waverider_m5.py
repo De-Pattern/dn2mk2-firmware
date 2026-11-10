@@ -1299,7 +1299,38 @@ def step_stress(init, sound, machines) -> dict:
         return f.to_bytes()
     re_, se, ee, le = scenario("E", 16, e_frame)
     rf, sf, ef, lf = scenario("F", 20, c_frame, memory_clock=True)   # v0.34: C's worst case on the memory clock
+    # v0.49 (NiKo, v0.47: an ONESHOT kick crunchy beside SID and PERC at ~85 %): G, twelve P-I
+    # voices (all controls moving) and a SID on tracks 0..12, an ONESHOT (SAMP 4) on track 15,
+    # the last our loop renders, on the memory clock; G0 the ONESHOT alone. The guard holds
+    # the sample's time back from PERC's: its output equals G0's in every block
+    sid = MMx.TYPES[MMx.NAMES.index("SID 6581")]
+    one = SM.TYPE_OF["ONESHOT"]
+
+    def g_frame(b, alone=False):
+        others = {15: one} if alone else {**{t: 5 for t in range(1, 12)}, 12: sid, 15: one}
+        f = base_frame(sound, machines, t0=0 if alone else 5, overrides=None if alone else perc_words(pi[0]),
+                       trigger=False, others=others)
+        if not alone:
+            for t in range(12):
+                for slot, w in perc_words(pi[(t + b) % len(pi)], params=[rnd.random() for _ in range(8)]).items():
+                    f.param(t, slot, w)
+            for slot, w in mnm_words(MMx.NAMES.index("SID 6581")).items():
+                f.param(12, slot, w)
+            f.trigger(b % 13)
+        for slot, w in smp_words({SM.SAMP_REC: 4}).items():
+            f.param(15, slot, w)
+        if b == 1:
+            f.trigger(15)
+        return f.to_bytes()
+    rg, sg, eg, lg = scenario("G", 16, g_frame, memory_clock=True)
+    rg0, _, _, _ = scenario("G0", 16, lambda b: g_frame(b, alone=True), memory_clock=True)
     undo_counts()
+
+    def smp_out(rr, t):
+        return [blk.get(t, {}).get("out") for blk in rr.get("smp", [])] if rr["ok"] else []
+    g_one, g0_one = smp_out(rg, 15), smp_out(rg0, 15)
+    g_same = bool(g_one) and len(g_one) == len(g0_one) and all(a == b for a, b in zip(g_one, g0_one))
+    g_heard = sum(1 for o in g0_one[2:] if o and V.peak(o) > 1e-5)
 
     def newest_heard(rr, every):
         if not rr["ok"]:
@@ -1324,6 +1355,8 @@ def step_stress(init, sound, machines) -> dict:
     n.update({"skips_worst": {"C": sc, "D": sd, "E": se, "F": sf},
               "our_end_over_P_worst": {k: v and round(v / P, 3) for k, v in (("C", ec), ("D", ed), ("E", ee), ("F", ef))},
               "memory_clock_scale": MEM_SCALE})
+    n.update({"G": {"skips": sg, "our_end_over_P": eg and round(eg / P, 3), "oneshot_same_as_alone": g_same,
+                    "oneshot_blocks_heard": g_heard}})
     fin_f = rf["ok"] and all(math.isfinite(x) for blk in rf["buffers"] for t in range(16) for x in blk[t])
     checks = {
         "every block of both returns": ra["ok"] and rb["ok"],
@@ -1339,6 +1372,9 @@ def step_stress(init, sound, machines) -> dict:
         "v0.34: F (C's case on the memory-cost clock): every block returns, our voices done by 0.8 of the "
         "frame, voices left out and counted, every buffer finite":
             rf["ok"] and ef is not None and ef <= 0.8 * P and bool(sf) and fin_f,
+        "v0.49: G (12 P-I voices and a SID beside an ONESHOT on track 15, the memory clock): every block "
+        "returns, voices are left out (PERC's), and the ONESHOT's output is, block for block, its output alone "
+        "(G0): never left out": rg["ok"] and rg0["ok"] and bool(sg) and g_same and g_heard >= 10,
         "with time short, voices are left out and counted (A)": bool(sa),
         "A: the newest note is heard in most blocks (newest first)": n["newest_heard_A"] >= 0.8,
         "nothing non-finite": fin,
