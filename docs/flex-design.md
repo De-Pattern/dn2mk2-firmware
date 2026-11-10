@@ -86,17 +86,26 @@ their release, and ours then rest (Machinedrum, VO-6). To measure for every mach
 and the other Monomachine machines, stock FM) with the load meter in the emulator; any that do not
 rest get a fix or a release note. A TRK take is before LEVEL and the sends: FLEX has its own.
 
-## Screens (owner: the handoff's mockups)
+## Screens (owner, 2026-11-10: the Elektron-style mockups)
 
-Layout and wording from DN2mk2_FLEX_Implementation_Handoff.pdf, appendix (mockups 01..20), drawn
-with the existing renderer and font, on the 128 x 64 screen. Dropped: those for Q.PLAY and the
-double buffer (12 WAIT PLAY; QPLAY in 06 REC SETTINGS). Kept rules:
-- SYN pages: Elektron's eight-encoder grid. RECORDER: the existing DT2-style recorder (meter,
-  labels, waveform, trim markers). Recorder trigs on the [TRIG] LEDs (bn_led_walk/bn_led_poll,
-  branch v047's history): red a trig, yellow a one-shot, dim yellow spent.
+The design is the two mockup sheets in `docs/flex-mockups/` (flex-screens-a.png, flex-screens-b.png):
+Elektron's eight-cell encoder grid with a label, an icon and the value in each cell, the selected
+or boxed value inverted (BUF 01, ARM ON), a title bar with the track and page, the [TRIG] grids
+for REC TRIGS (REC filled, ONE hatched) and REC BUS (INCL filled, EXCL open, FLEX crossed), the
+waveform with its range brackets, and the boxed messages (SAVE TAKE? YES/NO, SAVED AS SAMP n,
+REC REFUSED / NO ROOM, BUF BUSY, WAIT REC with the Q.REC boundary). **Not** the pixel-text
+screens in the handoff PDF's appendix (owner: not the design).
+
+Changes from the sheets, by the decisions above: no QPLAY cell (that place: MON or empty); no
+CHAN L+R (no stereo; the recorder's own CHAN as it is); the buffer menu's SAVE TO POOL is the
+saving above (CLEAR, RENAME, COPY TO only if they fit). Drawn with the existing renderer, font
+and icons; where a mockup's icon does not exist, the nearest existing one, or a new 1-bit icon in
+the same style. Kept rules:
+- Recorder trigs also on the [TRIG] LEDs (bn_led_walk/bn_led_poll, branch v047's history): red a
+  trig, yellow a one-shot, dim yellow spent.
 - Every value of a control at the same place, size and baseline; every choice fits its cell;
-  status lines fit their box. Gate: every control through every value, every status drawn, the
-  pixels inside their cell or box.
+  status lines and boxes fit. Gate: every control through every value (four detents a choice),
+  every status drawn, the pixels inside their cell or box.
 
 ## Also in v0.49 (owner, 2026-11-10): the guard
 
