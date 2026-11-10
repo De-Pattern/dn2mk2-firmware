@@ -40,7 +40,7 @@ CF_FRAME = 0x80005E60                   # the frame as the ColdFire builds it (1
 CF_REPLY_TAIL = 0x80005E40              # the SPI reply's tail: the DSP's status, 16 BE halfwords
 CF_TDM_TX, CF_TDM_RX = 0x4E6E0100, 0x4E6DF100
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
-UI_SLICE = 175_000                      # ColdFire instructions a period between ISRs (about the unit's)
+UI_SLICE = 1_000_000                    # ColdFire instructions a period between ISRs (the UI loop's pass needs about this here)
 
 
 def _bits(x: float) -> int:
@@ -62,6 +62,10 @@ class Coupled:
         self.halt = None
         self.taps: dict = {}
         self.input = None                       # block -> ([32 floats L], [32 floats R]): the inputs
+        self.shortcut_probe = True
+        self.probes_shortcut = 0
+        from dnfw.sampler import live as SL     # noqa: PLC0415
+        self.SL_C = SL.layout().C
         if verbose:
             print(f"  coupled: ready in {time.perf_counter() - t0:.0f} s", flush=True)
 
@@ -112,6 +116,7 @@ class Coupled:
         """FN(ARGS) on the ColdFire, its registers kept -> (d0, the pc it stopped at)"""
         uc, K, m = self.uc, self.K, self.machine
         saved = [uc.reg_read(r) for r in self.regs]
+        pc0, sr0 = uc.reg_read(K.UC_M68K_REG_PC), uc.reg_read(K.UC_M68K_REG_SR)   # the UI's, put back
         sp = STACK_TOP - 0x200
         m.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
         m.write(SENTINEL, bytes.fromhex("4e714e71"))
@@ -128,6 +133,9 @@ class Coupled:
         pc = uc.reg_read(K.UC_M68K_REG_PC)
         for r, v in zip(self.regs, saved):
             uc.reg_write(r, v)
+        uc.reg_write(K.UC_M68K_REG_PC, pc0)
+        uc.reg_write(K.UC_M68K_REG_SR, sr0)
+        m.pc = pc0
         return d0, pc
 
     def long(self, va) -> int:
@@ -251,8 +259,20 @@ class Coupled:
             for i, w in enumerate(tx):
                 frm, k = i >> 1, i & 1
                 self.poke(CF_TDM_RX + (half << 11) + 4 * (16 * frm + 14 + k), struct.pack(">I", w))
+        self._shortcut_probe()
         self.blocks += 1
         return True
+
+    def _shortcut_probe(self):
+        """The one shortcut: the DSP's power-on RAM check (CMD_PROBE, sampler program.probe:
+        PROBE_STEP words a block over 4 x 256 KB, about 1,000 blocks: hours here) is finished
+        the moment it starts, with the verdict a whole part gives (pres 1), as if its blocks had
+        run. Everything after it is the two sides' own. (probe() itself is held to its model
+        by the SHARC runner's link part.)"""
+        if self.shortcut_probe and self.dsp_word(self.SL_C["pres"]) == 3:
+            self.dsp_poke(self.SL_C["pph"], 0)
+            self.dsp_poke(self.SL_C["pres"], 1)
+            self.probes_shortcut += 1
 
     def periods(self, n, ui=UI_SLICE, each=None):
         for _ in range(n):

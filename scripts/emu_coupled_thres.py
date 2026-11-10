@@ -67,6 +67,7 @@ def main() -> int:
 
     def arm(c):
         c.machine.pc = c.panel.panelin.encoder(c.machine.m, c.panel.profile, 7, 1)   # knob H, right: ARM
+        c.panel.settle(10_000_000)                              # the UI takes the turn (as the gate's spin:)
 
     def run_until(c, want, limit):
         for n in range(limit):
