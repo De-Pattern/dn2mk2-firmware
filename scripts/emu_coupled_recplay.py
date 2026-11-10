@@ -199,15 +199,24 @@ def main() -> int:
                 c.dsp_poke(D.SMP_POOL_DDR + 8 + 16 * k + 4 * j, 0)
         dirs = [[c.dsp_word(D.SMP_POOL_DDR + 8 + 16 * k + 4 * j) for j in range(4)] for k in range(SM.POOL_SLOTS)]
         taken = [k for k, e in enumerate(dirs) if e[0] and e[1]]
-    rep["numbers"]["take"] = {"slots": taken, "entries": {k: dirs[k] for k in taken}, "rec_saved_slot": slot}
-    if not step("3a. the DSP's directory holds the take (address, frames)", len(taken) == 1,
-                f"slots with frames: {taken}"):
+    dest = c.long(lay["rec_dest"])                               # the slot the RECORDER showed (next empty)
+    in_area = [j for j in taken if dirs[j][0] >= D.SMP_POOL_DDR + SM.REC_OFFSET]
+    if dest not in taken and len(in_area) == 1:                  # (rec_dest moves on to the next empty one)
+        dest = in_area[0]
+    rep["numbers"]["take"] = {"slots": taken, "entries": {k: dirs[k] for k in taken}, "rec_saved_slot": slot,
+                              "rec_dest": dest}
+    # the pool's other entries are the DSP's built-in test sounds (in the pool's first MB);
+    # the take is the RECORDER's slot, in the recordings' area
+    if not step("3a. the DSP's directory holds the take in the RECORDER's slot (address, frames)",
+                0 <= dest < SM.POOL_SLOTS and dest in taken and dirs[dest][0] >= D.SMP_POOL_DDR + SM.REC_OFFSET,
+                f"rec_dest {dest}; entries with frames {[(k, hex(dirs[k][0]), dirs[k][1]) for k in taken]}"):
         return done()
-    k = taken[0]
+    k = dest
     addr, frames, rate, fmt = dirs[k]
-    want = 48000 * 60 // (4 * 120)
+    bpm120 = struct.unpack(">H", c.read(CF_FRAME + 2 * 108, 2))[0]
+    want = 86400000 // bpm120
     step("3b. its length is R.LEN's (1 step at the tempo)", abs(frames - want) <= 64,
-         f"{frames} frames, R.LEN 1 step at 120 BPM: {want}")
+         f"{frames} frames; R.LEN 1 step at {bpm120 / 120:.1f} BPM: {want}")
 
     def frames_at(off, n):
         out = []
