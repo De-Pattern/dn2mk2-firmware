@@ -26,7 +26,10 @@ import struct
 
 
 def f32(x: float) -> float:
-    return struct.unpack("<f", struct.pack("<f", x))[0]
+    try:
+        return struct.unpack("<f", struct.pack("<f", x))[0]
+    except OverflowError:                 # past float32's range: +-infinity, as the core's IEEE overflow
+        return math.copysign(math.inf, x)
 
 
 def bits(x: float) -> int:

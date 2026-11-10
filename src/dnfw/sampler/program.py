@@ -17,6 +17,13 @@ from ..perc import machines as PM
 from ..perc import program as PP
 from ..perc.dsl import Prog, s32
 from . import machines as SM
+from ..fascia import machines as _FSC
+
+# v0.45: FASCIA (type 18) has its own program, chained after this one (dnfw.fascia.program,
+# fascia.asm: smp.asm's tail jumps to it); until it was, this program wrote a FASCIA voice's
+# buffer silence (FASCIA_MUTE, now off: a type-18 slot is "not a sample machine" here)
+FASCIA_TYPES = (_FSC.TYPE,)
+FASCIA_MUTE = False
 
 V = dict(on=0, mach=1, pos=2, frac=3, lo=4, hi=5, loop=6, mode=7, base=8, frames=9, rate=10,
          last=11, low=12, fmt=13,
@@ -327,6 +334,13 @@ def silence(p: Prog, L: Layout) -> None:
         p.iconst(6, 0)
         p.loop(L.C["count"], 32, lambda: p.stpost(4, 6))
     p.ifz(0, "EQ", zeros)
+
+
+def zero_block(p: Prog, L: Layout) -> None:
+    """v0.45: the slot's buffer, 32 zeros, unconditionally (FASCIA's voices until its program)"""
+    buffer(p, L)
+    p.iconst(6, 0)
+    p.loop(L.C["count"], 32, lambda: p.stpost(4, 6))
 
 
 def buffer(p: Prog, L: Layout) -> None:
@@ -2980,11 +2994,25 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
             p.iconst(12, ty)
             p.e("COMP(R0, R12);")
             p.jump("EQ", mute := p.label("mute"))
+    # v0.45: FASCIA (type 18): the hook for its own program (planned: fascia.asm, a chained L2
+    # program of its own, docs/fascia-integration-plan.md). Until it lands, a FASCIA voice is
+    # silence: its engine slot (PERC's) writes nothing, so its buffer is zeroed here, never left
+    # holding another machine's block. When fascia.asm is chained, it renders these slots and
+    # this branch goes (FASCIA_MUTE False).
+    if FASCIA_MUTE:
+        for ty in FASCIA_TYPES:
+            p.iconst(12, ty)
+            p.e("COMP(R0, R12);")
+            p.jump("EQ", fmute := p.label("fmute"))
     p.jump("", other)
     p.place(body)
     from ..perc import guard as G
     G.around(p, L.C["t"], G.COST_SMP, PP.BUFFERS, lambda: voice(p, L))   # v0.27: if it fits in the frame
     p.jump("", nxt)
+    if FASCIA_MUTE:
+        p.place(fmute)
+        zero_block(p, L)
+        p.jump("", other)                    # then its sample voice off, as any other machine
     if any(ty not in ours for ty in SM.TYPES):
         p.place(mute)
         silence(p, L)
@@ -3005,7 +3033,7 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
     G.end_mark(p)                            # v0.32: our voices' time, for the guard's limit
-    p.e(f"JUMP {next_sw:#x};", "ping.asm's wr_ping (which restores; v0.26: RESONATOR and CZ gone)")
+    p.e(f"JUMP {next_sw:#x};", "fascia.asm's wr_fsc (v0.45), then ping.asm's tail (which restores)")
     p.emit_subs()
     p.raw(".wr_smp..end:")
     p.raw("      .type wr_smp.,STT_FUNC;")

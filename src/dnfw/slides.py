@@ -120,6 +120,13 @@ def md_midnote_measure(names=None, blocks: int = 40, at: int = 4) -> dict[str, s
     return out
 
 
+# v0.45: FASCIA (type 18, dnfw.fascia.machines): every continuous control slides (its DSP reads
+# them once a block, coefficients included); its five choices step, never slide
+from .fascia import machines as _fsc        # noqa: E402
+FASCIA_TYPE = _fsc.TYPE
+FASCIA_SLIDE = tuple(_fsc.SLOTS[c][1] for c in _fsc.CONTROLS if not _fsc.is_choice(c))
+FASCIA_STEP = tuple(_fsc.SLOTS[c][1] for c in _fsc.CONTROLS if _fsc.is_choice(c))
+
 DEST_SLOTS = (4, 12, 20)                # LFO DEST: copied unsmoothed by 0x400db12a; never slid
 SHARED_PAGES = (0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0D, 0x0E, 0x0F, 0x1A, 0x1B, 0x1C)
 MACHINE_PAGES = (0x00, 0x01, 0x02, 0x03)    # FM TONE, WAVETONE, FM DRUM, SWARMER (types 0..3)
@@ -178,4 +185,6 @@ def c_header(stock: bytes) -> str:
             f"static const unsigned char sl_perc_slot[8] = {{{', '.join(map(str, PERC_SLOTS))}}};\n"
             f"static const unsigned char sl_perc_bits[{len(MD.MACHINES)}] = {{{md_bits}}};\n"
             f"static const unsigned int sl_perc_fx[4] = {fx};\n"
-            f"static const unsigned int sl_samp[7][4] = {{\n {samp}}};\n#endif\n")
+            f"static const unsigned int sl_samp[7][4] = {{\n {samp}}};\n"
+            f"#define SL_FSC_TYPE {FASCIA_TYPE}\n"
+            f"static const unsigned int sl_fsc[4] = {words(sum(1 << x for x in FASCIA_SLIDE))};\n#endif\n")

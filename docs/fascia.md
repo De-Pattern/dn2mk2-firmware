@@ -1,6 +1,6 @@
 # FASCIA: a physical/spectral percussion machine (design approved 2026-11-07)
 
-Status: **the sound is approved and locked**. The DSP and UI integration are not started.
+Status: **the sound is approved and locked**. The UI is in (v0.45); the DSP program (`dnfw.fascia.program`, below) is written and held to `live.py` bit for bit; hardware unverified.
 
 The owner, on the pass-3 tour: "i love the new tour sounds. theyre all perfect. great work. that will be the new engine, exactly as you made it ... just make sure it fits in every way, look, gui animation, integration into seq and modulation and p locks, encoder feel and functionality, everything."
 
@@ -159,6 +159,107 @@ Each body has 16 two-pole modes: `y = 2 r cos w y1 - r^2 y2 + g x`, with `g = am
    - Voice steals use fades. No NaNs.
 8. **Look:** icons, alignment, spacing, font, highlight and animation match the Digitone II's own. The stock widgets are used where they exist. New icons for the exciter, body, click and XMOD types are drawn in the stock style.
 9. **Quality:** ColdFire harness steps for the pages, detents, p-lock highlight, slides, LFO destinations and copy/paste, added to `ship_gate.py` in the same commit. The full gate runs before hardware, with no regression.
+
+## The ColdFire side (v0.45): type 18, where the 24 controls sit
+
+FASCIA is machine type **18** (MACHINE SEL: "Fascia" / "FSC", in the synth section after the
+Monomachine's machines, before the sample machines). Its constants and its slot table are
+`src/dnfw/fascia/machines.py`: the one source the ColdFire's generated header
+(`dnfw.waverider.pages`, `wr_gen.h`) reads, and the one the FASCIA DSP program is to read.
+The panel itself (`PAGES`, `CHOICES`, `DEFAULTS`) is `model.py`'s, mirrored there because the
+build (also run by the browser patcher) must not import numpy; `test/test_fascia_coldfire.py`
+holds the two equal, and this table to the module.
+
+**Where they sit.** Only 12 of WaveTone's 25 records span exactly 0..127 (TUN1/TUN2 are 4..124,
+WAV1/WAV2 0..120, PD1/PD2/OFS1/OFS2 0..100; TBL1, TBL2, MOD, RSET and TYPE a few steps). So:
+
+- the **19 continuous** controls ride records of exactly 0..0x7f00, and the DSP reads the
+  panel's 0..127 as `word >> 8` with nothing rescaled: WaveTone's 12 (10 with a CC, MAST and
+  FINE without) and FM Tone's spare records 227..233 on slots 50..56 (no CC; owner, 2026-11-08);
+- the **5 choices** ride WaveTone's 0..100 / 0..120 records (each with a CC). A choice's knob is
+  the value over the record's span x 127, rounded (`(v 254 + top) / (2 top)`; the value itself on
+  a 0..127 record), and its option `(knob n) >> 7`, which is the model's `choice()`. A detent
+  writes the middle of the option's knob span (`machines.rep_word`).
+
+For a FASCIA sound, `param_set_slot_to_id` answers slots 50..64 with FM Tone's records (type 0)
+and the ownership test accepts FM Tone's records on those slots (208..211, 227..237), for type 18
+only (`dnfw.waverider.coldfire` `slot_shim`, `canon_valid`). FM Tone's 235..237 are not used:
+their modulation mask is 0. Every other record the sound has on our slots is named `-` while a
+FASCIA track is active, and so left out of the LFO destination list (`wr_lfo_mask`).
+
+| control | slot | record | range | stock record | CC | kind | DSP frame offset (+146 t) |
+|---|---|---|---|---|---|---|---|
+| TYPA | 26 | 239 | 0..120 | WaveTone WAV1 | 41 | choice, 6 | 220 |
+| TYPB | 32 | 243 | 0..120 | WaveTone WAV2 | 45 | choice, 6 | 232 |
+| HARD | 30 | 241 | 0..127 | WaveTone LEV1 | 43 | knob | 228 |
+| DUST | 50 | 227 | 0..127 | FM Tone PITCH | - | knob | 268 |
+| TZFM | 51 | 228 | 0..127 | FM Tone P2A4 | - | knob | 270 |
+| BEND | 52 | 229 | 0..127 | FM Tone RALL | - | knob | 272 |
+| MIX | 53 | 230 | 0..127 | FM Tone LVAB | - | knob | 274 |
+| DEC | 40 | 253 | 0..127 | WaveTone ATK | 56 | knob | 248 |
+| BODA | 29 | 240 | 0..100 | WaveTone PD1 | 42 | choice, 9 | 226 |
+| BODB | 35 | 244 | 0..100 | WaveTone PD2 | 46 | choice, 10 | 238 |
+| TUNE | 36 | 245 | 0..127 | WaveTone LEV2 | 47 | bipolar | 240 |
+| GEOM | 48 | 261 | 0..127 | WaveTone MAST | - | bipolar | 264 |
+| MATL | 54 | 231 | 0..127 | FM Tone ATAB | - | knob | 276 |
+| POS | 55 | 232 | 0..127 | FM Tone DCAB | - | knob | 278 |
+| COUP | 56 | 233 | 0..127 | FM Tone EDAB | - | knob | 280 |
+| DAMP | 41 | 254 | 0..127 | WaveTone HOLD | 57 | knob | 250 |
+| MORPH | 38 | 252 | 0..127 | WaveTone DRIF | 55 | knob | 244 |
+| SKIN | 42 | 255 | 0..127 | WaveTone DEC | 58 | bipolar | 252 |
+| SHIFT | 45 | 258 | 0..127 | WaveTone WDTH | 61 | bipolar | 258 |
+| CLIK | 44 | 257 | 0..127 | WaveTone BASE | 60 | knob | 256 |
+| XMOD | 28 | 246 | 0..100 | WaveTone OFS1 | 48 | choice, 5 | 224 |
+| BUZZ | 49 | 262 | 0..127 | WaveTone FINE | - | knob | 266 |
+| LPG | 43 | 256 | 0..127 | WaveTone NLEV | 59 | knob | 254 |
+| DRIVE | 47 | 260 | 0..127 | WaveTone CHAR | 63 | knob | 262 |
+
+**Pages.** Three descriptors (`SYN1 EXCITE`, `SYN2 BODY`, `SYN3 SPECTRAL`; the header reads
+"Fascia Excite (1/3)" ...), drawn by `fsc_page_draw` (`csrc/sampler/smp_page.c`) in the Elektron
+grid of the DT2 machines' pages: eight cells at the DT2's centres, a knob for a continuous
+control, the option's name in a box for a choice (four letters in the box: STRK, PULS, PLAT,
+CHIM, GLAS, STRG, EXCT, CHOK, TRAD; the header and SYN held show the whole name), the label under
+it, a p-locked cell inverted as stock lights a lock, SYN held showing values.
+
+**Behaviour.** The header's value text is FASCIA's own while its track is active (`fmt.c`
+`smp_formats`): 0..127, the bipolar four (TUNE, GEOM, SKIN, SHIFT) as -64..+63, a choice by name.
+Each choice steps **four detents an option** (`fsc_quant`, all five, BODB's ten included); FUNC +
+turn steps a choice one a click and leaves a knob where it is. MACHINE SEL writes the model's
+`DEFAULTS` (`rec.c` `smp_machine_commit`). Every continuous control slides onto its lock; the
+choices step (`dnfw.slides.FASCIA_SLIDE`, `slide.c continuous()`).
+
+**DSP (v0.45).** The machine lookup sends type 18 to PERC's engine slot (5), as the sample and
+Monomachine machines. PERC's chain is now PERC -> `smp.asm` -> **`fascia.asm`** (`wr_fsc`, sw
+0xBD8800, L2 0x200B1000..0x200C0000) -> PING's tail (0x170280, the register restore). The
+program is `src/dnfw/fascia/program.py`, in the PERC DSL: its run mode is bit-exact to
+`live.py` (`test/test_fascia_program.py`; `scripts/fascia_dsp_compare.py` renders the whole
+audition and its WAVs), and the SHARC runner holds the assembled code to the run mode
+(parts `fascia`, `fchords`+`fsilence`, `fgarbage`, `fstress`; `fcost` measures).
+
+- **Layout.** A voice's state is 0xF80 bytes (16 voices in two L2 rooms: 0x20098400 for 0..7,
+  below the MD's state; 0x200A9400 for 8..15, after the main mix's tap). The block's scratch is
+  L1 0x2E6400..0x2E7000 (I5-relative, its 64-word window holding the hot words and a pool of
+  12 constants filled at `wr_fsc`'s entry). The bookkeeping (costs, strikes, steals, routine
+  return words) is in the Monomachine scratch at +0x3200. The tables (`fascia/tables.json`, 1 KB)
+  are in DDR at 0x81220000. (The plan's 0x200E9000.. range is refused by `dsp._check_l2`, 64 KB
+  short of the non-cacheable window.)
+- **Velocity.** The frame header's word `52 + 2t` holds the trig's velocity << 8 (the ColdFire's
+  frame builder copies `0x8000dd40[t]` there, 0x4002750c; `docs/modulation-matrix.md`). The
+  program reads `min(word >> 8, 127) / 127` as `live`'s `vel`.
+- **Note.** From the frame's header word `2 + 2t` (/ 256), not the note cell (engine +0x1387c
+  + 4t) that PERC and smp read: the stock unpack writes the cell after our code runs, so on a
+  trig with a new note it still holds the previous note (the runner's steal 60 -> 67: the cell
+  60 on the trig's block, 67 the next). Found by the runner's `fascia` part.
+- **Voices.** A trig arms the voice (note-on on its block); an IDLE voice rests (the guard's
+  rest list, one block); a retrigger steals with `live`'s fade. Every state word is
+  initialised by the strike, and the life words are sanitised, so power-on garbage is harmless.
+- **`live.py` changes for the DSP** (rounding-level: float32 where it was float64; not re-auditioned by the owner): DUST's grain
+  smear `HANN_VAR * dn^2` in float32; the body ratios `exp2(LOG2R)` (the DSP's 576-byte ratio
+  table dropped).
+
+**Known limits.** TRK + CLEAR re-initialises a sound from its records' own defaults (stock's
+`0x400e7d4c`), so a cleared FASCIA track starts from WaveTone's and FM Tone's defaults, not
+FASCIA's (as a Monomachine track does). MIDI CC reaches only the 15 controls whose record has one.
 
 ## The DSP plan (next)
 

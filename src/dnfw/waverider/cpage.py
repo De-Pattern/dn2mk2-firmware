@@ -48,7 +48,8 @@ LINK_ENTRIES = ["smp_rx_hook", "kb_rec_hook", "smp_hi", "smp_walk", "smp_booted"
                  "slc_pop", "slc_poll", "slc_stock_asked", "slc_fails", "slc_linked", "smp_norm_state",
                  "smp_pl_quiesce", "smp_analysis_slot", "smp_slot_frames", "wr_draws", "smp_pos_in", "smp_playhead",
                  # v0.40: folders inside folders (lib.c, smp_page.c)
-                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"]
+                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete",
+                 "fsc_q_off"]                                        # v0.45: FASCIA's defaults (rec.c, fmt.c)
 # parameter slides (csrc/slides, dnfw.slides): the hooks and the state the checks read
 SLIDE_ENTRIES = ["sl_ui_table", "sl_cell", "sl_knob", "sl_screen", "sl_page_up", "sl_page_seen", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
                  "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks"]
