@@ -6,7 +6,7 @@ harness; everything else is the panel's keys and the firmware's own paths (the s
 ISR at the tempo, rt_frame in the audio ISR, the link, the DSP's recorder and voices).
 
   direct: track 1 FLEX (smp_machine_commit, the UI's commit path), an empty pool known to the
-          ColdFire, the pattern 4 steps, the panel's R.LEN 1 step and SRC IN (rec_rlen, rec_src)
+          ColdFire (no: v0.49 waits for its own start-up with no pool image), the pattern 4 steps, the panel's R.LEN 1 step and SRC IN (rec_rlen, rec_src)
   UI:     [TRK] + [TRIG 2] (track 1), FUNC + VOICE (the FLEX REC panel), [TRIG 1] (a one-shot
           recorder trig on step 1: v0.49's default), NO (closed), PLAY; then KEYBOARD and
           [TRIG 9] held (a note) once the take is in
@@ -92,9 +92,16 @@ def main() -> int:
     owner = c.call(0x4018A97A)[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, T, FLEX, 1, 1)
     rep["setup"].append(("track 1 FLEX", "direct: smp_machine_commit (the UI's commit path)"))
-    c.poke(SM.MIRROR + 8, b"\x00" * 16 * SM.POOL_SLOTS)
-    c.put32(lay["smp_dir_ok"], 1)
-    rep["setup"].append(("an empty pool, known", "direct"))
+    # v0.49: no pool image on the emulator's +Drive, as on a unit nothing was sent to: the
+    # ColdFire's own start-up decides (FLEX's buffers are on once it is over); waited for here
+    c.periods(1)
+    for n in range(800):
+        if c.long(lay["rt_on"]):
+            break
+        c.periods(2)
+    rep["setup"].append(("start-up over with no pool image (the firmware's own state)", "waited"))
+    rep["numbers"]["startup"] = {"rt_on": c.long(lay["rt_on"]), "smp_dir_ok": c.long(lay["smp_dir_ok"]),
+                                 "periods_waited": 2 * n}
     pat = c.long(SEQ_PATTERN)
     c.poke(pat + PAT_LENGTH, struct.pack(">H", 4))
     c.put32(lay["rec_src"], 0)

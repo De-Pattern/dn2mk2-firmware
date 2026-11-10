@@ -441,7 +441,14 @@ void rt_poll(void)
         rt_cur = -1;
         rt_dirty = 1;
     }
-    int on = smp_dir_ok != 0;
+    /* v0.49: the buffers are usable once the directory is read, or once start-up is over with
+     * no pool image on the +Drive (nothing sent to it yet: the pool is empty, so there is nothing
+     * in the recordings' area to keep clear but this session's own takes, which the allocator
+     * knows). v0.44..v0.47 waited for a directory that a unit with no image never has: every
+     * BOUNCE take was refused there (NO +DRIVE POOL) */
+    extern int smp_booted;
+    extern u32 smp_hi;
+    int on = smp_dir_ok != 0 || (smp_booted == 2 && smp_hi == 0);
     if (on != rt_on) {
         rt_on = on;
         rt_dirty = 1;
