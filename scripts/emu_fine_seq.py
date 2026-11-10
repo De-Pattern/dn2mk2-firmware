@@ -86,10 +86,10 @@ def main() -> int:
         return struct.unpack(">H", c.read(snd(t) + 0x14 + 2 * slot, 2))[0]
 
     def fword(v, slot):
-        """voice V's value for SLOT in the per-voice mirror the frame is built from (0x800068E4,
-        101 words a voice after 17: emu_slides.py's OUT). The frame's own words are this after
-        the ISR's smoothing (a glide toward it every frame), so they are not compared to the bit"""
-        return struct.unpack(">H", c.read(0x800068E4 + 2 * (17 + 101 * v + slot), 2))[0]
+        """voice V's source value for SLOT (0x80003AF0, slide.c's SRC: the sound's value with the
+        step's locks, 101 words a voice after 17), before modulation (OUT, 0x800068E4) and the
+        ISR's smoothing (the frame's words)"""
+        return struct.unpack(">H", c.read(0x80003AF0 + 2 * (17 + 101 * v + slot), 2))[0]
 
     owner = c.call(0x4018A97A)[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, A, ONESHOT, 1, 1)
@@ -132,6 +132,23 @@ def main() -> int:
     base = {A: val(A, s0), B: val(B, s1)}
     rep["base"] = base
     check("track A's STRT base is fine (a fraction)", base[A] % 256 != 0, f"{base[A]:#06x}")
+    table = pat + 97872                                          # the pattern's lock table (slide.c)
+
+    def locks():
+        """{(head, tag/track byte): step 1's value} for every record whose step 1 is set"""
+        raw = c.read(table, 80 * 258)
+        out = {}
+        for i in range(80):
+            r = raw[258 * i:258 * (i + 1)]
+            v = struct.unpack(">H", r[2:4])[0]
+            if v != 0xFFFF and (r[0] or r[1]):
+                out[f"{r[0]:#04x}/{r[1]:#04x}"] = v
+        return out
+    lk0 = locks()
+    rep["locks_before"] = lk0
+    check("the lock store holds a lock on step 1 for each track", len(lk0) >= 2, json.dumps({k: hex(v) for k, v in lk0.items()}))
+    check("track A's STRT lock is stored to the bit (a fraction of a whole step)",
+          any(v % 256 for v in lk0.values()), json.dumps({k: hex(v) for k, v in lk0.items()}))
     tap(K_PLAY)
     setup.append(("PLAY", "UI: the PLAY key"))
     seen = {A: {}, B: {}}
@@ -164,6 +181,9 @@ def main() -> int:
     check("4 steps played on each track", all(len(seen[t]) == 4 for t in (A, B)), str({t: sorted(seen[t]) for t in seen}))
     check("the kit's base values unchanged at the end", val(A, s0) == base[A] and val(B, s1) == base[B],
           f"{val(A, s0):#06x}, {val(B, s1):#06x}")
+    lk1 = locks()
+    rep["locks_after"] = lk1
+    check("the lock store unchanged through the swaps", lk1 == lk0, json.dumps({k: hex(v) for k, v in lk1.items()}))
     check("no faults, no halt", not c.faults() and not c.halt, f"{c.faults()[:3]} {c.halt}")
     failed = [n for n, ok in results if not ok]
     rep["results"] = results
