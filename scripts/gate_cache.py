@@ -112,8 +112,41 @@ def _cache(root: pathlib.Path, name: str) -> pathlib.Path:
     return root / "out" / "gate_cache" / f"{slug}.json"
 
 
+def _common_dir(top: pathlib.Path) -> str | None:
+    """the git common directory of the checkout at TOP (a worktree's .git file names it), or None"""
+    g = top / ".git"
+    try:
+        if g.is_dir():
+            return str(g.resolve())
+        if g.is_file():
+            d = pathlib.Path(g.read_text().split("gitdir:", 1)[1].strip())
+            c = d / "commondir"
+            return str((d / c.read_text().strip()).resolve()) if c.exists() else str(d.resolve())
+    except (OSError, IndexError):
+        return None
+    return None
+
+
+def _foreign(path: str, root: pathlib.Path) -> bool:
+    """v0.47: an input inside ANOTHER checkout of this repository (a sibling worktree): a pass
+    recorded there read that checkout's files, so its record says nothing about this one's (a
+    cache copied from v046-wt into v047-wt re-hashed v046-wt's own, unchanged, files and
+    reused v0.46's unit tests for v0.47's changed tree). Such a record is never reused."""
+    rp, base = pathlib.Path(path), root.resolve().parent
+    try:
+        rel = rp.relative_to(base)
+    except ValueError:
+        return False
+    top = base / rel.parts[0]
+    if not rel.parts or top == root.resolve():
+        return False
+    mine = _common_dir(root.resolve())
+    return mine is not None and _common_dir(top) == mine
+
+
 def lookup(root: pathlib.Path, name: str, cmds, work: pathlib.Path):
-    """-> the record whose commands are CMDS and whose every input is unchanged, or None."""
+    """-> the record whose commands are CMDS and whose every input is unchanged, or None.
+    v0.47: a record that read another checkout of this repository is not this tree's."""
     f = _cache(root, name)
     if not f.exists():
         return None
@@ -127,6 +160,9 @@ def lookup(root: pathlib.Path, name: str, cmds, work: pathlib.Path):
         ok = True
         for path, want in rec["inputs"].items():
             real = _real(path, work)
+            if _foreign(real, root):
+                ok = False
+                break
             kind, _, h = want.partition(":")
             now = (_sha(real) if kind in ("f", "x") else _listing(real)) if os.path.exists(real) else None
             if now != h:

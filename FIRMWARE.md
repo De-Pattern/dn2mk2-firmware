@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.46** | 2026-11-09 | recordings (RECORD NOW, a BOUNCE take saved with FUNC + YES) also copied into +DRIVE > RECORDED under their own name; FILE NAME up to 35 characters, RENAME long names, a new folder up to 30; BOUNCE's BUF reads 1..8; gate: the copy with a power cut after every step, a full +Drive, a send mid-copy | `builds/v0.46-KEEPER/` | yes |
+| **v0.47** | 2026-11-09 | the Monomachine's TUNE reads -64..+63 (0 in tune), FUNC + turn a semitone at a time; the TRIM preview 6 dB quieter (back at v0.37..v0.39's level); the RECORDER's INTO box smaller; BOUNCE out of MACHINE SEL (old BOUNCE tracks still load); gate: its reuse cache refuses passes from another worktree | `builds/v0.47-TUNED/` | yes |
+| v0.46 | 2026-11-09 | recordings (RECORD NOW, a BOUNCE take saved with FUNC + YES) also copied into +DRIVE > RECORDED under their own name; FILE NAME up to 35 characters, RENAME long names, a new folder up to 30; BOUNCE's BUF reads 1..8; gate: the copy with a power cut after every step, a full +Drive, a send mid-copy | `builds/v0.46-KEEPER/` | yes |
 | v0.45 | 2026-11-08 | BOUNCE fixed (v0.44 froze the unit on MACHINE SEL → BOUNCE and at power-on with a BOUNCE track) and back in MACHINE SEL; the +Drive library holds 16,384 samples; SELECT UNUSED in PROJECT RAM; recorder trigs on the [TRIG] LEDs while the BOUNCE REC panel is open; SAMP past the last loaded sample no longer plays the last one; PING removed; gate: every machine through MACHINE SEL's real list and a power-on with ours on the tracks, a wild-read trap in every emulator step | `builds/v0.45-ROOMIER/` | yes |
 | v0.44 | 2026-11-07 | **withdrawn (2026-11-08): BOUNCE froze the unit.** Use v0.45. BOUNCE, the seventh sample machine: Octatrack-style recorder trigs placed with [TRIG] (FUNC + [TRIG] a one-shot) record into the track's own buffer (8 buffers, two halves each), play the take fitted to its steps at any tempo, switch at Q.PLAY; Q.REC; FUNC + YES saves the take to the pool and +Drive; YES YES re-arms one-shots; v0.41's REC trigs, ARM knobs and REC TRIGS page gone; the CHAN icon on every RECORDER; FILE NAME UP/DOWN scroll characters | `builds/v0.44-BOUNCE/` | yes |
 | v0.43 | 2026-11-07 | 128 +Drive library folders (folders inside folders past 64; an older library as it was); the Monomachine voices 25-36 % lighter (their render scratch in L1, bit-exact); the gate's boot steps faster | `builds/v0.43-ROOM/` | yes |
@@ -84,6 +85,47 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.47 — TUNED (the Monomachine's TUNE, a quieter preview, BOUNCE hidden)
+
+`DN2mod_v0.47_TUNED_OS1.11.syx`
+sha256 `dda3d00824daf42e62eb1c1797835d363b3af9e02db96169a025653d9f47857b`
+Gate: CLEARED TO FLASH, 2026-11-09 (45 gates; 40 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit; every emulator step with the wild-read trap on). Source: commit `8d13498` (branch `v047`). Docs: `docs/flex-design.md`, `docs/bounce-removal-plan.md` (v0.48).
+
+Everything in v0.46, plus:
+
+**The Monomachine's TUNE** (SID, VO-6, WAVE, DDRW, DENS: knob H) reads -64..+63 as on the Monomachine,
+0 in tune, instead of stock's percent text for the record it borrows; the whole knob is +-2 semitones,
+32 a semitone. FUNC + turn moves to the next semitone the knob's way (-64, -32, 0, +33, +63: +32 is
+between two knob steps); a plain turn is unchanged. PERC and the stock machines keep stock's text
+(`fmt.c` f_mtune, mnm_tune_step).
+
+**The TRIM preview 6 dB quieter.** v0.40 normalised takes to full scale, which put TRIM's preview 6 dB
+over v0.37..v0.39's; the preview mix (`pvmix.asm`, `sampler/program.py`) is back at that level. The take
+itself and its playback from its slot are unchanged.
+
+**The RECORDER's INTO box smaller** (20 x 11), clear of the controls beside it.
+
+**BOUNCE out of MACHINE SEL.** On the unit it recorded and never played back. Its code stays in this
+build, so projects with BOUNCE tracks load and play as on v0.46; v0.48 removes it, and FLEX replaces it
+(`docs/flex-design.md`).
+
+**Gate:** `gate_cache.py` refuses a reuse record whose inputs lie in another worktree of the same
+repository (a copied cache once reused another tree's unit tests); the SHARC runner's TRIM preview check
+at the new level; `rectrig` checks TUNE's text and FUNC steps.
+
+**Tests**
+1. A Monomachine track: turn TUNE: -64..+63, 0 in the middle; FUNC + turn: -64, -32, 0, +33, +63, the
+   pitch a semitone each step.
+2. Record, TRIM, FUNC + YES: the preview is quieter than v0.46's (about half), still clear over the
+   pattern.
+3. The saved take plays from its slot at v0.46's level.
+4. MACHINE SEL: no BOUNCE. An old project with a BOUNCE track loads and plays.
+5. Everything from v0.46.
+
+**Known issues**
+- FASCIA is not in this build (it is being rebuilt as a one-voice machine).
+- Everything listed for v0.46 except BOUNCE's, now out of the list.
 
 ## v0.46 — KEEPER (recordings into +DRIVE > RECORDED, long names)
 
