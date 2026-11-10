@@ -103,7 +103,8 @@ u8 rt_used[BUF_N] D;                    /* a BOUNCE track points at the buffer (
 #define NQ 9
 static const u16 QSTEPS[NQ] = {0, 1, 2, 4, 8, 16, 32, 64, 0xFFFF};
 int rt_qrec D = 0;                      /* OFF */
-int rt_qplay D = NQ - 1;                /* PLEN: a new take is heard from the pattern's top */
+int rt_qplay D = NQ - 1;                /* (v0.49: unused; Q.PLAY is gone) */
+int rt_arm D = 1;                       /* v0.49 FLEX: the recorder trigs fire (ARM ON) */
 
 /* the master position, and the steps seen since PLAY (the audio interrupt counts them) */
 int rt_pos D = -1;
@@ -208,10 +209,15 @@ u32 rt_buf_of(u32 t)                            /* the buffer a FLEX track names
     return rt_buf_value(ctl(t, SLOT_BUF));
 }
 
+/* v0.49: R.LEN, SRC and CHAN are the FLEX REC panel's (rec.c rec_rlen, rec_src, rec_chan: what it
+ * shows and its knobs turn). v0.44..v0.47 read three sound slots the panel never wrote, so a
+ * BOUNCE take ignored its panel */
+extern int rec_rlen, rec_src, rec_chan;
 static u32 rlen_of(u32 t)                       /* R.LEN steps (0 MAX: the pattern's length) */
 {
-    u32 n = ctl(t, SLOT_RLEN);
-    return n > 0 && n < 128 ? n : (u32)master_len();
+    (void)t;
+    u32 n = rec_rlen > 0 ? (u32)rec_rlen : 0u;
+    return n > 0 && n <= 128 ? n : (u32)master_len();
 }
 
 /* does [PLACE, PLACE + BYTES) cross a live half region other than IX's own? */
@@ -272,7 +278,7 @@ int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
         refuse(track, 3);
         return 0;
     }
-    u32 src = ctl(track, SLOT_SRC), chan = ctl(track, SLOT_CHAN);
+    u32 src = rec_src < 0 ? 0u : (u32)rec_src, chan = rec_chan < 0 ? 0u : (u32)rec_chan;
     u32 seq = 0x80008000u | (++rt_n & 0x7FFFu);  /* low half's bit 15: a buffer take (rec.c) */
     rt_w[0] = seq;
     rt_w[1] = CMD_NOW;
@@ -304,6 +310,27 @@ void rt_cut(void)                               /* v0.49: the buffer keeps what 
     rt_cur = -1;
 }
 
+/* v0.49 FLEX: a manual take into the track's buffer (YES on the FLEX REC panel, rec.c): asked for
+ * from the UI, started by rt_frame (the audio interrupt, as the trigs: one writer of rt_w), at
+ * once, or with Q.REC set and the sequencer playing at the next boundary. ARM OFF: the track's
+ * recorder trigs do not fire (a finished bounce kept); YES still records */
+volatile u32 rt_req D = 0;              /* the track + 1 asked for, 0 none */
+void rt_flex_req(u32 t)
+{
+    rt_req = t < 16 ? t + 1u : 0u;
+}
+int rt_req_waiting(void)
+{
+    return rt_req != 0 && QSTEPS[rt_qrec] != 0 && SEQ_PLAYING;
+}
+static void req_fire(void)
+{
+    u32 t = rt_req - 1u;
+    rt_req = 0;
+    if (t < 16 && rt_is_bounce(t))
+        rt_trig(t, 0, rt_buf_of(t));
+}
+
 /* the playing pattern's lock table (the records slide.c keeps) */
 static u8 *pat_table(void)
 {
@@ -316,6 +343,8 @@ static u8 *pat_table(void)
  * on this step's boundary */
 void rt_frame(void)
 {
+    if (rt_req && SEQ_PLAYING && QSTEPS[rt_qrec] == 0)   /* v0.49: Q.REC OFF: at once */
+        req_fire();
     if (!SEQ_PLAYING) {
         rt_pos = -1;
         for (int t = 0; t < 16; t++)
@@ -325,6 +354,8 @@ void rt_frame(void)
             q_fire = q_gen;
             rt_qfired++;
         }
+        if (rt_req)                             /* v0.49: a FLEX take asked for: at once */
+            req_fire();
         return;
     }
     u8 *table = pat_table();
@@ -333,7 +364,7 @@ void rt_frame(void)
         if (cur == rt_last_step[t])
             continue;
         rt_last_step[t] = cur;
-        if (!table || cur > 127 || !rt_is_bounce(t))
+        if (!table || cur > 127 || !rt_arm || !rt_is_bounce(t))
             continue;
         u32 v = sl_lock_get(table, t, cur, 2);
         if (v == RT_TRIG || v == RT_ONESHOT) {
@@ -354,6 +385,8 @@ void rt_frame(void)
         q_fire = q_gen;
         rt_qfired++;
     }
+    if (rt_req && on_boundary(rt_qrec, p))      /* v0.49: a FLEX take at its Q.REC boundary */
+        req_fire();
 }
 
 /* the SAMP a BOUNCE voice on track T hears (link.c smp_mod_apply): its buffer's playing half
@@ -463,12 +496,13 @@ void rt_knob(int index, int delta)
     qk_acc += delta;
     int n = qk_acc / 4;
     qk_acc -= n * 4;
-    int *q = index == 5 ? &rt_qrec : 0;         /* v0.49: no Q.PLAY */
+    int *q = index == 5 ? &rt_qrec : index == 7 ? &rt_arm : 0;   /* v0.49: no Q.PLAY; 7 FLEX's ARM */
+    int top = index == 7 ? 1 : NQ - 1;
     if (!q || !n)
         return;
     *q += n;
     if (*q < 0) *q = 0;
-    if (*q > NQ - 1) *q = NQ - 1;
+    if (*q > top) *q = top;
 }
 
 int rt_q_waiting(void)                          /* a QREC take not started yet */

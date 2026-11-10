@@ -6,7 +6,7 @@ harness; everything else is the panel's keys and the firmware's own paths (the s
 ISR at the tempo, rt_frame in the audio ISR, the link, the DSP's recorder and voices).
 
   direct: track 1 FLEX (smp_machine_commit, the UI's commit path), an empty pool known to the
-          ColdFire, the pattern 4 steps, R.LEN 1 step (its sound slot 40), SRC IN (slot 38: 0)
+          ColdFire, the pattern 4 steps, the panel's R.LEN 1 step and SRC IN (rec_rlen, rec_src)
   UI:     [TRK] + [TRIG 2] (track 1), FUNC + VOICE (the FLEX REC panel), [TRIG 1] (a one-shot
           recorder trig on step 1: v0.49's default), NO (closed), PLAY; then KEYBOARD and
           [TRIG 9] held (a note) once the take is in
@@ -97,9 +97,9 @@ def main() -> int:
     rep["setup"].append(("an empty pool, known", "direct"))
     pat = c.long(SEQ_PATTERN)
     c.poke(pat + PAT_LENGTH, struct.pack(">H", 4))
-    c.poke(snd + 0x14 + 2 * SLOT_RLEN, struct.pack(">H", 1 << 8))
-    c.poke(snd + 0x14 + 2 * SLOT_SRC, struct.pack(">H", 0))
-    rep["setup"].append(("pattern 4 steps, R.LEN 1, SRC IN", "direct: written"))
+    c.put32(lay["rec_src"], 0)
+    c.put32(lay["rec_rlen"], 1)
+    rep["setup"].append(("pattern 4 steps; the panel's SRC IN and R.LEN 1 step (rec_src, rec_rlen)", "direct: written"))
     c.input = chirp
     c.periods(4, label="settle")
     if not link("0. track 1 is FLEX", c.read(snd + 0xDE, 1)[0] == FLEX, f"type {c.read(snd + 0xDE, 1)[0]}"):

@@ -296,6 +296,7 @@ int rec_view __attribute__((section(".data"))) = 0;      /* v0.41's REC TRIGS vi
  * 0.4 s) arms the spent one-shots again; a single YES is RECORD NOW, taken once the 0.4 s
  * have passed with no second YES */
 int bn_page __attribute__((section(".data"))) = 0;
+int bn_sub __attribute__((section(".data"))) = 0;          /* v0.49 FLEX REC: 0 REC TRIGS, 1 REC SETUP */
 u32 bn_yes_at __attribute__((section(".data"))) = 0;    /* a YES waiting for a second (0: none) */
 u32 bn_said_at __attribute__((section(".data"))) = 0;   /* the line's last word, when (ARMED n) */
 int bn_said_n __attribute__((section(".data"))) = 0;
@@ -559,8 +560,10 @@ void rec_poll(void)
     rt_poll();                                  /* v0.41: the REC buffers (rectrig.c) */
     if (bn_yes_at && FRAMES - bn_yes_at >= 600u) {   /* v0.44: a single YES on a BOUNCE track */
         bn_yes_at = 0;
-        if (bn_active())
-            rec_yes();
+        if (bn_active()) {                      /* v0.49 FLEX: into the track's buffer (Q.REC: at its boundary) */
+            extern void rt_flex_req(u32 t);
+            rt_flex_req(UI_TRACK_B);
+        }
     }
     if (smp_status(st)) {
         rec_state = st[0] & 3;
@@ -682,10 +685,12 @@ static void knob(int index, int delta)
     extern void rt_knob(int index, int delta);
     if (index == 8 && sl_rec_knob(delta))
         return;
-    if (bn_active()) {                          /* v0.44 BOUNCE: A SRC, B CHAN, E Q.REC, F Q.PLAY, G R.LEN */
-        if (index == 5 || index == 6)
-            rt_knob(index, delta);
-        else if (index == 7)
+    if (bn_active()) {                          /* v0.49 FLEX REC (both pages): A SRC, B CHAN, D R.LEN, E ARM, F Q.REC */
+        if (index == 6)
+            rt_knob(5, delta);                  /* Q.REC: four detents a choice */
+        else if (index == 5)
+            rt_knob(7, delta);                  /* ARM: four detents a choice */
+        else if (index == 4)
             rec_rlen = clamp(rec_rlen + delta, 0, 128);
         else if (index == 1 || index == 2)
             goto as_recorder;
@@ -1545,6 +1550,11 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             it[0] = IT_DROP;
             return (u32)it;
         }
+        if (bn_active() && press && (code == K_LEFT || code == K_RIGHT)) {   /* v0.49: REC TRIGS / REC SETUP */
+            extern int bn_sub;
+            bn_sub = code == K_RIGHT;
+            smp_overlay_dirty = 1;
+        }
         if (bn_active() && press && code == 22) {         /* PAGE: the next page of steps */
             bn_page = (bn_page + 1) % (int)bn_pages();
             smp_overlay_dirty = 1;
@@ -1571,7 +1581,11 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             } else if (press && code == K_YES)
                 rec_yes();
             if (press && code == K_NO) {
-                if (rt_q_waiting()) {           /* v0.41: a QREC take waiting: NO cancels it */
+                extern int rt_req_waiting(void);
+                extern volatile u32 rt_req;
+                if (rt_req_waiting())           /* v0.49: a FLEX take waiting for Q.REC: NO cancels it */
+                    rt_req = 0;
+                else if (rt_q_waiting()) {      /* v0.41: a QREC take waiting: NO cancels it */
                     rt_q_cancel();
                     sent_seq = 0;
                 } else
