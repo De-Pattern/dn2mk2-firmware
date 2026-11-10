@@ -83,7 +83,9 @@ def main() -> int:
     from dnfw.sampler import machines as SM                     # noqa: PLC0415
     from dnfw.waverider import dsp as D                         # noqa: PLC0415
     c = Coupled(a.build, a.snapshot, a.stock, verbose=True)
-    rep = {"break": a.brk, "steps": {}, "numbers": {}}
+    setup = []
+    rep = {"break": a.brk, "steps": {}, "numbers": {}, "setup": setup}
+    c.watchdog()
     fail = []
 
     def step(name, ok, detail=""):
@@ -130,34 +132,48 @@ def main() -> int:
 
     owner = c.call(0x4018A97A)[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, 0, ONESHOT, 1, 1)
+    setup.append(("track 0 ONESHOT", "direct call of smp_machine_commit (the UI's commit path, not MACHINE SEL's keys)"))
     c.poke(SM.MIRROR + 8, b"\x00" * 16 * SM.POOL_SLOTS)          # an empty pool: room to record
     c.put32(lay["smp_dir_ok"], 1)
+    setup.append(("an empty pool, its directory known", "direct: the ColdFire's mirror emptied, smp_dir_ok set"))
     c.input = chirp
     c.periods(4)
     if not step("0. track 0 on ONESHOT", c.read(snd + 0xDE, 1)[0] == ONESHOT, f"type {c.read(snd + 0xDE, 1)[0]}"):
         return done()
 
-    # 1. the RECORDER (FUNC + VOICE where the panel names them; else its combo's entry)
-    func, voice = names.get("FUNC"), names.get("VOICE") or names.get("VOICES")
-    if func and voice:
-        hold_tap(func, voice)
-    else:
-        c.call(lay["rec_combo"])
-        rep["numbers"]["recorder_opened_by"] = "rec_combo (the panel has no FUNC/VOICE names)"
-    c.periods(2)
+    # 1. the RECORDER: FUNC held, the VOICE key (panel code 49, as the gate's recorder step
+    # presses it; the firmware's name table calls 49 LEVEL) pressed and let go, FUNC let go.
+    # It opens on VOICE's release (measured), so FUNC is held through it
+    def held(code, on):
+        f = c.panel.panelin.press if on else c.panel.panelin.release
+        c.machine.pc = f(c.machine.m, c.panel.profile, *key(code))
+        c.periods(3)
+    held(17, True); held(49, True); held(49, False); held(17, False)
+    setup.append(("the RECORDER opened", "UI: FUNC + VOICE (panel keys, audio periods between)"))
     c.put32(lay["rec_src"], 0)                                   # IN (knob A's value; set, not turned)
     c.put32(lay["rec_rlen"], 1)                                  # R.LEN 1 step (knob G's)
+    setup.append(("SRC IN, R.LEN 1 step", "direct: the recorder's variables written"))
     if "rec_rstrt" in lay:
         c.put32(lay["rec_rstrt"], 0)
-    step("1. the RECORDER is up", c.long(lay["rec_overlay"]) != 0, f"overlay {c.long(lay['rec_overlay'])}")
+        setup.append(("R.STRT", "direct"))
+    if not step("1. the RECORDER is up", c.long(lay["rec_overlay"]) != 0, f"overlay {c.long(lay['rec_overlay'])}"):
+        return done()
     cmds0 = c.long(lay["smp_cmds"])
     if a.brk == "noqueue":
         c.packet_filter = lambda words: None
     tap(names.get("YES", 10), after=1_000_000)
+    setup.append(("YES records", "UI: the YES key"))
     rec_at, end_at = None, None
+    c.phase = "recording"
+    t0 = shown = __import__("time").perf_counter()
     for n in range(400):
         if not c.period():
             break
+        now = __import__("time").perf_counter()
+        if now - shown >= 60:
+            shown = now
+            print(f"  [recording] period {n + 1} (at most 400), {(n + 1) / 1.5:.0f} ms of audio, {now - t0:.0f} s, "
+                  f"status {c.last_status[:2]}, started {rec_at}", flush=True)
         st = c.last_status[0]
         if st & 0xFF00 == 0x5A00 and st & 3 == 2 and rec_at is None:
             rec_at = n
@@ -217,6 +233,7 @@ def main() -> int:
         c.periods(10)
         phases.append(c.long(lay["rec_phase"]))
     yes = names.get("YES", 10)
+    setup.append(("TRIM, FILE NAME, ASSIGN", "UI: YES, YES, [TRIG 1] (panel keys)"))
     tap(yes, after=5_000_000)                                    # TRIM -> FILE NAME
     phases.append(c.long(lay["rec_phase"]))
     tap(yes, after=5_000_000)                                    # FILE NAME -> ASSIGN
@@ -230,6 +247,7 @@ def main() -> int:
                 f"phases {phases}, SAMP {samp}, the take's slot {k} (SAMP {k + 1})"):
         return done()
 
+    setup.append(("STRT", "UI: SRC page key, encoder E turned"))
     # 5. STRT, fine, on the SYN page's encoder E
     c.panel.tap((0, 1))
     for _ in range(a.strt_counts):
@@ -252,6 +270,7 @@ def main() -> int:
         return bytes(b)
     if a.brk in ("nosel", "wrongslot"):
         c.frame_filter = fil
+    setup.append(("the note", "UI: KEYBOARD, [TRIG 9] held"))
     kb, trig9 = names.get("KEYBOARD"), 33
     if kb:
         tap(kb)
@@ -259,6 +278,7 @@ def main() -> int:
     c.machine.pc = c.panel.panelin.press(c.machine.m, c.panel.profile, *key(trig9))
     fw = []
     out = []
+    c.phase = "the note"
     for n in range(40):
         if not c.period():
             break

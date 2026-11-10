@@ -43,6 +43,14 @@ STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 SEQ_ISR, SEQ_VECTOR = 0x400D987A, 121   # the sequencer's timer ISR (emu_jump.py, emu_waverider_menu.py)
 SEQ_ENTRIES_A_STEP = 24                 # 4 entries a tick, 6 ticks a sixteenth (measured, emu_jump.py)
 UI_SLICE = 1_000_000                    # ColdFire instructions a period between ISRs (the UI loop's pass needs about this here)
+# v0.48, the timing-faithful mode (docs/coupled-emulator.md): on the unit the audio ISR takes
+# 56 % of the ColdFire's time with the sequencer stopped (docs/coldfire-tasks.md, the USB
+# probe's protocol 3), so a frame is the ISR's own cost / 0.56, measured here in the same units
+# the UI's slice and the timers count (the fast stepper's blocks x per_block)
+ISR_SHARE_STOPPED = 0.56
+AUDIO_HZ = 1500
+TICK = 0x466758B0                       # the panel task's 60 Hz tick (the timer wheel's, every PIT2)
+IDLE_SPIN = 0x400CF0E2                  # the idle task's bra.s * (docs/coldfire-tasks.md)
 
 
 def _bits(x: float) -> int:
@@ -51,12 +59,16 @@ def _bits(x: float) -> int:
 
 class Coupled:
     def __init__(self, build_syx: str, snapshot: str, stock_syx: str, digikit_sharc: str | None = None,
-                 png_dir: str | None = None, verbose: bool = False):
+                 png_dir: str | None = None, verbose: bool = False, dsp: bool = True):
         self.verbose = verbose
         t0 = time.perf_counter()
         self._load_images(build_syx, stock_syx)
         self._cf_setup(snapshot, png_dir)
-        self._dsp_setup(digikit_sharc)
+        # dsp=False: the ColdFire alone (the ISR, the sequencer, the frame it builds, the UI),
+        # no DSP block: its status and replies stay as they were (category 2, not 1)
+        self.dsp = dsp
+        if dsp:
+            self._dsp_setup(digikit_sharc)
         self.blocks = 0
         self.last_seq = {0: None, 1: None}
         self.delivered = 0
@@ -69,6 +81,17 @@ class Coupled:
         # packet_filter(words) -> words or None, the ColdFire's packet before delivery
         self.frame_filter = None
         self.packet_filter = None
+        # the scheduling: "fast" (UI_SLICE a period: the UI about 80 x the audio's pace) or
+        # "faithful" (set_timing: a frame's worth of instructions shared as on the unit)
+        self.timing = "fast"
+        self.frame_units = None
+        self.isr_units = []
+        self.ui_units = 0.0
+        self.last_call_units = 0.0
+        # progress (periods(..., label=)) and the watchdog
+        self.phase = "setup"
+        self.period_wall = []
+        self._last_done = time.perf_counter()
         self.shortcut_probe = True
         self.seq_acc = 0.0                      # the sequencer's timer, kept in step with the frames
         self.probes_shortcut = 0
@@ -136,6 +159,7 @@ class Coupled:
             uc.emu_start(fn, until if until is not None else SENTINEL, count=limit)
         finally:
             if stepper is not None:
+                self.last_call_units = ((1 << 40) - stepper.left) * stepper.per_block
                 stepper.left = 0
         d0 = uc.reg_read(K.UC_M68K_REG_D0)
         pc = uc.reg_read(K.UC_M68K_REG_PC)
@@ -206,15 +230,31 @@ class Coupled:
         """one audio period: the UI's slice, the ColdFire's ISR, the DSP's block, the replies"""
         if self.halt:
             return False
-        self.panel.settle(ui)
+        t_start = time.perf_counter()
+        if self.timing == "faithful":
+            last = self.isr_units[-1] if self.isr_units else self.frame_units * ISR_SHARE_STOPPED
+            ui = max(0, int(self.frame_units - last))
+        if ui:
+            self.ui_units += self.panel.settle(ui)
         self._seq_tick()
         _, pc = self.call(ISR, until=ISR_RTE)
+        self.isr_units.append(self.last_call_units)
+        if len(self.isr_units) > 4096:
+            del self.isr_units[:2048]
         if pc != ISR_RTE:
             self.halt = f"the ColdFire's ISR stopped at {pc:#x}"
             return False
         frame_be = self.read(CF_FRAME, 2688)
         if self.frame_filter is not None:
             frame_be = self.frame_filter(frame_be)
+        self.last_frame = frame_be
+        if not self.dsp:
+            self._cf_packet()
+            self.blocks += 1
+            now = time.perf_counter()
+            self.period_wall.append(now - t_start)
+            self._last_done = now
+            return True
         frame = self.M.swap16(frame_be)
         packet = self._cf_packet()
         if packet is not None and self.packet_filter is not None:
@@ -274,6 +314,9 @@ class Coupled:
                 self.poke(CF_TDM_RX + (half << 11) + 4 * (16 * frm + 14 + k), struct.pack(">I", w))
         self._shortcut_probe()
         self.blocks += 1
+        now = time.perf_counter()
+        self.period_wall.append(now - t_start)
+        self._last_done = now
         return True
 
     def _seq_tick(self):
@@ -318,13 +361,87 @@ class Coupled:
             self.dsp_poke(self.SL_C["pres"], 1)
             self.probes_shortcut += 1
 
-    def periods(self, n, ui=UI_SLICE, each=None):
-        for _ in range(n):
+    def periods(self, n, ui=UI_SLICE, each=None, label=None, every=60.0):
+        """N periods. With LABEL, a progress line at least every EVERY seconds of wall time:
+        the phase, periods done of N, the audio time they make, the wall time, the measured
+        throughput and the time left at it."""
+        if label:
+            self.phase = label
+        t0, shown = time.perf_counter(), time.perf_counter()
+        for k in range(n):
             if not self.period(ui):
                 return False
             if each is not None:
                 each(self)
+            now = time.perf_counter()
+            if label and (now - shown >= every or k == n - 1):
+                shown = now
+                rate = (k + 1) / (now - t0)
+                print(f"  [{label}] {k + 1}/{n} periods, {(k + 1) / AUDIO_HZ * 1000:.1f} ms of audio "
+                      f"(block {self.blocks}), {now - t0:.0f} s, {1 / rate:.1f} s a period, "
+                      f"about {(n - k - 1) / rate / 60:.1f} min left ({self.timing})", flush=True)
         return True
+
+    def set_timing(self, mode, calibrate=24):
+        """"fast" or "faithful". Faithful: a frame is ISR_SHARE_STOPPED of the ISR's cost measured
+        over CALIBRATE periods now (call it with the sequencer stopped and nothing recording,
+        once; the frame stays fixed after, as the unit's clock does), the UI gets what the ISR
+        leaves of it, and every timer counts that frame rate's instructions a second."""
+        if mode == "faithful" and self.frame_units is None:
+            self.timing = "fast"
+            self.periods(calibrate, label="calibrating the frame")
+            w = sorted(self.isr_units[-calibrate:])
+            self.frame_units = w[len(w) // 2] / ISR_SHARE_STOPPED
+        self.timing = mode
+        ips = (self.frame_units * AUDIO_HZ) if mode == "faithful" else None
+        for src in getattr(self.panel.timers, "sources", (self.panel.timers,)):
+            if not hasattr(src, "ips"):
+                continue
+            if not hasattr(src, "_ips_fast"):
+                src._ips_fast = src.ips
+            src.ips = ips if ips else src._ips_fast
+        return self.frame_units
+
+    def timing_report(self, n=AUDIO_HZ // 2):
+        """N periods measured: the clocks against the audio (the 60 Hz tick, the frame counter,
+        the timers' interrupts) and the UI's share that the idle task spent spinning"""
+        from unicorn import UC_HOOK_CODE                     # noqa: PLC0415
+        spins = {"n": 0}
+
+        def on_spin(uc_, ad, sz, us):
+            spins["n"] += 1
+        h = self.uc.hook_add(UC_HOOK_CODE, on_spin, begin=IDLE_SPIN, end=IDLE_SPIN)
+        t0, f0 = self.long(TICK), self.long(0x4058E8D4)
+        fired0 = dict(self.panel.timers.fired)
+        ui0, isr0 = self.ui_units, len(self.isr_units)
+        self.periods(n, label=f"timing report ({self.timing})")
+        self.uc.hook_del(h)
+        per = getattr(getattr(self.machine.m, "_fast_stepper_obj", None), "per_block", 1.0)
+        fired = {k: v - fired0.get(k, 0) for k, v in dict(self.panel.timers.fired).items()}
+        isr = self.isr_units[isr0:]
+        ui = self.ui_units - ui0
+        out = {"mode": self.timing, "periods": n, "audio_s": n / AUDIO_HZ,
+               "tick_60hz": self.long(TICK) - t0, "tick_want": round(60 * n / AUDIO_HZ, 1),
+               "frames": self.long(0x4058E8D4) - f0, "timers_fired": fired,
+               "isr_units_median": sorted(isr)[len(isr) // 2] if isr else None,
+               "ui_units_a_period": ui / n, "frame_units": self.frame_units,
+               "idle_spin_share_of_ui": (spins["n"] * per / ui) if ui else None}
+        return out
+
+    def watchdog(self, quiet=600.0):
+        """A thread that says so when no period has completed for QUIET seconds (and after
+        every further QUIET): the phase, the last block. It stops nothing."""
+        import threading                                       # noqa: PLC0415
+
+        def run():
+            while True:
+                time.sleep(30)
+                idle = time.perf_counter() - self._last_done
+                if idle >= quiet:
+                    print(f"  WATCHDOG: no period completed for {idle:.0f} s (phase '{self.phase}', "
+                          f"last block {self.blocks}, halt {self.halt})", flush=True)
+                    self._last_done = time.perf_counter()
+        threading.Thread(target=run, daemon=True).start()
 
     # -- the panel -------------------------------------------------------------------------
     def press(self, code):

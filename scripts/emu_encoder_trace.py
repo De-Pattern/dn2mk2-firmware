@@ -72,6 +72,8 @@ def main() -> int:
     p.add_argument("--no-wheel", action="store_true",
                    help="negative control: stop delivering PIT2 (the timer-wheel tick) before the turn, so the "
                         "panel task never flushes; the trace must report the loss at the queue stage")
+    p.add_argument("--hold", type=int, default=None,
+                   help="a panel code held through the turn (17 FUNC; 41 + encoder: that encoder's push)")
     p.add_argument("--regs", action="append", default=[], help="ADDR: log D0-D7/A0-A6 there")
     p.add_argument("--dump", action="append", default=[], help="ADDR:REG:LEN: at ADDR log LEN bytes at register REG")
     p.add_argument("--build", default=None, help="a .syx: install its ColdFire image over the snapshot first")
@@ -226,6 +228,9 @@ def main() -> int:
            "start": {"tick": now(), "value": word(), "acc": m.long(ACC + 4 * a.enc),
                      "pending": m.long(PENDING), "last": m.long(LAST + 4 * a.enc)},
            "steps": []}
+    if a.hold is not None:
+        m.pc = panel.panelin.press(m.m, panel.profile, *divmod(a.hold - 1, 8))
+        panel.settle(2_000_000)
     log.clear()
     for k, d in enumerate(plan):
         seqn["n"] = k
@@ -238,6 +243,8 @@ def main() -> int:
                              "consumed": panelin_state(panel)["consumed"] - st["consumed"],
                              "acc": m.long(ACC + 4 * a.enc), "pending": m.long(PENDING), "value": word()})
     seqn["n"] = len(plan)
+    if a.hold is not None:
+        m.pc = panel.panelin.release(m.m, panel.profile, *divmod(a.hold - 1, 8))
     panel.settle(a.tail)
     out["records_after"] = records()
     out["end"] = {"tick": now(), "value": word(), "acc": m.long(ACC + 4 * a.enc), "pending": m.long(PENDING)}
