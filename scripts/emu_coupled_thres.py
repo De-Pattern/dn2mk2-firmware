@@ -81,13 +81,13 @@ def main() -> int:
         c = setup()
         c.put32(lay["rec_thres"], 30)
         arm(c)
-        armed = run_until(c, 1, 30)
-        started = run_until(c, 2, 30) if armed else None
-        report["numbers"]["A"] = {"armed_after": armed, "started_after": started, "status": c.last_status,
+        started = run_until(c, 2, 30)                           # (armed and over the threshold at once:
+        echoed = c.last_status[1] == (c.long(lay["smp_cmds"]) & 0xFFFF) if started else False   # no armed block seen)
+        report["numbers"]["A"] = {"started_after": started, "status": c.last_status,
                                   "halt": c.halt, "faults": len(c.faults())}
         print("  A:", report["numbers"]["A"], flush=True)
-        report["checks"]["A: THRES 30 (tick -45 dB), a -34 dB tone: armed, then the take starts"] = bool(
-            armed and started and started <= 6)
+        report["checks"]["A: THRES 30 (tick -45 dB), a -34 dB tone: the take starts on the ARM"] = bool(
+            started and started <= 6)
     if "B" in a.only:
         c = setup()
         c.put32(lay["rec_thres"], 110)
