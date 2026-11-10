@@ -491,14 +491,34 @@ def entry_check(p: Prog, L: Layout) -> None:
 MIN_REGION = 32                                # v0.22: the shortest ONESHOT region, frames
 
 
+POS_TOP = 120 << 8                       # v0.48: STRT, LEN, LOOP as the DT2's: 0.00..120.00, 1/256 a step
+
+
+def ctl_pos(p: Prog, d: int, rec: int, k146: int) -> None:
+    """v0.48 (impbox, the owner: the DT2's resolution): Rd = the position control on REC as its
+    whole 16-bit word, 0..POS_TOP (120.00 in 1/256), for STRT, LEN and LOOP only: the DT2's own
+    records for them are fine-resolution (records 0x401eb844.. in its 1.17 OS: range 0x7800,
+    the fine flag set), and the ColdFire gives ours the same (fmt.c smp_fine), so a step under
+    a whole number reaches playback. v0.15..v0.47 read them through ctl() (the word >> 8: 121
+    places across a sample). A word over POS_TOP (an older project's LEN at 127) is 120.00.
+    Clobbers R0, R1, R12, I1."""
+    slot, lo, top = SM.RECORDS[rec]
+    assert lo == 0, rec
+    PP.half(p, d, PM.frame_offset(slot), k146)
+    p.iconst(12, 0)
+    p.iop(d, d, "MAX", 12)
+    p.iconst(12, POS_TOP)
+    p.iop(d, d, "MIN", 12)
+
+
 def oneshot_bounds(p: Prog, L: Layout) -> None:
     """lo, hi and loop from STRT, LEN and LOOP (R10: the track's frame slot base, F13: the
     sample's frames). Clobbers R4..R7, R12, R14, R15, I1."""
-    ctl(p, 4, SM.STRT_REC, 10)           # 0..120
-    tofloat(p, 14, 4, 1.0 / 120.0)
+    ctl_pos(p, 4, SM.STRT_REC, 10)       # v0.48: 0..120.00 in 1/256 (was 0..120 whole)
+    tofloat(p, 14, 4, 1.0 / POS_TOP)
     p.fop(14, 14, "*", 13)               # lo = STRT frames
-    ctl(p, 4, SM.LEN_REC, 10)            # 0..127
-    tofloat(p, 15, 4, 1.0 / 127.0)
+    ctl_pos(p, 4, SM.LEN_REC, 10)        # v0.48: 0..120.00 (was 0..127 whole, as WDTH's record)
+    tofloat(p, 15, 4, 1.0 / POS_TOP)
     p.fop(15, 15, "*", 13)
     # v0.22: never an empty region (an empty one ended the note, and a held note stayed
     # silent when the knob came back): at least MIN_REGION frames, or a 508th of the
@@ -519,8 +539,8 @@ def oneshot_bounds(p: Prog, L: Layout) -> None:
     p.iop(5, 5, "MIN", 6)
     vs(p, "lo", 4)
     vs(p, "hi", 5)
-    ctl(p, 7, SM.LOOP_REC, 10)           # 0..127: the loop point, in the whole sample
-    tofloat(p, 7, 7, 1.0 / 127.0)
+    ctl_pos(p, 7, SM.LOOP_REC, 10)       # v0.48: 0..120.00: the loop point, in the whole sample
+    tofloat(p, 7, 7, 1.0 / POS_TOP)
     p.fop(7, 7, "*", 13)
     p.trunc(6, 7)
     v(p, 4, "lo")
@@ -867,7 +887,7 @@ def region(p: Prog, L: Layout) -> None:
         def oneshot():
             p.ld(9, C["t"])
             PP.t146(p, 10, 9)
-            ctl(p, 4, SM.STRT_REC, 10)
+            ctl_pos(p, 4, SM.STRT_REC, 10)   # v0.48: 0 only at 0.00 (a fraction is a start past 0)
             p.ifz(4, "EQ", lambda: (p.iconst(0, 0), vs(p, "fin", 0)))
         p.if_(0, "EQ", 12, oneshot, kind="i")
     p._branch(lambda: s32(p.r[4]) - s32(p.r[5]) < 0, "LT", go, None)
