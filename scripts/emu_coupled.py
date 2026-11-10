@@ -40,6 +40,8 @@ CF_FRAME = 0x80005E60                   # the frame as the ColdFire builds it (1
 CF_REPLY_TAIL = 0x80005E40              # the SPI reply's tail: the DSP's status, 16 BE halfwords
 CF_TDM_TX, CF_TDM_RX = 0x4E6E0100, 0x4E6DF100
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
+SEQ_ISR, SEQ_VECTOR = 0x400D987A, 121   # the sequencer's timer ISR (emu_jump.py, emu_waverider_menu.py)
+SEQ_ENTRIES_A_STEP = 24                 # 4 entries a tick, 6 ticks a sixteenth (measured, emu_jump.py)
 UI_SLICE = 1_000_000                    # ColdFire instructions a period between ISRs (the UI loop's pass needs about this here)
 
 
@@ -63,6 +65,7 @@ class Coupled:
         self.taps: dict = {}
         self.input = None                       # block -> ([32 floats L], [32 floats R]): the inputs
         self.shortcut_probe = True
+        self.seq_acc = 0.0                      # the sequencer's timer, kept in step with the frames
         self.probes_shortcut = 0
         from dnfw.sampler import live as SL     # noqa: PLC0415
         self.SL_C = SL.layout().C
@@ -199,6 +202,7 @@ class Coupled:
         if self.halt:
             return False
         self.panel.settle(ui)
+        self._seq_tick()
         _, pc = self.call(ISR, until=ISR_RTE)
         if pc != ISR_RTE:
             self.halt = f"the ColdFire's ISR stopped at {pc:#x}"
@@ -262,6 +266,37 @@ class Coupled:
         self._shortcut_probe()
         self.blocks += 1
         return True
+
+    def _seq_tick(self):
+        """The sequencer's timer ISR (it never fires on its own here: the timers are deferred),
+        entered as the interrupt would be, at the rate the tempo gives: the frame's word 108 is
+        BPM x 120, a sixteenth SEQ_ENTRIES_A_STEP entries, 1,500 periods a second"""
+        bpm = struct.unpack(">H", self.read(CF_FRAME + 2 * 108, 2))[0] / 120.0
+        if bpm <= 0:
+            return
+        self.seq_acc += SEQ_ENTRIES_A_STEP * (bpm / 15.0) / 1500.0
+        uc, K, m = self.uc, self.K, self.machine
+        while self.seq_acc >= 1.0:
+            self.seq_acc -= 1.0
+            saved = [uc.reg_read(r) for r in self.regs]
+            pc0, sr0 = uc.reg_read(K.UC_M68K_REG_PC), uc.reg_read(K.UC_M68K_REG_SR)
+            sp = STACK_TOP - 0x100
+            m.write(sp, struct.pack(">HHI", 0x4000 | (SEQ_VECTOR << 2), 0x2000, SENTINEL))
+            m.write(SENTINEL, bytes.fromhex("4e714e71"))
+            uc.reg_write(K.UC_M68K_REG_A7, sp)
+            stepper = getattr(m.m, "_fast_stepper_obj", None)
+            if stepper is not None:
+                stepper.left = 1 << 40
+            try:
+                uc.emu_start(SEQ_ISR, SENTINEL, count=3_000_000)
+            finally:
+                if stepper is not None:
+                    stepper.left = 0
+            for r, v in zip(self.regs, saved):
+                uc.reg_write(r, v)
+            uc.reg_write(K.UC_M68K_REG_PC, pc0)
+            uc.reg_write(K.UC_M68K_REG_SR, sr0)
+            m.pc = pc0
 
     def _shortcut_probe(self):
         """The one shortcut: the DSP's power-on RAM check (CMD_PROBE, sampler program.probe:
