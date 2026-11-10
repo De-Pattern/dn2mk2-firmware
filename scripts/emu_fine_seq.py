@@ -11,8 +11,8 @@ Set up through the panel (the UI's own paths) unless marked direct:
   - PLAY; while it plays the active track goes 0 -> 1 -> 0 -> 1 ([TRK] + [TRIG n]), so the
     records 239/258/257 are swapped in and out under the sequencer.
 
-Checked every period, from the frame the ColdFire built: each track's value word for the
-locked slot is its lock on step 1 and its own base on the others, to the bit, whatever track
+Checked every period, from the per-voice mirror the frame is built from (the voices the
+slot -> track table gives each track): each track's value word for the locked slot is its lock on step 1 and its own base on the others, to the bit, whatever track
 is active; at the end the kit's values are what they were; no faults.
 
 Usage: emu_fine_seq.py --build out/v048.syx [--json OUT]"""
@@ -85,8 +85,11 @@ def main() -> int:
     def val(t, slot):
         return struct.unpack(">H", c.read(snd(t) + 0x14 + 2 * slot, 2))[0]
 
-    def fword(v, slot):                                          # voice V's record in the frame
-        return struct.unpack(">H", c.last_frame[168 + 2 * slot + 146 * v:170 + 2 * slot + 146 * v])[0]
+    def fword(v, slot):
+        """voice V's value for SLOT in the per-voice mirror the frame is built from (0x800068E4,
+        101 words a voice after 17: emu_slides.py's OUT). The frame's own words are this after
+        the ISR's smoothing (a glide toward it every frame), so they are not compared to the bit"""
+        return struct.unpack(">H", c.read(0x800068E4 + 2 * (17 + 101 * v + slot), 2))[0]
 
     owner = c.call(0x4018A97A)[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, A, ONESHOT, 1, 1)
