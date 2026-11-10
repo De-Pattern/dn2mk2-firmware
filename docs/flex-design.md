@@ -1,95 +1,122 @@
-# FLEX: live-buffer machine (design, not yet built)
+# FLEX: live-buffer machine (design settled 2026-11-10, not yet built)
 
-Owner, 2026-11-09. Replaces BOUNCE (removed in v0.48: docs/bounce-removal-plan.md). Built **after**
-the emulator runs the ColdFire and the DSP together, so the whole record -> buffer -> note-trig
-playback path is tested before it ships (BOUNCE passed every separate check and played nothing on
-the unit: its recorder trigs fired and takes were made, the playback never sounded).
+Owner, 2026-11-09 (first design) and 2026-11-10 (this revision, after the Discord discussion and
+the review of BOUNCE). Replaces BOUNCE (removed in v0.48: docs/bounce-removal-plan.md). Built on
+the coupled emulator (ColdFire and DSP together), so record -> buffer -> note-trig playback is
+tested end to end before it ships. BOUNCE passed every separate check and played nothing on the
+unit: its trigs fired and takes were made; the track never played its buffer.
 
-Sources: the owner's FLEX handoff (DN2mk2_FLEX_Implementation_Handoff.pdf, GPT, 2026-11-09) for the
-behaviour; its mockups are superseded. The owner's rules for the screens:
-- SYN pages: Elektron's eight-encoder grid, icons, value fields and page navigation.
-- RECORDER: the existing DT2-style recorder (meter, labels, controls, waveform).
-- Waveforms: the existing waveform drawing and DT2-style trim markers.
-- Recorder trigs: shown on the 16 physical keys' LEDs (v0.45..v0.47's bn_led_walk/bn_led_poll,
-  in git history on branch v047).
-Every screen 128 x 64, drawn with the existing renderer.
+## Purpose (owner, 2026-11-10)
+
+Capture perfectly timed loops from CPU-heavy tracks while the sequencer runs, then play them from
+FLEX with ordinary note trigs, and mute the source to free its DSP time. Example: track 1 an
+expensive Monomachine patch; FLEX on track 16 records exactly 16 steps of it from a one-shot
+recorder trig on step 1; a note trig on step 1 plays the loop; track 1 is muted.
+Timing accuracy and reliable playback come first; nothing that compromises them goes in.
+
+## Decisions (owner, 2026-11-10)
+
+- **Single buffer** per FLEX buffer slot (always the owner's intent). No take swapping.
+- **No Q.PLAY.** Playback is note trigs, already on the grid. BOUNCE's Q.PLAY (when a finished take
+  replaced the playing one) was ours, not the Octatrack's, and is not carried over.
+- **Q.REC: a trigless way to record.** YES while the sequencer runs waits for the next Q.REC
+  boundary, then records R.LEN steps. ("Start at the next step 1" from Discord is Q.REC = PLEN.)
+- **Playing while recording is allowed**, as the Octatrack: a note on the recorder trig's step
+  plays the audio as it arrives. Pitched up, the playhead catches the write head (stock Octatrack
+  behaviour too: accepted).
+- **Saving a buffer as a sample: included.**
+- **The BUS matrix: wanted, if it can be done elegantly and stably**; not essential. Built last;
+  left out of v0.49 if it costs too much room, DSP time, memory or development time.
+- **Stereo: out of scope.** Takes are the recorder's format.
+- Four detents a choice on every multi-choice knob. Screens from the handoff's mockups (below).
+
+## The core idea: a buffer is a region plus a valid-frames count, owned by the DSP
+
+Each of the 8 buffers: an address and length in the recordings area (allocated on first record,
+R.LEN at the tempo) and a **valid-frames** count. The DSP's recorder raises the count as it writes
+and reports start, progress and end to the ColdFire (BOUNCE's ColdFire predicted the end with a
+timer). A FLEX voice never reads past the count. So:
+- a take that ends early or is cut off leaves exactly what was written, and plays that;
+- a note during a recording plays what has arrived (one block, ~0.7 ms, behind the write head:
+  the DSP renders voices before the recorder writes the block);
+- nothing stale or uninitialised is ever heard.
+Later seamless replacement (a second region, the pointer flipped at a safe point) fits this
+without a redesign.
 
 ## Machine
 
-- A new type: **19** (FASCIA is 18). BOUNCE's 17 stays a silent compatibility stub (v0.48).
-- SYN page 1: A TUNE, B PLAY, C -, D **BUF**, E STRT, F LEN, G LOOP, H LEV (ONESHOT's, with BUF in
-  SAMP's place).
-- **BUF: 01..08 over the knob's whole travel, a detent each** (BOUNCE's BUF sat on a 0..100 record
-  read as "anything over 7 is 8": the default was BUF 8 and only the first 8 clicks chose). Tested by
-  turning the knob from its default, not by writing the value.
-- The track plays its buffer through its **own note trigs**, as ONESHOT does. A waveform of the take
-  on the SYN page; `BUF01 EMPTY` with nothing recorded.
+- Type **19** (FASCIA 18; BOUNCE's 17 stays a silent stub).
+- SYN page 1: A TUNE, B PLAY, C -, D **BUF**, E STRT, F LEN, G LOOP, H LEV (ONESHOT's, BUF in SAMP's
+  place). BUF 01..08, a detent each over the knob's travel (BOUNCE's BUF: default 8, only the first
+  8 clicks chose). STRT/LEN/LOOP: v0.48's fine controls, against the take's length.
+- Playback is ONESHOT's DSP code reading the buffer, bounded by the valid count. A waveform of the
+  take on the SYN page; `BUF01 EMPTY` with nothing recorded.
 
 ## Recording
 
-- FUNC + VOICE: **FLEX REC**, two pages:
-  - **REC TRIGS** (on entry): [TRIG 1..16] toggle recorder trigs on the page's steps; FUNC + [TRIG]
-    a one-shot. The trig LEDs show them (red a trig, yellow a one-shot, dim yellow spent). Status
-    lines and the take's waveform.
-  - **REC SETUP** (RIGHT): A SRC, B CHAN, C DEST, D RLEN, E ARM, F QREC, G QPLAY, H -. Four-click
-    detents on every choice.
-- **Sources** (A SRC):
-  - **BUS** (default): the resampling bus (below).
-  - **TRK1..16**: one track's own block (today's TRK source).
-  - **IN**: the inputs.
-  - **MAIN**: the whole mix as heard, FLEX tracks included: the feedback choice, labelled so.
-- A take is heard only once it is complete; the previous take plays until then. A one-shot is
-  spent only when the DSP confirms the take started. No silent truncation: `NO ROOM`, `BUSY`.
+Three ways to start a take, one recorder (the DSP has one), one owner at a time:
+1. **Recorder trigs**: on their step, for R.LEN steps. Ordinary (every pass) or **one-shot**
+   (records once, then spent; YES YES re-arms). New trigs default to one-shot: an ordinary trig
+   left on a loop re-records over the bounce every pass.
+2. **Q.REC** (manual, trigless): YES while playing waits for the next boundary (OFF, 1, 2, 4, 8,
+   16, 32, 64, PLEN); OFF records at once. NO cancels while waiting.
+3. **The recorder's own ARM / R.STRT** (threshold, transport start), as today.
 
-## The resampling bus (owner, 2026-11-09)
+The owner state machine (ColdFire): a manual take pending or running refuses recorder trigs
+(`MANUAL REC`); a trig while a take runs is refused (`BUSY`), never cuts it; two FLEX tracks'
+trigs on one step: the lower track records, the other shows `BUSY`. A one-shot is spent only when
+the DSP confirms its take started. No silent truncation: `NO ROOM`.
 
-- What it records: the sum of the selected tracks' own blocks (the DSP already keeps one per
-  track: SM.TRK_BUF, the source of TRK1..16 today), fed to the existing recorder. Elektron's mixer
-  and the MAIN output are untouched; the DSP cost is one add a sample a selected track.
-- **Selection: a matrix page, as the Syntakt's routing page.** Two rows of eight numbered cells (the
-  16 tracks). **[TRIG n] toggles track n**: a selected track's cell is drawn **inverted** (filled,
-  its number cut out), as a p-locked parameter is highlighted, and its key's LED lit; pressed again,
-  it is removed.
-- **FLEX tracks are out by default** (every FLEX track, not only the recording one, so two FLEX
-  tracks never feed each other). A FLEX track's cell is drawn struck until deliberately pressed in.
-- Default: every non-FLEX track in.
-- **Dry**: each block is taken after the track's amp, before pan, the track's LEVEL, the send
-  effects and the master section. **Decided (owner, 2026-11-09): each track's LEVEL is applied in the bus** (the ColdFire knows
-  it), so the recorded balance is the balance heard. Send-effect returns in the bus: only after research shows they can
-  be tapped safely.
-- Stored per FLEX owner track and pattern, with the other REC SETUP values.
+- **Sources**: TRK1..16 (one track's own block: the bounce), IN, MAIN; BUS if built.
+- **Saving** (FUNC + YES): the buffer's take into the next empty pool slot and the +Drive, as a
+  manual recording (SAVING, NORMALIZING, TRIM, FILE NAME, ASSIGN). BOUNCE's bn_save.
 
-## DSP work (the release blockers)
+## The resampling bus (if built)
 
-1. **Start and completion acknowledgements** from the DSP's recorder (today the ColdFire predicts
-   the end with a timer).
-2. **Which buffer each voice is reading**, so a half is never overwritten while a note plays it
-   (or, conservatively, refuse a third take while any voice of that buffer sounds: `BUF BUSY`).
-3. **The bus source**: the selected tracks' blocks summed into the recorder's input, with each
-   track's level.
-4. Per-half waveform peaks for the display (approximate peaks from the meter acceptable at first).
-5. MAIN's reported silence on some units checked on its own before anything builds on it.
+As designed 2026-11-09: the sum of the selected tracks' blocks (dry, after the amp, each track's
+LEVEL applied) into the recorder. A Syntakt-style matrix page: [TRIG n] toggles track n, a selected
+cell drawn inverted, its LED lit; FLEX tracks out by default (struck until pressed in); default
+every non-FLEX track in; stored per FLEX track and pattern. DSP cost: one add a sample a selected
+track.
+
+## Freeing the source's DSP time
+
+Mute, not LEVEL: a muted track gets no note-on on stock (docs/mute-research.md); its voices end by
+their release, and ours then rest (Machinedrum, VO-6). To measure for every machine family (SID
+and the other Monomachine machines, stock FM) with the load meter in the emulator; any that do not
+rest get a fix or a release note. A TRK take is before LEVEL and the sends: FLEX has its own.
+
+## Screens (owner: the handoff's mockups)
+
+Layout and wording from DN2mk2_FLEX_Implementation_Handoff.pdf, appendix (mockups 01..20), drawn
+with the existing renderer and font, on the 128 x 64 screen. Dropped: those for Q.PLAY and the
+double buffer (12 WAIT PLAY; QPLAY in 06 REC SETTINGS). Kept rules:
+- SYN pages: Elektron's eight-encoder grid. RECORDER: the existing DT2-style recorder (meter,
+  labels, waveform, trim markers). Recorder trigs on the [TRIG] LEDs (bn_led_walk/bn_led_poll,
+  branch v047's history): red a trig, yellow a one-shot, dim yellow spent.
+- Every value of a control at the same place, size and baseline; every choice fits its cell;
+  status lines fit their box. Gate: every control through every value, every status drawn, the
+  pixels inside their cell or box.
+
+## Also in v0.49 (owner, 2026-11-10): the guard
+
+NiKo's report (v0.47: SID + three PERC, an ONESHOT kick crunchy at ~85 %): the frame-time guard left
+the sample voice out block after block (a sample voice is retried every block, so it flickered).
+- Render the sample voices first, so time runs out on the heavy ones.
+- A sample voice left out is stopped until its next note (as PERC's), never flickers.
+Tested with the runner's stress scenario plus SID + PERC with an ONESHOT on a later track.
 
 ## Tests (gate)
 
-- The coupled emulator: a trig on a step -> the DSP records the chosen source -> the buffer's
-  directory entry -> a FLEX note trig plays it, the track's own output compared with what was
-  recorded. Every source (BUS with a chosen set, TRK, IN, MAIN).
-- BUF through the knob from its default, every detent.
-- The matrix: [TRIG n] toggles, the inverted cells, the LEDs, FLEX tracks excluded by default.
-- Old projects with BOUNCE tracks still load silent (v0.48's bouncegone step).
-- Room: the image size and the DSP time with FLEX playing on 16 tracks, within the limits.
+- Coupled: a one-shot recorder trig on step 1, a 16-step take of a track, a FLEX note trig playing
+  it, its render (read after the voices, before the stock chain) against the source; Q.REC; a note
+  on the trig's step during the take; an interrupted take; the one-shot spent; negative controls
+  that fail at their link.
+- BUF through the knob from its default, every detent; every REC SETUP choice its 4 detents.
+- The screens' text-fit check. Old BOUNCE projects still load silent (bouncegone).
+- Room: the image size and the DSP time with FLEX on 16 tracks.
 
-## Text and values never outgrow their place (owner, 2026-11-09)
+## Room (v0.48)
 
-- Every value of every control is drawn at the **same place, size and baseline** whatever it is:
-  `MAX` and `16` on the same line in the same font (not v0.47's RECORDER, where R.LEN's MAX sits
-  higher and larger than a number's two-line `16 / STEPS`). A unit word is not added under some
-  values and not others; the label says what the value is.
-- Every choice is designed to fit its cell (32 px a column: about 6 label characters).
-- Status lines fit their box (no overlap: BOUNCE's `64 STEPS, FN+YES SAVES` ran out of its box
-  over SRC and the grid).
-- **Gate**: every control is turned through every value, and every status in every state is
-  drawn; the text's pixels must stay inside the control's cell or the box, at the same baseline
-  for every value of a control. The same check is applied to the existing RECORDER in v0.48
-  (R.LEN's MAX and numbers on one line; its centre box's every message).
+ColdFire 2,076,257 of 2,097,152 bytes stored (20,895 free); DSP 1,010,704 of 1,048,575 (37,871
+free). v0.47 with BOUNCE was 2,080,802; FASCIA added about 15 KB (not in v0.49 unless FLEX leaves room).
