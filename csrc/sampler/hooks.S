@@ -122,3 +122,31 @@ smp_pj_new_hook:
         addq.l  #1, smp_pj_news
         addq.l  #1, smp_blank_req
         jmp     0x40042AFA
+
+| v0.48 (owner, 2026-11-09: KEYBOARD mode should survive grid recording). The RECORD key's
+| handler (0x40072cee.., a2 the handler) toggles grid recording (0x40055d72) and then asks
+| whether it is now on (jsr 0x40055cca(rec) at 0x40072d74 and 0x40072dca): when it is, stock
+| keeps KEYBOARD's state in a2@(136) and turns KEYBOARD off (0x40047002(kbd, 0), kbd =
+| a2@(116)). Stock gives it back only when a held RECORD is let go (0x40072e62); a second
+| RECORD press that turns grid recording off left KEYBOARD off. Here, in place of that jsr:
+| the same question; when the answer is "off" and KEYBOARD was on when grid recording began,
+| KEYBOARD is turned back on exactly as stock's own release path does (clear a2@(136), then
+| 0x40047002(kbd, 1)). d0 leaves as stock's answer; d1, a0, a1 are scratch at both sites
+| (the caller pops the argument and tests d0 next); every other register as it came.
+        .globl  kb_rec_hook
+kb_rec_hook:
+        move.l  4(%sp), -(%sp)                  | rec (the caller's argument)
+        jsr     0x40055cca                      | is grid recording on now?
+        addq.l  #4, %sp
+        tst.b   %d0
+        bne.s   1f                              | on: stock goes on to keep and clear KEYBOARD
+        tst.b   136(%a2)
+        beq.s   1f                              | KEYBOARD was off when it began: nothing to give back
+        clr.b   136(%a2)
+        moveq   #1, %d0
+        move.l  %d0, -(%sp)
+        move.l  116(%a2), -(%sp)
+        jsr     0x40047002                      | KEYBOARD on again (stock's release path's call)
+        addq.l  #8, %sp
+        moveq   #0, %d0                         | stock's answer: off
+1:      rts

@@ -207,6 +207,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("slides", "parameter slides (ColdFire)"),
        ("bouncegone", "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)"),
        ("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)"),
+       ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
@@ -2173,6 +2174,38 @@ def main() -> int:
         later("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)",
               "RECORDER text inside its places, every state and R.LEN value (ColdFire)",
               [rx_cmd, sorted(EMU_ENV.items())], rx_body)
+
+        # v0.48 (owner, 2026-11-09: "chromatic view is gone after REC grid mode ... i wish it
+        # [persisted], across all tracks and machine types"). KEYBOARD's state is the long at
+        # 0x42431a99 in this snapshot (the keyboard object's +56: 0x40047088 toggles it,
+        # 0x4004702e sets it; found with --access). KEYBOARD on; RECORD (grid recording on):
+        # off, as stock; RECORD again (off): on again (stock left it off); to track 2 (made an
+        # ONESHOT) with TRK + [TRIG 3]: still on; RECORD twice there: on; KEYBOARD off; RECORD
+        # twice: still off (nothing given back that was not taken)
+        from dnfw.sampler import machines as SMk        # noqa: PLC0415
+        KB = "mem:0x42431a99:4"
+        kb_steps = ["wait:6", KB, "tap:18", "wait:8", KB, "tap:19", "wait:8", KB, "tap:19", "wait:8", KB,
+                    f"poke:{0x4210C08C + 52 + 1163 * 2 + 0xDE:#x}:{SMk.TYPE_OF['ONESHOT']:02x}",
+                    "press:16", "wait:2", "tap:27", "wait:2", "release:16", "wait:8", KB,
+                    "tap:19", "wait:8", KB, "tap:19", "wait:8", KB,
+                    "tap:18", "wait:8", KB, "tap:19", "wait:8", KB, "tap:19", "wait:8", KB, "png:end"]
+        kb_js = work / "kbrec.json"
+        kb_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                  "--snapshot", snap, "--steps", ",".join(kb_steps), "--png-dir", work / "kbrec", "--json", kb_js]
+        KB_WANT = [0, 1, 0, 1, 1, 0, 1, 0, 0, 0]
+
+        def kb_body(tdir):
+            rc, out = run("keyboard rec", kb_cmd, logs, env=EMU_ENV, trace=tdir)
+            if rc != 0 or not kb_js.exists():
+                return False, out[-900:]
+            got = [int(v, 16) for v in json.loads(kb_js.read_text())["memory"].values()]
+            if got != KB_WANT:
+                return False, f"KEYBOARD's word {got}, wanted {KB_WANT}"
+            return True, ("KEYBOARD on; RECORD (grid recording): off as stock; RECORD again: on again; on "
+                          "another track, an ONESHOT: still on, and through RECORD twice; KEYBOARD off: "
+                          "RECORD twice leaves it off")
+        later("kbrec", "KEYBOARD kept through grid recording (ColdFire)",
+              "KEYBOARD kept through grid recording (ColdFire)", [kb_cmd, sorted(EMU_ENV.items())], kb_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()

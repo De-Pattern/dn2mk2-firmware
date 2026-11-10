@@ -499,6 +499,8 @@ REC_COMBO_STOCK = bytes.fromhex("2f2a00a44eb940046bfe")
 REC_COMBO_EXIT = 0x4005FC50             # the handler's common exit (the key offered to the base)
 LFO_MASK_LEA = 0x40039570               # the LFO destination list's lea 0x400dc30e,%a2 (v0.22)
 LFO_MASK_STOCK = 0x400DC30E
+KB_REC_SITES = (0x40072D74, 0x40072DCA)    # v0.48: the RECORD key's jsr 0x40055cca (grid recording on?), both toggles
+KB_REC_STOCK = bytes.fromhex("4eb940055cca")
 KEYNOTES_SITE = 0x40058BE8              # v0.23: KeyboardView's jsr 0x40034460(kbd, &notes, key)
 KEYNOTES_STOCK = bytes.fromhex("4eb940034460")
 MACHSEL_COLSW_SITE = 0x4005BABE         # v0.35: MACHINE SEL's redraw after LEFT / RIGHT (jsr 0x4011c7ba)
@@ -690,6 +692,17 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(KEYNOTES_SITE, bytes.fromhex("4eb9") + _long(csyms["slc_keynotes"]),
          "a trig key's notes in KEYBOARD mode: on a SLICE track (SLCE NOTE) slice k, else stock's",
          KEYNOTES_STOCK)
+
+    # v0.48 (owner): KEYBOARD mode survives grid recording. Stock keeps KEYBOARD's state when
+    # RECORD turns grid recording on and gives it back only when a held RECORD is let go; a
+    # second press turned grid recording off and left KEYBOARD off (seen in the emulator).
+    # kb_rec_hook (sampler/hooks.S) asks the same question and gives KEYBOARD back as stock's
+    # release path does.
+    for site in KB_REC_SITES:
+        _need(content, site - 4, bytes.fromhex("2f2a006c"), "the RECORD key's handler pushes its recorder")
+        _need(content, site + 6, bytes.fromhex("4fef00104a00"), "the handler pops three arguments and tests the answer")
+        edit(site, bytes.fromhex("4eb9") + _long(csyms["kb_rec_hook"]),
+             "RECORD's toggle: grid recording off gives KEYBOARD back (v0.48)", KB_REC_STOCK)
 
     # v0.30: MACHINE SEL from one sample machine to another keeps SAMP (owner's request: the
     # commit resets the sound to the machine's defaults, SAMP to OFF; measured in the emulator)
