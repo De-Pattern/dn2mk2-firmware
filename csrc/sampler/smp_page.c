@@ -2291,6 +2291,22 @@ static void bn_view_draw(void *c, int heard)
         choice(c, 3, TOP_Y, rl, "RLEN", 0);
         choice(c, 0, BOT_Y, rt_arm ? "ON" : "OFF", "ARM", rt_arm);
         choice(c, 1, BOT_Y, rt_qname(rt_qrec), "QREC", 0);
+        /* v0.49 (owner): the buffer's state in G and H's place, no box: a dot and REC while it
+         * records, WAIT while a take waits for Q.REC, else READY and its length, or EMPTY */
+        {
+            int tenths, steps, st = rt_state((int)b, &tenths, &steps);
+            int x = CELL_X(2) + 12, y = BOT_Y + 6;
+            (void)steps;
+            if (rt_req_waiting())
+                LABEL(c, x + 13, y, "%s", "WAIT QREC");
+            else if (st == 1) {
+                fill(c, x - 6, y + 1, x - 4, y + 3);
+                LABEL(c, x + 13, y, "REC %d.%dS", tenths / 10, tenths % 10);
+            } else if (st)
+                LABEL(c, x + 13, y, "READY %d.%dS", tenths / 10, tenths % 10);
+            else
+                LABEL(c, x + 13, y, "%s", "EMPTY");
+        }
         LABEL(c, 116, 2, "%s", "<");
         return;
     }
