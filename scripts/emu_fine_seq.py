@@ -169,14 +169,21 @@ def main() -> int:
                   f"{c.read(TRACK_CUR + A, 1)[0]}/{c.read(TRACK_CUR + B, 1)[0]}, seen {json.dumps({t: {k: sorted(hex(x) for x in v) for k, v in seen[t].items()} for t in seen})}", flush=True)
     tap(K_STOP)
     rep["seen"] = {t: {k: sorted(v) for k, v in seen[t].items()} for t in seen}
+    # only step 1 has a trig: its voice keeps the lock's value through steps 2..4 (no new note
+    # there), and shows the track's base before its first note. So each track's voices may hold
+    # exactly its base and its lock, and nothing of the other track's
+    lockv = {A: None, B: None}
+    for key_, v in lk0.items():
+        trk = int(key_.split("/")[1], 16) & 0x0F
+        if trk in lockv:
+            lockv[trk] = v
     for t in (A, B):
-        locked = seen[t].get(0, set())
-        others = set().union(*[v for k, v in seen[t].items() if k != 0]) if len(seen[t]) > 1 else set()
-        check(f"track {t}: the other steps play its base {base[t]:#06x} only", others == {base[t]},
-              f"{sorted(hex(x) for x in others)}")
-        check(f"track {t}: step 1 plays one locked value, not the base", len(locked) == 1 and base[t] not in locked,
-              f"{sorted(hex(x) for x in locked)}")
-    lock0 = next(iter(seen[A].get(0, {0})))
+        got = set().union(*seen[t].values()) if seen[t] else set()
+        other = B if t == A else A
+        check(f"track {t}'s voices hold only its own base and lock", got <= {base[t], lockv[t]} and lockv[t] in got,
+              f"{sorted(hex(x) for x in got)}; base {base[t]:#06x}, lock {lockv[t]:#06x} (other track: "
+              f"{base[other]:#06x}, {lockv[other]:#06x})")
+    lock0 = lockv[A] if lockv[A] is not None else 0
     check("track A's STRT lock is kept to the bit (fine, not rounded to a whole step)", lock0 % 256 != 0, f"{lock0:#06x}")
     check("4 steps played on each track", all(len(seen[t]) == 4 for t in (A, B)), str({t: sorted(seen[t]) for t in seen}))
     check("the kit's base values unchanged at the end", val(A, s0) == base[A] and val(B, s1) == base[B],
