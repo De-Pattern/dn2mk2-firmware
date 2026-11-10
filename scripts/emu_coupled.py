@@ -57,6 +57,21 @@ def _bits(x: float) -> int:
     return struct.unpack("<I", struct.pack("<f", x))[0]
 
 
+class _FrameClock:
+    """an event source for digikit's spin: its deadline is where the UI's share of the frame
+    ends, so the deadline stepping stops the UI there (faithful mode only); it raises nothing"""
+    def __init__(self):
+        self.ui_end = None
+
+    def step(self, done, remaining=None):
+        if self.ui_end is None:
+            return None
+        return max(1, int(self.ui_end - done + 0.999))
+
+    def service(self, done):
+        pass
+
+
 class Coupled:
     def __init__(self, build_syx: str, snapshot: str, stock_syx: str, digikit_sharc: str | None = None,
                  png_dir: str | None = None, verbose: bool = False, dsp: bool = True):
@@ -87,6 +102,8 @@ class Coupled:
         self.frame_units = None
         self.isr_units = []
         self.ui_units = 0.0
+        self._clock = _FrameClock()
+        self._frame_t0 = None
         self.last_call_units = 0.0
         # progress (periods(..., label=)) and the watchdog
         self.phase = "setup"
@@ -231,14 +248,24 @@ class Coupled:
         if self.halt:
             return False
         t_start = time.perf_counter()
+        timers = self.panel.timers
         if self.timing == "faithful":
+            # the UI runs to the frame's end less the ISR's last cost, stopped exactly there by
+            # the frame clock (the timers' deadline stepping would otherwise run on to the next
+            # PIT deadline, a whole timer period: measured, 23 x the frame)
             last = self.isr_units[-1] if self.isr_units else self.frame_units * ISR_SHARE_STOPPED
-            ui = max(0, int(self.frame_units - last))
+            if self._frame_t0 is None or timers.now > self._frame_t0 + self.frame_units:
+                self._frame_t0 = timers.now
+            self._clock.ui_end = self._frame_t0 + self.frame_units - last
+            ui = max(1, int(self._clock.ui_end - timers.now))
         if ui:
             self.ui_units += self.panel.settle(ui)
         self._seq_tick()
         _, pc = self.call(ISR, until=ISR_RTE)
         self.isr_units.append(self.last_call_units)
+        if self.timing == "faithful":
+            timers.now += self.last_call_units       # the ISR's time is the frame's too
+            self._frame_t0 += self.frame_units
         if len(self.isr_units) > 4096:
             del self.isr_units[:2048]
         if pc != ISR_RTE:
@@ -393,6 +420,12 @@ class Coupled:
             w = sorted(self.isr_units[-calibrate:])
             self.frame_units = w[len(w) // 2] / ISR_SHARE_STOPPED
         self.timing = mode
+        if mode == "faithful":
+            self._frame_t0 = None
+            if self._clock not in self.panel.events:
+                self.panel.events = tuple(self.panel.events) + (self._clock,)
+        else:
+            self.panel.events = tuple(e for e in self.panel.events if e is not self._clock)
         ips = (self.frame_units * AUDIO_HZ) if mode == "faithful" else None
         for src in getattr(self.panel.timers, "sources", (self.panel.timers,)):
             if not hasattr(src, "ips"):
