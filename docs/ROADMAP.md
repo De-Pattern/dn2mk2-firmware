@@ -16,6 +16,12 @@ enough of a plan that it can be picked up cold. Upstream's own parked ideas are 
 - **Stereo sampling: not planned** (owner). The DN2's tracks are mono until the stock chain pans
   them; stereo would mean two voices a note or bypassing the stock voice chain, twice the memory
   and the sample voices' DSP time, and every sample machine changed. Not what this box is for.
+- **After v0.49, before v0.50's work: a full stereo assessment** (owner, 2026-11-10; a study, not
+  an implementation): what stereo would take end to end -- resampling (MAIN, TRK, IN), playback on
+  every sample machine, importing without folding to mono (the import tool, the pool and +Drive
+  formats) -- what it would cost (DSP time, memory, polyphony, ColdFire room), what would have to
+  be removed or changed, how long it would take, and how certain we could be that it works (what
+  the emulator can prove, what only hardware can).
 - After v0.48: the gate split into runs that fit the two-hour job limit and resume themselves.
 
 ## After v0.40 (owner, 2026-11-02 / 11-03)
