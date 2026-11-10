@@ -158,17 +158,25 @@ def main() -> int:
     held(18, True); held(18, False)                              # KEYBOARD
     c.machine.pc = P.press(c.machine.m, c.panel.profile, *key(33))
     rep["setup"].append(("a note", "UI: KEYBOARD, [TRIG 9] held"))
-    fw, ty, out = [], [], []
+    fw, ty = [], []
+    outs = [[] for _ in range(16)]
     c.phase = "the note"
     for n in range(40):
         if not c.period():
             break
-        fw.append(struct.unpack(">H", c.read(CF_FRAME + 168 + 2 * SLOT_SAMP, 2))[0])
+        vt = struct.unpack(">16I", c.read(0x80005308, 64))     # voice -> track (the frame is per voice)
+        for v in range(16):
+            if vt[v] == 0:
+                fw.append(struct.unpack(">H", c.read(CF_FRAME + 168 + 2 * SLOT_SAMP + 146 * v, 2))[0])
         ty.append(struct.unpack(">H", c.read(CF_FRAME + 148, 2))[0])
-        out += c.last_bufs[0]
+        for b in range(16):
+            outs[b] += c.last_bufs[b]
     c.machine.pc = P.release(c.machine.m, c.panel.profile, *key(33))
     c.periods(2)
-    peak = max(abs(x) for x in out) if out else 0.0
+    peaks = [max((abs(x) for x in o), default=0.0) for o in outs]
+    bi = max(range(16), key=lambda b: peaks[b])
+    out, peak = outs[bi], peaks[bi]
+    rep["numbers"]["peaks"] = [round(x, 4) for x in peaks]
     want = (129 + k) << 8
     rep["numbers"]["note"] = {"frame_samp": sorted(set(fw)), "frame_type": sorted(set(ty)), "peak": peak,
                               "want_samp": want, "rt_play": list(c.read(lay["rt_play"], 2)),
