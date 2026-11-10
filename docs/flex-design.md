@@ -25,8 +25,9 @@ Timing accuracy and reliable playback come first; nothing that compromises them 
   plays the audio as it arrives. Pitched up, the playhead catches the write head (stock Octatrack
   behaviour too: accepted).
 - **Saving a buffer as a sample: included.**
-- **The BUS matrix: wanted, if it can be done elegantly and stably**; not essential. Built last;
-  left out of v0.49 if it costs too much room, DSP time, memory or development time.
+- **No BUS matrix** (owner, 2026-11-10, later): the sources are the recorder's own, TRK1..16, IN
+  and MAIN, as they are today. MAIN covers "several tracks at once" (mute what should not be in
+  it). The matrix stays a future idea.
 - **Stereo: out of scope.** Takes are the recorder's format.
 - Four detents a choice on every multi-choice knob. Screens from the handoff's mockups (below).
 
@@ -67,17 +68,18 @@ The owner state machine (ColdFire): a manual take pending or running refuses rec
 trigs on one step: the lower track records, the other shows `BUSY`. A one-shot is spent only when
 the DSP confirms its take started. No silent truncation: `NO ROOM`.
 
-- **Sources**: TRK1..16 (one track's own block: the bounce), IN, MAIN; BUS if built.
+- **Sources**: the recorder's own, as today: TRK1..16 (one track's own block: the bounce), IN
+  (the inputs), MAIN (the whole mix as heard, send effects and master included). MAIN with a FLEX
+  track sounding records that track too (feedback: the Octatrack's behaviour; mute the FLEX track,
+  or record with TRK, for a clean bounce). The screen shows MAIN as it is labelled today.
 - **Saving** (FUNC + YES): the buffer's take into the next empty pool slot and the +Drive, as a
   manual recording (SAVING, NORMALIZING, TRIM, FILE NAME, ASSIGN). BOUNCE's bn_save.
 
-## The resampling bus (if built)
+## The resampling bus: not in v0.49
 
-As designed 2026-11-09: the sum of the selected tracks' blocks (dry, after the amp, each track's
-LEVEL applied) into the recorder. A Syntakt-style matrix page: [TRIG n] toggles track n, a selected
-cell drawn inverted, its LED lit; FLEX tracks out by default (struck until pressed in); default
-every non-FLEX track in; stored per FLEX track and pattern. DSP cost: one add a sample a selected
-track.
+Dropped (owner, 2026-11-10): MAIN with the unwanted tracks muted does its job. The 2026-11-09
+design (a Syntakt-style matrix, FLEX tracks excluded by default, LEVEL applied in the bus) is
+kept in git history if it is wanted later.
 
 ## Freeing the source's DSP time
 
@@ -91,7 +93,7 @@ rest get a fix or a release note. A TRK take is before LEVEL and the sends: FLEX
 The design is the two mockup sheets in `docs/flex-mockups/` (flex-screens-a.png, flex-screens-b.png):
 Elektron's eight-cell encoder grid with a label, an icon and the value in each cell, the selected
 or boxed value inverted (BUF 01, ARM ON), a title bar with the track and page, the [TRIG] grids
-for REC TRIGS (REC filled, ONE hatched) and REC BUS (INCL filled, EXCL open, FLEX crossed), the
+for REC TRIGS (REC filled, ONE hatched) and the
 waveform with its range brackets, and the boxed messages (SAVE TAKE? YES/NO, SAVED AS SAMP n,
 REC REFUSED / NO ROOM, BUF BUSY, WAIT REC with the Q.REC boundary). **Not** the pixel-text
 screens in the handoff PDF's appendix (owner: not the design).
