@@ -270,12 +270,16 @@ def main() -> int:
     # 6. the note, its frame, the DSP's render
     def fil(fr):
         b = bytearray(fr)
-        o = 168 + 2 * SLOT_SAMP
-        if a.brk == "nosel":
-            b[o:o + 2] = b"\x00\x00"
-        elif a.brk == "wrongslot":
-            v = struct.unpack(">H", bytes(b[o:o + 2]))[0]
-            b[o:o + 2] = struct.pack(">H", (v + 0x100) & 0xFFFF)
+        vt = struct.unpack(">16I", c.read(0x80005308, 64))
+        for vv in range(16):
+            if vt[vv] != 0:
+                continue
+            o = 168 + 2 * SLOT_SAMP + 146 * vv
+            if a.brk == "nosel":
+                b[o:o + 2] = b"\x00\x00"
+            elif a.brk == "wrongslot":
+                w = struct.unpack(">H", bytes(b[o:o + 2]))[0]
+                b[o:o + 2] = struct.pack(">H", (w + 0x100) & 0xFFFF)
         return bytes(b)
     if a.brk in ("nosel", "wrongslot"):
         c.frame_filter = fil
@@ -286,18 +290,32 @@ def main() -> int:
     c.periods(2)
     c.machine.pc = c.panel.panelin.press(c.machine.m, c.panel.profile, *key(trig9))
     fw = []
-    out = []
+    outs = [[] for _ in range(16)]
+    voices = set()
     c.phase = "the note"
     for n in range(40):
         if not c.period():
             break
-        fw.append(struct.unpack(">H", c.read(CF_FRAME + 168 + 2 * SLOT_SAMP, 2))[0])
-        out += c.last_bufs[0]
+        # the frame's records are per VOICE; the ColdFire's slot -> track table (0x80005308,
+        # the DSP's routing, link.c SLOT_TRACK) says which voices play track 0
+        vt = struct.unpack(">16I", c.read(0x80005308, 64))
+        for v in range(16):
+            if vt[v] == 0:
+                voices.add(v)
+                fw.append((v, struct.unpack(">H", c.read(CF_FRAME + 168 + 2 * SLOT_SAMP + 146 * v, 2))[0]))
+        for b in range(16):
+            outs[b] += c.last_bufs[b]
     c.machine.pc = c.panel.panelin.release(c.machine.m, c.panel.profile, *key(trig9))
     c.periods(2)
-    peak = max(abs(x) for x in out) if out else 0.0
-    rep["numbers"]["note"] = {"frame_samp": sorted(set(fw)), "peak": peak, "keyboard_key": kb}
-    step("6a. the frame selects the take (its SAMP word)", (k + 1) << 8 in fw, f"frame SAMP words {sorted(set(fw))}")
+    peaks = [max((abs(x) for x in o), default=0.0) for o in outs]
+    bi = max(range(16), key=lambda b: peaks[b])
+    out, peak = outs[bi], peaks[bi]
+    rep["numbers"]["note"] = {"frame_samp": sorted(set(fw)), "voices_of_track0": sorted(voices),
+                              "peaks": [round(x, 4) for x in peaks], "loudest_buffer": bi, "peak": peak,
+                              "keyboard_key": kb}
+    step("6a. the frame selects the take (its SAMP word, on a voice of track 0's)",
+         any(w == (k + 1) << 8 for _, w in fw),
+         f"track 0's voices {sorted(voices)}; their SAMP words {sorted(set(fw))}; want {(k + 1) << 8:#x}")
     if not step("6b. the DSP renders track 0", peak > 0.01, f"peak {peak:.4f}"):
         return done()
 
