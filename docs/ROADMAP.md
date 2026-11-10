@@ -4,6 +4,20 @@ What the owner has asked for and is not built yet, in the words he asked for it,
 enough of a plan that it can be picked up cold. Upstream's own parked ideas are in
 `docs/ideas-backlog.md`.
 
+## The order after v0.48 (owner, 2026-11-10)
+
+- **v0.49: FLEX** (docs/flex-design.md) and the guard fixes (sample voices first; a dropped
+  sample voice stops until its next note).
+- **v0.50: lighter Monomachine machines** (and the Machinedrum's, if they gain from it). Rewrite
+  and trim them for DSP time, even if they no longer match stock bit for bit: "we can make them
+  sound good without being exact replicas"; a significant cut is worth it even at ~70 % of
+  today's likeness. Tried in its own release, reverted if it goes wrong; no long measurement
+  against the stock engines. Straight on after v0.49.
+- **Stereo sampling: not planned** (owner). The DN2's tracks are mono until the stock chain pans
+  them; stereo would mean two voices a note or bypassing the stock voice chain, twice the memory
+  and the sample voices' DSP time, and every sample machine changed. Not what this box is for.
+- After v0.48: the gate split into runs that fit the two-hour job limit and resume themselves.
+
 ## After v0.40 (owner, 2026-11-02 / 11-03)
 
 In this order unless the owner changes it:
