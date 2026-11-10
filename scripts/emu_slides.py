@@ -1021,7 +1021,6 @@ def main() -> int:
               f"step 9 {got}, stock {st9}, hits {hits}")
         panel.screen("after_trig_paste")
 
-
         # v0.40 review: the five paste sites nothing above drives (page paste and its UNDO, track
         # paste's UNDO, shift, page autocopy), slot 80 in shift and autocopy, and a paste on a
         # nearly full lock table (scripts/emu_slides_paths.py)
