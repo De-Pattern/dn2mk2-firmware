@@ -1039,11 +1039,11 @@ def main() -> int:
         if rec90:
             put16(tbl + REC * rec90[0] + 2 + 2 * 11, 0x2222)
         hits0 = dict(hits)
-        clears = []
+        tl_clears = []
 
         def on_clear(uc_, ad, sz, us):                      # (diagnosis: which steps sl_clear empties)
             sp = uc_.reg_read(K.UC_M68K_REG_A7)
-            clears.append(struct.unpack(">3I", bytes(uc_.mem_read(sp + 4, 12)))[2])
+            tl_clears.append(struct.unpack(">3I", bytes(uc_.mem_read(sp + 4, 12)))[2])
         h_clear = uc.hook_add(UC_HOOK_CODE, on_clear, begin=lay["sl_clear"], end=lay["sl_clear"])
         pasted0 = machine.read(lay["sl_pasted"], 4)
         panel.hold(key(36), 5_000_000)
@@ -1060,7 +1060,7 @@ def main() -> int:
         uc.hook_del(h_clear)
         got_tl = [lock(tbl, 0, 13, 0), lock(tbl, 0, 13, 1)]
         report["trigless_diag"] = {"clip": clip, "pasted": [pasted0.hex(), machine.read(lay["sl_pasted"], 4).hex()],
-                                   "clears": clears[:20]}
+                                   "tl_clears": tl_clears[:20]}
         st14 = stock_map(90).get(13)
         report["trigless_hits"] = {k: hits[k] - hits0.get(k, 0) for k in hits}
         check("v0.48: a trigless trig's copy/paste carries its SLD/SLEN as its stock lock (depaffect)",
