@@ -236,10 +236,19 @@ def main() -> int:
 
     # 4. the ColdFire's flow to ASSIGN, the panel's keys
     phases = [c.long(lay["rec_phase"])]
-    for _ in range(6):
+    for _ in range(3):
         if c.long(lay["rec_phase"]) == 1:                        # TRIM: YES on
             break
-        c.periods(10)
+        c.periods(10, label="SAVING")
+        phases.append(c.long(lay["rec_phase"]))
+    if c.long(lay["rec_phase"]) == 4:
+        # SAVING reads the take back over the link to write it to the +Drive (link.c save_*:
+        # 24 bytes a packet, hundreds of periods at 11 s each here). The gate's recflow step
+        # takes the same shortcut: the save reported done. Normalising then has no peak.
+        c.put32(lay["smp_saved"], 1)
+        setup.append(("the +Drive save", "direct: smp_saved set, as the gate's recflow step does "
+                      "(the take stays in the DSP's pool; nothing written to the +Drive)"))
+        c.periods(6, label="NORMALIZING")
         phases.append(c.long(lay["rec_phase"]))
     yes = names.get("YES", 10)
     setup.append(("TRIM, FILE NAME, ASSIGN", "UI: YES, YES, [TRIG 1] (panel keys)"))
