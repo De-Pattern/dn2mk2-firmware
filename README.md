@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.47** | 2026-11-09 | the Monomachine's TUNE reads -64..+63 (0 in tune), FUNC + turn a semitone at a time; the TRIM preview 6 dB quieter (back at v0.37..v0.39's level); the RECORDER's INTO box smaller; BOUNCE out of MACHINE SEL (old BOUNCE tracks still load); gate: its reuse cache refuses passes from another worktree | `builds/v0.47-TUNED/` | yes |
+| **v0.48** | 2026-11-10 | STRT/LEN/LOOP as the DT2's fine controls (0.00..120.00, the stock fine knob, push + turn whole steps; the DSP plays from that exact place); THRES fixed (the meter's scale, live while armed); KEYBOARD kept through grid recording; turned values shown on the sample pages; SLICE's keys as the DT2's; the RECORDER's text inside its boxes; BOUNCE's code out (old projects load, the track silent); gate: the first step on both processors together (THRES), fineswap, fineknob | `builds/v0.48-FINE/` | yes |
+| v0.47 | 2026-11-09 | the Monomachine's TUNE reads -64..+63 (0 in tune), FUNC + turn a semitone at a time; the TRIM preview 6 dB quieter (back at v0.37..v0.39's level); the RECORDER's INTO box smaller; BOUNCE out of MACHINE SEL (old BOUNCE tracks still load); gate: its reuse cache refuses passes from another worktree | `builds/v0.47-TUNED/` | yes |
 | v0.46 | 2026-11-09 | recordings (RECORD NOW, a BOUNCE take saved with FUNC + YES) also copied into +DRIVE > RECORDED under their own name; FILE NAME up to 35 characters, RENAME long names, a new folder up to 30; BOUNCE's BUF reads 1..8; gate: the copy with a power cut after every step, a full +Drive, a send mid-copy | `builds/v0.46-KEEPER/` | yes |
 | v0.45 | 2026-11-08 | BOUNCE fixed (v0.44 froze the unit on MACHINE SEL → BOUNCE and at power-on with a BOUNCE track) and back in MACHINE SEL; the +Drive library holds 16,384 samples; SELECT UNUSED in PROJECT RAM; recorder trigs on the [TRIG] LEDs while the BOUNCE REC panel is open; SAMP past the last loaded sample no longer plays the last one; PING removed; gate: every machine through MACHINE SEL's real list and a power-on with ours on the tracks, a wild-read trap in every emulator step | `builds/v0.45-ROOMIER/` | yes |
 | v0.44 | 2026-11-07 | **withdrawn (2026-11-08): BOUNCE froze the unit.** Use v0.45. BOUNCE, the seventh sample machine: Octatrack-style recorder trigs placed with [TRIG] (FUNC + [TRIG] a one-shot) record into the track's own buffer (8 buffers, two halves each), play the take fitted to its steps at any tempo, switch at Q.PLAY; Q.REC; FUNC + YES saves the take to the pool and +Drive; YES YES re-arms one-shots; v0.41's REC trigs, ARM knobs and REC TRIGS page gone; the CHAN icon on every RECORDER; FILE NAME UP/DOWN scroll characters | `builds/v0.44-BOUNCE/` | yes |
@@ -85,6 +86,67 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.48 — FINE (STRT/LEN/LOOP as the DT2's, THRES fixed, KEYBOARD kept, BOUNCE out)
+
+`DN2mod_v0.48_FINE_OS1.11.syx`
+sha256 `8bf7ff0017fba6ea7733059f795a98316a65032425d8b511aa0559297fc53358`
+Gate: CLEARED TO FLASH, 2026-11-10 (50 gates; 45 reused; run step by step under the two-hour job limit, each reused pass one of this same build whose every input is byte-identical; every emulator step with the wild-read trap on). Source: commit `c326af5` (branch `v048`). Docs: `docs/coupled-emulator.md`, `docs/bounce-removal-plan.md`, `docs/flex-design.md` (v0.49).
+
+Everything in v0.47, plus (each with the commit that adds it, so it can be taken out alone):
+
+**STRT, LEN and LOOP as the DT2 has them** (impbox) on ONESHOT (STRT, LEN, LOOP) and STRETCH/REPITCH
+(STRT, LEN): 0.00..120.00 with two decimals; the knob in fine steps with stock's acceleration (the
+same steps as stock's fine FREQ knob, checked step for step), push + turn whole steps. The DSP plays
+from exactly that place (before, only whole numbers reached playback). A new ONESHOT/STRETCH/REPITCH
+starts at LEN 120.00. Commits `9c2105b` (the ColdFire: `smp_fine`, `fmt.c`), `dc28d49` and `956f900`
+(the DSP reads the whole 16-bit word).
+
+**THRES fixed** (Error Kit): threshold recording only started at THRES 0. THRES now follows the
+meter's scale (its tick is where the take starts), and turning it while armed takes effect at once.
+Commit `f3037bc`.
+
+**KEYBOARD stays on through grid recording**: RECORD used to leave it off after a second press.
+Commit `1451350`.
+
+**A turned control's value shows under it for a second** on the sample pages, its p-lock's too
+(impbox). Commit `dac55cb`.
+
+**SLICE's keys play the slices as the DT2's do**: each key its own note, that note's slice (the
+same as a trig with that note). Commit `f3037bc`.
+
+**The RECORDER's text stays inside its boxes** (ON TRK, SAVED, +DRV FULL; R.LEN's MAX on one line).
+Commits `0ad04d5`, `a1227d4`.
+
+**BOUNCE's code is out** (`docs/bounce-removal-plan.md`). Old projects with a BOUNCE track still load:
+the track plays nothing, its recorder trigs are kept in the pattern. Commits `5d1be6b`, `04b558c`.
+
+**Gate:** new steps `fineswap` (STRT/LEN/LOOP's settings swap in and out byte for byte as tracks
+change), `fineknob` (STRT's knob against stock's fine FREQ, step for step), `kbrec`, `rectext`,
+`bouncegone`, and `thres`, the first step run on the ColdFire and the DSP together (the coupled
+emulator, `scripts/emu_coupled.py`); the gate cache refuses another worktree's records (with a
+negative control). The SLICE keys step checks the notes against stock OS 1.11's own for the same keys.
+
+**Tests**
+1. ONESHOT: turn STRT slowly: 0.00, 0.01, 0.02 ...; faster turns jump further; push + turn: whole
+   steps. On a long sample the start moves by amounts you can hear.
+2. LEN and LOOP the same; LEN at its top stops at 120.00, STRT at 0.00.
+3. Switch to a WaveTone track: its knobs are as before (whole steps); back to the ONESHOT track: STRT
+   is where you left it.
+4. p-lock STRT on a step to a fraction (e.g. 1.79): that step plays from there.
+5. RECORDER: THRES 10..30 with a sound over the tick: the take starts; THRES high: armed, turn it
+   down: it starts.
+6. KEYBOARD on, RECORD on and off twice: KEYBOARD still on.
+7. A SLICE track, KEYBOARD: each key plays the slice a trig with its note would.
+8. Everything from v0.47.
+
+**Not verified on hardware:** the encoder's counts per detent (the emulator gives the knob the stock
+path's counts); the DSP's real timing (the coupled emulator approximates it).
+
+**Known issues**
+- Copying a trigless trig doesn't take its SLD/SLEN with it (left as is: the fix wasn't worth the risk).
+- An old project's LEN above 120 shows 127.00 until turned (it plays as 120.00, the whole sample).
+- Everything listed for v0.47 except BOUNCE's.
 
 ## v0.47 — TUNED (the Monomachine's TUNE, a quieter preview, BOUNCE hidden)
 
