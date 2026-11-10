@@ -914,9 +914,8 @@ def main() -> int:
 
         # 6e. v0.23, SLICE: its menus drawn over the page (the menu, the grid dialog, the
         # editor with a slice table), the editor's keys and knobs moving the picked slice;
-        # and in KEYBOARD mode on a SLICE track (SLCE NOTE) the keys play the slices in the
-        # order of their notes (v0.26): trig 9, 10 (the lowest) slices 1, 2 (notes C0, C0 + 1,
-        # which SLCE's NOTE mode turns into those slices), trig 2 (higher) a later one
+        # and in KEYBOARD mode on a SLICE track (SLCE NOTE) each key plays its own note's slice,
+        # as the DT2 (v0.48; v0.26..v0.47 ranked the keys' notes): trig 9 C, 10 D, 2 C#
         if "slc_state" in lay:
             import struct as _st                # noqa: PLC0415
             g = {k: hex(lay[k]) for k in ("slc_state", "slc_nfr", "slc_ns", "slc_cur", "slc_sl")}
@@ -1001,13 +1000,15 @@ def main() -> int:
                                  _st.unpack(">9I", bytes.fromhex(m[f"{g['slc_sl']}@6"])),
                                  _st.unpack(">9I", bytes.fromhex(m[f"{g['slc_sl']}@7"]))),
                              "closed": int(m[g["slc_state"]], 16) == 0,
-                             # trig 9, 10 (the bottom row's first two: the lowest notes) slices
-                             # 1, 2; trig 2 (the top row: a higher note) a later one
-                             "slice notes": len(notes) == 3 and notes[:2] == [24, 25] and notes[2] > 25}   # v0.33: from C1 (24), as the DT2
+                             # v0.48 (the owner: the DT2's stock behaviour): each key its own
+                             # note, the DSP the slice (note - C1) wrapped: trig 9 a C, trig 10
+                             # its D (+2), trig 2 its C# (+1), the chromatic keyboard's notes
+                             "slice notes": len(notes) == 3 and notes[0] % 12 == 0
+                             and notes[1] == notes[0] + 2 and notes[2] == notes[0] + 1}
                     good = all(facts.values()) and busy_ok
                     why = str(facts) + f" notes {notes}" + busy_why
                 return good, ("menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
-                 "closes; FUNC + RIGHT splits slice 2, FUNC + LEFT removes it; FUNC + E moves at the normal step; KEYBOARD on a SLICE track: trigs 9, 10 play slices 1, 2 and trig 2 a later one (the keys' notes in order)"
+                 "closes; FUNC + RIGHT splits slice 2, FUNC + LEFT removes it; FUNC + E moves at the normal step; KEYBOARD on a SLICE track: each key its own note (trig 9 C, 10 D, 2 C#), the slice that note's, as the DT2's"
                               + ("; v0.40: EDIT SLICE POINTS and CREATE SLICE GRID (TR.DET OFF, ON, after CLEAR) reach the "
                                  "editor every time while the loader, TRIM's read, LOAD TO PROJECT, a preview, refused reads, "
                                  "a take saving and normalising, a project switch are in flight; LINKED START/END move the "

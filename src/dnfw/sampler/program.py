@@ -1941,6 +1941,32 @@ def recorder(p: Prog, L: Layout) -> None:
             p.iconst(12, 2)
             p.if_(3, "EQ", 12, lambda: (p.iconst(7, 3), p.st(C["rst"], 7)), kind="i")
         p.if_(2, "EQ", 12, stop, kind="i")
+
+        # v0.48 (Error Kit: THRES changed while armed did nothing until re-armed): MONITOR,
+        # which the ColdFire now sends when THRES moves while armed, has set rthr from its
+        # threshold word (settings(), above); an armed take on a threshold (rmode 0, or 2..:
+        # THRES 0's learning) takes the new one's rule as ARM sets it: under REC_AUTO_BELOW,
+        # THRES 0 (learn the noise again from 0.0), else that level. R.STRT PLAY (rmode 1)
+        # is left as it is
+        def retune():
+            p.ld(3, C["rst"])
+            p.iconst(12, 1)
+
+            def armed_now():
+                p.ld(7, C["rmode"])
+                p.iconst(12, 1)
+
+                def rule():
+                    p.ld(4, cmd + 16)
+                    p.iconst(12, REC_AUTO_BELOW)
+                    p.if_(4, "LT", 12, lambda: (p.iconst(7, 2), p.st(C["rmode"], 7),
+                                                p.fconst(5, 0.0), p.st(C["rthr"], 5)),
+                          lambda: (p.iconst(7, 0), p.st(C["rmode"], 7)), kind="i")
+                p.if_(7, "NE", 12, rule, kind="i")
+            p.if_(3, "EQ", 12, armed_now, kind="i")
+        p.ld(2, cmd + 4)
+        p.iconst(12, SM.CMD_MONITOR)
+        p.if_(2, "EQ", 12, retune, kind="i")
         p.ld(2, cmd + 4)
         p.iconst(12, SM.CMD_SEND)
 

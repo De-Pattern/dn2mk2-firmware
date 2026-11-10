@@ -43,6 +43,10 @@ STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 UI_SLICE = 175_000                      # ColdFire instructions a period between ISRs (about the unit's)
 
 
+def _bits(x: float) -> int:
+    return struct.unpack("<I", struct.pack("<f", x))[0]
+
+
 class Coupled:
     def __init__(self, build_syx: str, snapshot: str, stock_syx: str, digikit_sharc: str | None = None,
                  png_dir: str | None = None, verbose: bool = False):
@@ -57,6 +61,7 @@ class Coupled:
         self.dsp_packets = 0
         self.halt = None
         self.taps: dict = {}
+        self.input = None                       # block -> ([32 floats L], [32 floats R]): the inputs
         if verbose:
             print(f"  coupled: ready in {time.perf_counter() - t0:.0f} s", flush=True)
 
@@ -205,6 +210,11 @@ class Coupled:
                     w = packet[16 * frm + 8 + k] if packet is not None else 0
                     M.m2.poke(r.state, rx + 64 * frm + 32 + 4 * k, w)
             tap["bufs"] = [M.m2.word(r.state, M.V.TRACK_BUFFERS + 4 * t) for t in range(16)]
+            if self.input is not None:          # the inputs (L, R), as the per-block driver converts them
+                left, right = self.input(self.blocks)
+                for k in range(32):
+                    M.m2.poke(r.state, SM.IN_BUF + 4 * k, _bits(left[k]))
+                    M.m2.poke(r.state, SM.IN_BUF + 0x80 + 4 * k, _bits(right[k]))
 
         def after_smp(r):
             tx = SM.TDM_TX + (tap.get("pg", 0) << 11)

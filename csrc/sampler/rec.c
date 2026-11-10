@@ -191,11 +191,30 @@ static int next_empty(int from)
     return from % REC_FIRST;
 }
 
+/* v0.48 (Error Kit: a guitar never started a take at THRES 1 or 10): THRES is where its tick
+ * sits on the meter, and the meter is logarithmic (meter_x, smp_page.c: 60 dB across, 6 dB a
+ * twelfth of THRES's travel), but v0.15..v0.47 sent THRES as a straight fraction of full scale:
+ * THRES 10, its tick near the meter's left end (about -55 dB), asked for -21.6 dB, and a quiet
+ * input whose bar passed the tick never reached it. Now the level is the tick's: THRES t is
+ * -60 + t/2 dB (2^((t - 120)/12) of full scale); THRES 0 is still the floor the DSP takes as
+ * "above the noise" (under its REC_AUTO_BELOW, 64); THRES 1.. never under that */
+static const unsigned short thr_frac[12] = {   /* 65536 x 2^(-i/12) */
+    65535, 61858, 58386, 55109, 52016, 49097, 46341, 43740, 41285, 38968, 36781, 34716 };
+static u32 thr_word(int t)
+{
+    if (t <= 0)
+        return REC_THR_FLOOR;                   /* v0.30: THRES 0 waits for a sound, not for silence */
+    if (t > 120)
+        t = 120;
+    u32 v = (32767u >> ((120 - t) / 12)) * thr_frac[(120 - t) % 12] >> 16;
+    return v < 64u ? 64u : v;
+}
+
+static int mon_thres __attribute__((section(".data"))) = -1;   /* v0.48: the THRES last sent */
+
 static void send(int cmd)
 {
-    u32 src, chan, thr = (u32)rec_thres * 32767u / 120u;
-    if (thr < REC_THR_FLOOR)                    /* v0.30: THRES 0 waits for a sound, not for */
-        thr = REC_THR_FLOOR;                    /* silence (a user: it began on nothing) */
+    u32 src, chan, thr = thr_word(rec_thres);
     src_of(rec_src, &src, &chan);
     /* v0.33: no DEST (the owner: choosing a slot by number risked writing over a sample; the
      * DT2 has none). A recording goes into the first empty slot, found as it starts; when
@@ -237,6 +256,7 @@ static void send(int cmd)
     sent_seq = smp_command((u32)cmd, src, chan | (place / 512u) << 8, thr,
                            (u32)rec_dest << 24 | len);
     sent_at = FRAMES;
+    mon_thres = rec_thres;
     if (rec_link < 0)
         rec_link = 0;
     mon_src = rec_src;
@@ -405,7 +425,9 @@ void rec_poll(void)
         mon_known = 0;
         return;
     }
-    if (!mon_known || rec_src != mon_src) {
+    /* v0.48: THRES moved while armed: sent at once (MONITOR carries it; the DSP's armed take
+     * takes its rule), not only at the next ARM (Error Kit) */
+    if (!mon_known || rec_src != mon_src || (rec_state == 1 && rec_thres != mon_thres)) {
         mon_known = 1;
         if (rec_state != 2)                     /* not while recording: the source stays */
             send(CMD_MONITOR);
