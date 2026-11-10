@@ -64,6 +64,11 @@ class Coupled:
         self.halt = None
         self.taps: dict = {}
         self.input = None                       # block -> ([32 floats L], [32 floats R]): the inputs
+        # negative controls only (a test breaking one link on purpose, to show it is caught):
+        # frame_filter(bytes) -> bytes, the frame as the DSP gets it (big-endian, as built);
+        # packet_filter(words) -> words or None, the ColdFire's packet before delivery
+        self.frame_filter = None
+        self.packet_filter = None
         self.shortcut_probe = True
         self.seq_acc = 0.0                      # the sequencer's timer, kept in step with the frames
         self.probes_shortcut = 0
@@ -208,8 +213,12 @@ class Coupled:
             self.halt = f"the ColdFire's ISR stopped at {pc:#x}"
             return False
         frame_be = self.read(CF_FRAME, 2688)
+        if self.frame_filter is not None:
+            frame_be = self.frame_filter(frame_be)
         frame = self.M.swap16(frame_be)
         packet = self._cf_packet()
+        if packet is not None and self.packet_filter is not None:
+            packet = self.packet_filter(packet)
         M, SM = self.M, self.SM
         tap = {}
 
