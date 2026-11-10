@@ -1021,6 +1021,42 @@ def main() -> int:
               f"step 9 {got}, stock {st9}, hits {hits}")
         panel.screen("after_trig_paste")
 
+        # v0.48 (depaffect: "when you copy and paste a trigless trig, parameter slide & parameter
+        # slide length are not copied (although portamento + portamento time are)"): a trigless
+        # lock trig on step 12 (FUNC + [TRIG 12]) with SLD/SLEN and a stock lock; held, RECORD
+        # (copy); step 14 held, STOP (paste): step 14 has step 12's SLD/SLEN and its stock lock
+        panel.hold(key(17), 5_000_000)
+        panel.tap(key(36))
+        panel.settle(10_000_000)
+        panel.let_go(key(17))
+        panel.settle(10_000_000)
+        pc0, sr0 = uc.reg_read(K.UC_M68K_REG_PC), uc.reg_read(K.UC_M68K_REG_SR)
+        call(sl_set, tbl, 0, 11, 0, 1)
+        call(sl_set, tbl, 0, 11, 1, 5)
+        uc.reg_write(K.UC_M68K_REG_PC, pc0)
+        uc.reg_write(K.UC_M68K_REG_SR, sr0)
+        rec90 = [i for i, h, v in records() if h == bytes([90, 0])]
+        if rec90:
+            put16(tbl + REC * rec90[0] + 2 + 2 * 11, 0x2222)
+        hits0 = dict(hits)
+        panel.hold(key(36), 5_000_000)
+        panel.tap(key(19))
+        panel.settle(10_000_000)
+        panel.let_go(key(36))
+        panel.settle(10_000_000)
+        panel.hold(key(38), 5_000_000)
+        panel.tap(key(21))
+        panel.settle(10_000_000)
+        panel.let_go(key(38))
+        panel.settle(10_000_000)
+        got_tl = [lock(tbl, 0, 13, 0), lock(tbl, 0, 13, 1)]
+        st14 = stock_map(90).get(13)
+        report["trigless_hits"] = {k: hits[k] - hits0.get(k, 0) for k in hits}
+        check("v0.48: a trigless trig's copy/paste carries its SLD/SLEN as its stock lock (depaffect)",
+              got_tl == [1, 5] and st14 == 0x2222,
+              f"step 14 {got_tl}, stock {st14}, hits {report['trigless_hits']}")
+        panel.screen("after_trigless_paste")
+
         # v0.40 review: the five paste sites nothing above drives (page paste and its UNDO, track
         # paste's UNDO, shift, page autocopy), slot 80 in shift and autocopy, and a paste on a
         # nearly full lock table (scripts/emu_slides_paths.py)

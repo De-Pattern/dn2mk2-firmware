@@ -354,6 +354,18 @@ static void rpt_poll(void);
 static void fb_pv_poll(void);
 void rec_poll(void)
 {
+    /* v0.48: a turned control's value shows for a second (smp_page.c shows()); then its
+     * label again, drawn once more when the second is up */
+    static int val_shown __attribute__((section(".data"))) = 0;
+    extern int smp_knob_code;
+    extern u32 smp_knob_at;
+    if (smp_knob_code && *(volatile u32 *)0x4058E8D4u - smp_knob_at < 1500u)
+        val_shown = 1;
+    else if (val_shown) {
+        val_shown = 0;
+        smp_knob_code = 0;
+        smp_overlay_dirty = 1;
+    }
     extern void smp_marquee_poll(void);
     rpt_poll();
     smp_marquee_poll();                         /* v0.39: the selected long name's marquee */
@@ -1175,6 +1187,7 @@ u32 smp_held_hi __attribute__((section(".data"), aligned(4))) = 0;
 
 int smp_knob_d __attribute__((section(".data"))) = 0;       /* v0.32: the last knob turn (fmt.c func_turn) */
 u32 smp_knob_at __attribute__((section(".data"))) = 0;
+int smp_knob_code __attribute__((section(".data"))) = 0;     /* v0.48: which knob (1..8: A..H), its value shown */
 
 u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock receive returns it */
 {
@@ -1185,6 +1198,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     if (it[0] == IT_KNOB && code >= 1 && code <= 8) {           /* A..H */
         smp_knob_d = (signed char)it[8];
         smp_knob_at = *(volatile u32 *)0x4058E8D4u;
+        smp_knob_code = (int)code;
     }
     u32 flags = (u32)it[8] << 24 | (u32)it[9] << 16 | (u32)it[10] << 8 | it[11];
     /* v0.25: a key's item: bit 0 while it is down (a press), bit 4 on most keys' release,

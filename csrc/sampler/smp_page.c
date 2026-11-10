@@ -412,6 +412,20 @@ static void invert(void *c, int x0, int y0, int x1, int y1)
                 bits[x * cv[3] + (y >> 5)] ^= 0x80000000u >> (y & 31);
 }
 
+/* v0.48 (impbox: "no numbers show below [the knob] when moving or locking parameter values
+ * on the sample based machines"): as stock's pages, the control a knob has just turned (a
+ * value or, with a trig held, its lock) shows its value in its label's place for a second;
+ * with SYN held, every control's (v0.35). CELL_I is the cell being drawn: knob A..H's place */
+#define VALUE_SHOW 1500u                        /* a second of frames */
+static int cell_i __attribute__((section(".data"))) = -1;
+static int shows(int i)
+{
+    extern int smp_knob_code;
+    extern u32 smp_knob_at;
+    return smp_values_held() || (i >= 0 && smp_knob_code == i + 1
+                                 && *(volatile u32 *)0x4058E8D4u - smp_knob_at < VALUE_SHOW);
+}
+
 /* one cell: its widget at (X, Y) and, LABELLED, its label under it */
 static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labelled, int pill)
 {
@@ -464,7 +478,7 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
         }
     }
     extern int smp_values_held(void);
-    if (labelled && id && smp_values_held()) {     /* v0.35: SYN held: the value, as the record's */
+    if (labelled && id && shows(cell_i)) {     /* v0.35: SYN held (v0.48: or just turned): the value, as the record's */
         char vb[32];                            /* formatter writes it for the header (O14) */
         u8 flag;
         vb[0] = 0;
@@ -494,8 +508,7 @@ void smp_knob_page(void *view, void *c, const unsigned short *ids, const char *c
             int top, v = value(view, ids[i], &top);
             w_knob_at(c, x, y, v, top, 0);
         }
-        extern int smp_values_held(void);
-        if (smp_values_held()) {                   /* v0.35: SYN held: the value (O14) */
+        if (shows(i)) {                         /* v0.35: SYN held (v0.48: or just turned): the value (O14) */
             char vb[32];
             u8 flag;
             vb[0] = 0;
@@ -1777,8 +1790,11 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         ids[i] = smp_ids[SMP_IDX(kind)][i];
     smp_box(c);
     if (!wave) {                                /* page 1: the widgets and their labels */
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < 8; i++) {
+            cell_i = i;
             cell(c, view, kind, ids[i], CELL_X(i & 3), i < 4 ? TOP_Y : BOT_Y, 1, 0);
+        }
+        cell_i = -1;
         sample_list(c, view, value(view, SMP_SAMP_ID, 0), kind);
         return;
     }
@@ -1878,7 +1894,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
             mini_mode(c, x, 0, value(view, SMP_MODE_ID, 0) * 4 / 128);
         else if (kind == SMP_WERP_KIND && ids[i] == SMP_BARS_ID)
             fill(c, x + 6, 2, x + 17, 4);
-        else if (smp_values_held()) {           /* v0.35: SYN held: the value (O14) */
+        else if (shows(i)) {                    /* v0.35: SYN held (v0.48: or just turned): the value (O14) */
             char vb[32];
             u8 flag;
             vb[0] = 0;
@@ -1888,9 +1904,8 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         } else
             LABEL(c, x + 12, 0, "%.5s", NAME_SHORT(ids[i]));
     }
-    if (smp_values_held())                      /* v0.35: the top row's too (unlabelled: on the knobs' line) */
-        for (int i = 0; i < 4; i++)
-            if (ids[i]) {
+    for (int i = 0; i < 4; i++)                 /* v0.35: the top row's too (unlabelled: on the knobs' line) */
+            if (ids[i] && shows(i)) {
                 char vb[32];
                 u8 flag;
                 vb[0] = 0;
