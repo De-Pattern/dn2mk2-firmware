@@ -2263,13 +2263,14 @@ void rec_screen_draw(void *c)
         glyph(c, bx0 + 10, by0 + 16, 'E', 0);
         glyph(c, bx0 + 14, by0 + 16, 'S', 0);
         LABEL(c, cx + 11, by0 + 16, "%s", state == 3 ? "AGAIN" : "RECORD");
+        /* v0.48: three lines inside the box (rows 24..28, 30..34, 38..42): the third sat on the border */
         u32 secs = rec_room / 96000u;           /* int16 at 48 kHz */
-        LABEL(c, cx, by0 + 6, "%d S FREE", (int)(secs > 999 ? 999 : secs));
+        LABEL(c, cx, by0 + 8, "%d S FREE", (int)(secs > 999 ? 999 : secs));
         if (as_done >= 0 && rec_saved_slot >= 0)
-            LABEL(c, cx, by0 + 0, "%d ON TRK %d", rec_saved_slot + 1, as_done + 1);
+            LABEL(c, cx, by0 + 2, "%d ON TRK %d", rec_saved_slot + 1, as_done + 1);
         else if (state == 3 && rec_saved_slot >= 0) {
             extern int smp_rs_last;             /* v0.46: RECORDED full: the take is in the pool only */
-            LABEL(c, cx, by0 + 0, smp_rs_last == 2 ? "%d +DRV FULL" : "SAVED %d", rec_saved_slot + 1);
+            LABEL(c, cx, by0 + 2, smp_rs_last == 2 ? "%d +DRV FULL" : "SAVED %d", rec_saved_slot + 1);
         }
     }
 
