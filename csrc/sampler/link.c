@@ -378,29 +378,8 @@ static u32 blank_left __attribute__((section(".data"))) = 0;
 #define BLANK_PACKETS ((ENTRY_WORDS + RX_WORDS - 1u) / RX_WORDS)
 u32 smp_blank_sent __attribute__((section(".data"))) = 0;
 
-/* v0.41 (rectrig.c): a REC trig's command, and a QREC take's at its boundary, each sent as a
- * queued one is (CMD_REPEAT packets), ahead of the queue but never in the middle of a queued
- * command's repeats (the DSP would take that one again after: a STOP would end the take) */
-extern volatile u32 rt_w[6], rt_gen, q_w[6], q_fire;
-static u32 rt_seen __attribute__((section(".data"))) = 0;
-static u32 q_seen __attribute__((section(".data"))) = 0;
-static u32 rt_left __attribute__((section(".data"))) = 0;
-static u32 rt_cw[CMD_WORDS] __attribute__((section(".data")));
-u32 smp_rt_sent __attribute__((section(".data"))) = 0;     /* (for the checks) */
-
-static int rt_take(volatile u32 *w, volatile u32 *gen, u32 *seen)
-{
-    u32 g = *gen;
-    if (g == *seen)
-        return 0;
-    for (int j = 0; j < CMD_WORDS; j++)
-        rt_cw[j] = w[j];
-    if (*gen != g)
-        return 0;                               /* rewritten as it was read: the next period */
-    *seen = g;
-    rt_left = CMD_REPEAT;
-    return 1;
-}
+/* (v0.48: v0.41..v0.47's REC trig and QREC commands, sent ahead of the queue, are gone with
+ * BOUNCE: docs/bounce-removal-plan.md) */
 
 void smp_tdm(u32 h)
 {
@@ -411,15 +390,9 @@ void smp_tdm(u32 h)
         blank_left = BLANK_PACKETS;
         job_fast_next = job_n;                  /* (its check fails: the loader sends it again) */
     }
-    if (!rt_left && !cmd_left && !rt_take(rt_w, &rt_gen, &rt_seen))
-        rt_take(q_w, &q_fire, &q_seen);
-    int is_rt = rt_left != 0;
-    int is_cmd = is_rt || cmd_tail != cmd_head;
+    int is_cmd = cmd_tail != cmd_head;
     int is_blank = !is_cmd && blank_left;
-    if (is_rt)
-        for (int j = 0; j < CMD_WORDS; j++)
-            cw[j] = rt_cw[j];
-    else if (is_cmd)                            /* a command first: the command block's words */
+    if (is_cmd)                                 /* a command first: the command block's words */
         for (int j = 0; j < CMD_WORDS; j++)
             cw[j] = cmdq[cmd_tail % CMDQ][j];
     if (is_cmd || is_blank || (job_data && job_fast_next < job_n)) {
@@ -460,10 +433,7 @@ void smp_tdm(u32 h)
             smp_blank_sent++;
         } else if (!is_cmd)
             job_fast_next = k + n;
-        else if (is_rt) {
-            if (--rt_left == 0)
-                smp_rt_sent++;
-        } else if (++cmd_left >= CMD_REPEAT) {    /* sent a few times: one may be lost */
+        else if (++cmd_left >= CMD_REPEAT) {    /* sent a few times: one may be lost */
             cmd_left = 0;
             cmd_tail++;
         }
@@ -1358,17 +1328,10 @@ u32 smp_rec_place(int dest, u32 *room)
     /* v0.38: and every other project's recordings (pools.c): their ends are candidates too,
      * and nothing starts inside one or runs into one */
     int nres = smp_pl_res_count();
-    extern u32 rt_rplace[BUF_HALVES], rt_rbytes[BUF_HALVES], rt_nx_place[BUF_N], rt_nx_need[BUF_N];   /* v0.44: 16 halves, 8 next places */
-    for (int c = -1; c < POOL_SLOTS + nres + BUF_HALVES + BUF_N; c++) {    /* each candidate start: 0, or a recording's end */
+    /* (v0.48: BOUNCE's buffer takes and planned places are gone: rectrig.c, docs/bounce-removal-plan.md) */
+    for (int c = -1; c < POOL_SLOTS + nres; c++) {    /* each candidate start: 0, or a recording's end */
         u32 s = 0;
-        if (c >= POOL_SLOTS + nres) {           /* v0.41: a buffer take's end, or a next place's */
-            int i = c - POOL_SLOTS - nres;
-            u32 a = i < BUF_HALVES ? rt_rplace[i] : rt_nx_place[i - BUF_HALVES];
-            u32 z = a + (i < BUF_HALVES ? rt_rbytes[i] : rt_nx_need[i - BUF_HALVES]);
-            if (z == a || (i < BUF_HALVES && BUF_SLOT0 + i == dest))
-                continue;
-            s = (z + 511u) & ~511u;
-        } else if (c >= POOL_SLOTS) {
+        if (c >= POOL_SLOTS) {
             u32 z = smp_pl_res_end(c - POOL_SLOTS);
             if (z <= REC_OFFSET || z >= REC_OFFSET + REC_BYTES)
                 continue;
@@ -1394,9 +1357,6 @@ u32 smp_rec_place(int dest, u32 *room)
                 next = a & ~511u;
         }
         if (smp_pl_clash(REC_OFFSET + s, REC_OFFSET + s + 1u))
-            inside = 1;
-        extern int rt_regions(int dest, u32 s, u32 *next);   /* v0.41: the buffers' takes, and their next places */
-        if (rt_regions(dest, s, &next))
             inside = 1;
         u32 nx = smp_pl_next(REC_OFFSET + s);
         if (nx != 0xFFFFFFFFu && nx - REC_OFFSET < next)
@@ -2479,14 +2439,6 @@ void smp_boot(void)
     }
     extern void smp_pl_poll(void);
     smp_pl_poll();                                      /* v0.38: a LOAD, a NEW, a slot changed */
-    {                                                   /* v0.41: a buffer take writes the recordings' area */
-        extern volatile u32 rt_gen;
-        static u32 rt_span_seen __attribute__((section(".data"))) = 0;
-        if (rt_gen != rt_span_seen) {
-            rt_span_seen = rt_gen;
-            span_drop(REC_OFFSET, REC_END);
-        }
-    }
     load_poll();
     save_poll();
     edits_poll();
@@ -2968,8 +2920,6 @@ void smp_mod_apply(void *mirror)
 {
     snap_slots();
     MOD_APPLY(mirror);
-    extern void rt_frame(void);
-    rt_frame();                                 /* v0.41: QPLAY switches and QREC starts on their step */
     if (!dir_ok)
         return;
     /* v0.33: the loaded slots, listed once a frame and only if a voice needs them (this runs
@@ -2981,13 +2931,12 @@ void smp_mod_apply(void *mirror)
         u8 *snd = VOICE_SOUND(b);
         if (!snd)
             continue;
-        if (snd[SOUND_TYPE] == BOUNCE_TYPE) {   /* v0.44 BOUNCE: its buffer's playing half, or OFF */
-            extern u32 rt_bounce_samp(u32 t);
-            u32 ot = SLOT_TRACK[b];              /* the voice's track */
+        if (snd[SOUND_TYPE] == BOUNCE_TYPE) {   /* v0.48: a BOUNCE track from an older project:
+                                                 * SAMP OFF, so it plays nothing (BOUNCE is out:
+                                                 * docs/bounce-removal-plan.md) */
             volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
-            u32 want = ot < 16 ? rt_bounce_samp(ot) : 0;
-            if ((u32)(*cell >> 8) != want)
-                *cell = (u16)(want << 8);
+            if (*cell >> 8)
+                *cell = 0;
             continue;
         }
         if (snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)

@@ -163,6 +163,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
          "test/test_sources.py", "test/test_md_ui.py", "test/test_patcher.py",
          "test/test_sampler_relatch.py", "test/test_pools.py",
+         "test/test_gate_cache_foreign.py",                 # v0.48: the cache's cross-worktree guard and its control
          "test/test_slides.py",
          "test/test_libtree.py", "test/test_web_tool.py"]   # v0.40: nested folders (the model, the page's levels)
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
@@ -205,7 +206,12 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("drivenav", "+DRIVE keys and long names (ColdFire)"),
        ("jump", "DIRECT JUMP (ColdFire)"),
        ("slides", "parameter slides (ColdFire)"),
-       ("rectrig", "BOUNCE REC trigs, buffers, QREC, QPLAY (ColdFire)"),
+       ("bouncegone", "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)"),
+       ("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)"),
+       ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
+       ("thres", "THRES on both processors (coupled)"),
+       ("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"),
+       ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
@@ -912,9 +918,8 @@ def main() -> int:
 
         # 6e. v0.23, SLICE: its menus drawn over the page (the menu, the grid dialog, the
         # editor with a slice table), the editor's keys and knobs moving the picked slice;
-        # and in KEYBOARD mode on a SLICE track (SLCE NOTE) the keys play the slices in the
-        # order of their notes (v0.26): trig 9, 10 (the lowest) slices 1, 2 (notes C0, C0 + 1,
-        # which SLCE's NOTE mode turns into those slices), trig 2 (higher) a later one
+        # and in KEYBOARD mode on a SLICE track (SLCE NOTE) each key plays its own note's slice,
+        # as the DT2 (v0.48; v0.26..v0.47 ranked the keys' notes): trig 9 C, 10 D, 2 C#
         if "slc_state" in lay:
             import struct as _st                # noqa: PLC0415
             g = {k: hex(lay[k]) for k in ("slc_state", "slc_nfr", "slc_ns", "slc_cur", "slc_sl")}
@@ -999,13 +1004,16 @@ def main() -> int:
                                  _st.unpack(">9I", bytes.fromhex(m[f"{g['slc_sl']}@6"])),
                                  _st.unpack(">9I", bytes.fromhex(m[f"{g['slc_sl']}@7"]))),
                              "closed": int(m[g["slc_state"]], 16) == 0,
-                             # trig 9, 10 (the bottom row's first two: the lowest notes) slices
-                             # 1, 2; trig 2 (the top row: a higher note) a later one
-                             "slice notes": len(notes) == 3 and notes[:2] == [24, 25] and notes[2] > 25}   # v0.33: from C1 (24), as the DT2
+                             # v0.48 (the owner: the DT2's stock behaviour): each key its own
+                             # note, the DSP the slice (note - C1) wrapped. The notes are
+                             # stock's: the same snapshot, keys (trig 9, 10, 2) and call site
+                             # on stock OS 1.11 give 60, 63, 75 (its project's KEYBOARD is a
+                             # scale, not chromatic; measured 2026-11-10)
+                             "slice notes": notes == [60, 63, 75]}
                     good = all(facts.values()) and busy_ok
                     why = str(facts) + f" notes {notes}" + busy_why
                 return good, ("menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
-                 "closes; FUNC + RIGHT splits slice 2, FUNC + LEFT removes it; FUNC + E moves at the normal step; KEYBOARD on a SLICE track: trigs 9, 10 play slices 1, 2 and trig 2 a later one (the keys' notes in order)"
+                 "closes; FUNC + RIGHT splits slice 2, FUNC + LEFT removes it; FUNC + E moves at the normal step; KEYBOARD on a SLICE track: each key its own note, stock's (trig 9, 10, 2: 60, 63, 75, as stock OS 1.11 gives), the slice that note's, as the DT2's"
                               + ("; v0.40: EDIT SLICE POINTS and CREATE SLICE GRID (TR.DET OFF, ON, after CLEAR) reach the "
                                  "editor every time while the loader, TRIM's read, LOAD TO PROJECT, a preview, refused reads, "
                                  "a take saving and normalising, a project switch are in flight; LINKED START/END move the "
@@ -2133,31 +2141,127 @@ def main() -> int:
             later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
                   [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
 
-        # v0.44 (docs/rectrig.md): BOUNCE tracks' REC trigs into their track's buffer halves
-        # (one buffer per BOUNCE track, eight), one-shot trigs armed by YES YES and spent only
-        # when a take starts, the recorder's refusals (a manual take's turn, NO ROOM), QREC's
-        # held start, QPLAY's switch on its boundary, the REC lock (id 202) through SAVE/LOAD
-        # and the step clear, and the BOUNCE REC panel ([TRIG] toggles, YES YES, NO)
-        if "rt_trig" in lay:
-            rt_js = work / "rectrig.json"
-            rt_cmd = [a.venv, "-u", "scripts/emu_rectrig.py", "--build", bdir, "--snapshot", snap,
-                      "--json", rt_js, "--png-dir", work / "rectrig"]
+        # v0.48 (docs/bounce-removal-plan.md): BOUNCE is out; it replaces v0.44..v0.47's rectrig
+        # step and keeps that step's other checks (SAMP never glides, the RECORDER's CHAN knob and
+        # FILE NAME keys, the Monomachine's TUNE). Always run: not keyed to a symbol, so it can
+        # never drop out unseen
+        bg_js = work / "bouncegone.json"
+        bg_cmd = [a.venv, "-u", "scripts/emu_bouncegone.py", "--build", bdir, "--snapshot", snap,
+                  "--json", bg_js, "--png-dir", work / "bouncegone"]
 
-            def rt_body(tdir):
-                rc, out = run("rec trigs", rt_cmd, logs, env=EMU_ENV, trace=tdir)
-                last = out.strip().splitlines()[-1] if out.strip() else ""
-                if rc != 0 or not last.startswith("PASS"):
-                    return False, out[-900:]
-                r = json.loads(rt_js.read_text())
-                return True, (f"{last[6:]}: a BOUNCE track's REC trig takes its step into the track's "
-                              f"buffer's idle half (the command ahead of the queue, never mid-repeat) and the "
-                              f"track plays it from the buffer directory, a one-shot (YES YES) fires once and "
-                              f"is spent only when its take started, a manual take's turn and NO ROOM refuse "
-                              f"it, QREC 8 holds a manual NOW to step 8, QPLAY PLEN switches on the pattern's "
-                              f"first step, the REC lock through SAVE/LOAD (id 202) and the clear, and the "
-                              f"BOUNCE REC panel's [TRIG] toggle, YES YES and NO")
-            later("rectrig", "BOUNCE REC trigs, buffers, QREC, QPLAY (ColdFire)", "BOUNCE REC trigs, buffers, QREC, QPLAY (ColdFire)",
-                  [rt_cmd, sorted(EMU_ENV.items())], rt_body)
+        def bg_body(tdir):
+            rc, out = run("bounce gone", bg_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0 or not last.startswith("PASS"):
+                return False, out[-900:]
+            return True, (f"{last[6:]}: a BOUNCE track from an older project plays SAMP OFF with the "
+                          f"sequencer over its recorder trigs, nothing sent to the DSP, nothing kept clear "
+                          f"in the recordings' area; recorder trigs and a slide through SAVE/LOAD byte for "
+                          f"byte; the LED site stock's; record 244's text stock's; FUNC + VOICE the plain "
+                          f"RECORDER; SAMP never glides; CHAN, FILE NAME; the Monomachine's TUNE")
+        later("bouncegone", "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)",
+              "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)",
+              [bg_cmd, sorted(EMU_ENV.items())], bg_body)
+
+        # v0.48 (owner, 2026-11-09): no text outside its place, every value of a control at one
+        # place and size: the RECORDER in every state of its centre box and R.LEN through its values
+        rx_js = work / "rectext.json"
+        rx_cmd = [a.venv, "-u", "scripts/emu_rectext.py", "--build", bdir, "--snapshot", snap,
+                  "--json", rx_js, "--png-dir", work / "rectext"]
+
+        def rx_body(tdir):
+            rc, out = run("recorder text", rx_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0 or not last.startswith("PASS"):
+                return False, out[-900:]
+            return True, (f"{last[6:]}: every centre-box message of the RECORDER inside its box (no "
+                          f"pixel in the gutters, the border untouched), R.LEN's MAX and step counts on "
+                          f"one line inside their column")
+        later("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)",
+              "RECORDER text inside its places, every state and R.LEN value (ColdFire)",
+              [rx_cmd, sorted(EMU_ENV.items())], rx_body)
+
+        # v0.48 (owner, 2026-11-09: "chromatic view is gone after REC grid mode ... i wish it
+        # [persisted], across all tracks and machine types"). KEYBOARD's state is the long at
+        # 0x42431a99 in this snapshot (the keyboard object's +56: 0x40047088 toggles it,
+        # 0x4004702e sets it; found with --access). KEYBOARD on; RECORD (grid recording on):
+        # off, as stock; RECORD again (off): on again (stock left it off); to track 2 (made an
+        # ONESHOT) with TRK + [TRIG 3]: still on; RECORD twice there: on; KEYBOARD off; RECORD
+        # twice: still off (nothing given back that was not taken)
+        from dnfw.sampler import machines as SMk        # noqa: PLC0415
+        KB = "mem:0x42431a99:4"
+        kb_steps = ["wait:6", KB, "tap:18", "wait:8", KB, "tap:19", "wait:8", KB, "tap:19", "wait:8", KB,
+                    f"poke:{0x4210C08C + 52 + 1163 * 2 + 0xDE:#x}:{SMk.TYPE_OF['ONESHOT']:02x}",
+                    "press:16", "wait:2", "tap:27", "wait:2", "release:16", "wait:8", KB,
+                    "tap:19", "wait:8", KB, "tap:19", "wait:8", KB,
+                    "tap:18", "wait:8", KB, "tap:19", "wait:8", KB, "tap:19", "wait:8", KB, "png:end"]
+        kb_js = work / "kbrec.json"
+        kb_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                  "--snapshot", snap, "--steps", ",".join(kb_steps), "--png-dir", work / "kbrec", "--json", kb_js]
+        KB_WANT = [0, 1, 0, 1, 1, 0, 1, 0, 0, 0]
+
+        def kb_body(tdir):
+            rc, out = run("keyboard rec", kb_cmd, logs, env=EMU_ENV, trace=tdir)
+            if rc != 0 or not kb_js.exists():
+                return False, out[-900:]
+            got = [int(v, 16) for v in json.loads(kb_js.read_text())["memory"].values()]
+            if got != KB_WANT:
+                return False, f"KEYBOARD's word {got}, wanted {KB_WANT}"
+            return True, ("KEYBOARD on; RECORD (grid recording): off as stock; RECORD again: on again; on "
+                          "another track, an ONESHOT: still on, and through RECORD twice; KEYBOARD off: "
+                          "RECORD twice leaves it off")
+        later("kbrec", "KEYBOARD kept through grid recording (ColdFire)",
+              "KEYBOARD kept through grid recording (ColdFire)", [kb_cmd, sorted(EMU_ENV.items())], kb_body)
+
+        # v0.48 (Error Kit): THRES on the coupled emulator (emu_coupled.py: the ColdFire and the
+        # DSP together, block by block): a -34 dB tone on IN; THRES 30 (tick -45 dB) starts the
+        # take on the ARM; THRES 110 holds it back, and turned to 30 while armed it starts
+        th_js = work / "thres.json"
+        th_cmd = [a.venv, "-u", "scripts/emu_coupled_thres.py", "--build", a.build, "--stock", a.stock,
+                  "--snapshot", snap, "--json", th_js]
+
+        def th_body(tdir):
+            rc, out = run("thres coupled", th_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0 or not last.startswith("PASS"):
+                return False, out[-900:]
+            return True, (f"{last[6:]}: on the ColdFire and the DSP together, a -34 dB tone on IN: THRES 30 (its "
+                          f"tick at -45 dB) starts the take on the ARM; THRES 110 holds it back, and turned to 30 "
+                          f"while armed, it starts without a new ARM")
+        later("thres", "THRES on both processors (coupled)", "THRES on both processors (coupled)",
+              [th_cmd, sorted(EMU_ENV.items())], th_body)
+
+        # v0.48 (impbox, the owner: "exact dt2"): STRT, LEN, LOOP's fine records (fmt.c
+        # smp_fine), on the ColdFire emulator: swapped in on ONESHOT/STRETCH/REPITCH/BOUNCE,
+        # every byte back on WaveTone, none on GRID/SLICE/WERP, a fresh machine's LEN 120.00
+        fs_js = work / "fineswap.json"
+        fs_cmd = [a.venv, "-u", "scripts/emu_fine_swap.py", "--build", a.build, "--snapshot", snap, "--json", fs_js]
+
+        def fs_body(tdir):
+            rc, out = run("fine swap", fs_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0:
+                return False, "\n".join(l for l in out.splitlines() if l.startswith("FAIL"))[-900:] or out[-900:]
+            return True, (f"{last}: STRT/LEN/LOOP carry FREQ's fine words while ONESHOT (all three), STRETCH, "
+                          f"REPITCH, BOUNCE (STRT, LEN) is the active track; every byte of the records and "
+                          f"runtime entries back on WaveTone; none on GRID, SLICE, WERP; a fine STRT kept "
+                          f"through track changes; a fresh machine's LEN at 120.00")
+        later("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)",
+              "STRT/LEN/LOOP fine records swapped in and out (ColdFire)", [fs_cmd, sorted(EMU_ENV.items())], fs_body)
+
+        # ... and STRT's knob: every knob step with the inputs of one of stock FREQ's makes
+        # the same change (emu_fine_knob.py over emu_encoder_trace.py)
+        fk_js = work / "fineknob.json"
+        fk_cmd = [a.venv, "-u", "scripts/emu_fine_knob.py", "--build", a.build, "--snapshot", snap, "--json", fk_js]
+
+        def fk_body(tdir):
+            rc, out = run("fine knob", fk_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0 or not last.startswith("PASS"):
+                return False, out[-900:]
+            return True, last[6:]
+        later("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)",
+              "STRT's knob against stock's fine FREQ (ColdFire)", [fk_cmd, sorted(EMU_ENV.items())], fk_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()

@@ -393,12 +393,6 @@ static void f_slen(int v, char *buf)            /* GRID's LEN: how many slices, 
     put_num(buf, (coarse(v, SMP_SLEN_ID) >> 1) + 1);
 }
 
-static void f_buf(int v, char *buf)             /* v0.46 BOUNCE's BUF: 1..8 (depaffect: it read 0%..100%) */
-{
-    int b = coarse(v, SMP_BUF_ID);
-    put_num(buf, (b < 0 ? 0 : b > 7 ? 7 : b) + 1);
-}
-
 /* v0.47: the Monomachine's TUNE as a signed knob, -64..+63 (0 in tune, 32 a semitone),
  * not stock's percentage of the record it sits on */
 static void f_mtune(int v, char *buf)
@@ -414,12 +408,14 @@ static void f_mtune(int v, char *buf)
 /* the records whose text is ours on a sample machine's track; 239, SLCE's and LEN's
  * records only on GRID's (ONESHOT's STRT, LOOP and CFAD are the same records) */
 static const u16 fmt_ids[] = {SMP_PLAY_REC, SMP_MODE_REC, SMP_BARS_REC, SMP_SEG_REC, SMP_GRID_REC,
-                              SMP_SAMP_REC, SMP_SLICE_ID, SMP_SLEN_ID, SMP_BUF_ID, MNM_TUNE_REC};
+                              SMP_SAMP_REC, SMP_SLICE_ID, SMP_SLEN_ID, MNM_TUNE_REC};
 static void (*const fmt_fns[])(int, char *) = {f_play, f_mode, f_bars, f_seg, f_grid, f_samp,
-                                               f_slce, f_slen, f_buf, f_mtune};   /* (v0.22: the recorder's are a screen's now) */
+                                               f_slce, f_slen, f_mtune};   /* (v0.22: the recorder's are a screen's now) */
 #define NFMT (int)(sizeof fmt_ids / sizeof fmt_ids[0])
 static void *stock_fmt[NFMT] __attribute__((section(".data")));
 static int fmt_saved __attribute__((section(".data"))) = 0;
+
+void smp_fine(int kind);
 
 /* from wr_names, when the active track's machine changes: KIND as is_wr answers it
  * (SMP_KIND0.. for the sample machines) */
@@ -441,9 +437,77 @@ void smp_formats(int kind)
         int slices = fmt_ids[k] == SMP_SLICE_ID || fmt_ids[k] == SMP_SLEN_ID;  /* GRID's, SLICE's */
         if (smp && (!grid_only || kind == SMP_GRID_KIND)
             && (!slices || kind == SMP_GRID_KIND || kind == SMP_SLICE_KIND)
-            && (fmt_ids[k] != SMP_MODE_REC || kind == SMP_WERP_KIND)
-            && (fmt_ids[k] != SMP_BUF_ID || kind == SMP_BOUNCE_KIND))     /* v0.46: 244 is stock's elsewhere */
+            && (fmt_ids[k] != SMP_MODE_REC || kind == SMP_WERP_KIND))   /* (v0.48: BOUNCE's BUF text gone: 244 stock's) */
             f = (void *)fmt_fns[k];
         RECORD_FMT(fmt_ids[k]) = f;
     }
+    smp_fine(kind);
+}
+
+/* v0.48 (impbox, the owner: "exact dt2"): STRT, LEN and LOOP as the DT2's own controls.
+ * Its 1.17 OS gives them fine-resolution records (range 0x7800 = 120.00, LEN's default
+ * 120.00, the fine flag set), so the knob moves in 1/256 and the screen shows 0.00..120.00.
+ * The DN2's own fine controls (FREQ, record 36) are the reference: while the active track is
+ * ONESHOT (all three), STRETCH, REPITCH or BOUNCE (STRT and LEN), records 239/258/257 get
+ * that range, default and flag, FREQ's value type (the 4 words at +4 of its runtime entry,
+ * which the knob step 0x4011336e reads: 1/256 a count, push for whole steps) and FREQ's
+ * two-decimal formatter (0x400e2ef6, generic); otherwise the stock words go back, so
+ * WaveTone, GRID and SLICE see exactly what they had. To pull this out: drop the call above
+ * (the records are never touched) and ctl_pos in dnfw.sampler.program (back to ctl). */
+#define POS_RANGE 0x7800
+#define FINE_REF 36u                            /* FREQ: stock's fine unipolar control */
+#define REC_W(id) ((int *)(0x401F7F94u + 60u * (id)))
+#define ENTRY_TYPE(id) ((u32 *)(0x4243325Cu + 68u * (id) + 4u))   /* the value type, 4 words */
+static const u16 pos_ids[3] = {SMP_STRT_ID, SMP_LEN_ID, SMP_LOOP_ID};
+static int pos_rec[3][3] __attribute__((section(".data")));   /* stock range, default, flag */
+static u32 pos_type[3][4] __attribute__((section(".data")));
+static void *pos_fmt[3] __attribute__((section(".data")));
+static int pos_saved __attribute__((section(".data"))) = 0;
+int smp_fine_on __attribute__((section(".data"))) = 0;   /* which of the three are fine now (bits) */
+
+int smp_fine_mask(int kind)
+{
+    if (kind == SMP_KIND0)
+        return 7;                               /* ONESHOT: STRT, LEN, LOOP */
+    if (kind == SMP_STRETCH_KIND || kind == SMP_REPITCH_KIND || kind == SMP_BOUNCE_KIND)
+        return 3;                               /* STRT, LEN */
+    return 0;
+}
+
+void smp_fine(int kind)
+{
+    if (!pos_saved) {
+        for (int k = 0; k < 3; k++) {
+            int *r = REC_W(pos_ids[k]);
+            pos_rec[k][0] = r[3];
+            pos_rec[k][1] = r[4];
+            pos_rec[k][2] = r[5];
+            for (int j = 0; j < 4; j++)
+                pos_type[k][j] = ENTRY_TYPE(pos_ids[k])[j];
+            pos_fmt[k] = RECORD_FMT(pos_ids[k]);
+        }
+        pos_saved = 1;
+    }
+    int mask = smp_fine_mask(kind);
+    for (int k = 0; k < 3; k++) {
+        u32 id = pos_ids[k];
+        int *r = REC_W(id);
+        if (mask & (1 << k)) {
+            r[3] = POS_RANGE;
+            r[4] = id == SMP_LEN_ID ? POS_RANGE : 0;
+            r[5] = REC_W(FINE_REF)[5];
+            for (int j = 0; j < 4; j++)
+                ENTRY_TYPE(id)[j] = ENTRY_TYPE(FINE_REF)[j];
+            RECORD_FMT(id) = RECORD_FMT(FINE_REF);
+        } else if (smp_fine_on & (1 << k)) {
+            r[3] = pos_rec[k][0];
+            r[4] = pos_rec[k][1];
+            r[5] = pos_rec[k][2];
+            for (int j = 0; j < 4; j++)
+                ENTRY_TYPE(id)[j] = pos_type[k][j];
+            if (RECORD_FMT(id) == RECORD_FMT(FINE_REF))
+                RECORD_FMT(id) = pos_fmt[k];    /* (smp_formats has set GRID's/SLICE's own) */
+        }
+    }
+    smp_fine_on = mask;
 }

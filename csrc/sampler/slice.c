@@ -959,64 +959,12 @@ int slc_pop(u8 *it)
 u32 slc_kb_c __attribute__((section(".data"))) = 0;
 u32 slc_keynotes(u32 kbd, u32 *vec, u32 k)
 {
-    u32 t = ACTIVE_TRACK;
-    if (KIT && t <= 15 && k < 16 && vec && vec[0] && vec[2] >= vec[0] + 4u) {
-        volatile u8 *s = (volatile u8 *)SOUND(t);
-        int ty = (signed char)s[0xDE];
-        if ((ty == SLICE_TYPE || ty == GRID_TYPE) && SOUND_VALUE(SOUND(t), SMP_SLICE_ID) == 0) {
-            /* v0.26: the slices in the order of the keys' notes, as the keyboard lays them
-             * out (chromatic: its lit keys; a folded scale: all 16): the key with the
-             * lowest note plays slice 1, the next slice 2 .., as the DT2's KEYBOARD with
-             * SLICE at NOTE ("slices play from C1 upwards, wrapping after the last"). Each
-             * octave up or down (KEYBOARD + UP/DOWN) moves them on by as many slices as the
-             * keys play. v0.25 gave TRIG k slice k, so the unlit keys' slices could not be
-             * played (and the lit ones' came out of order) */
-            /* v0.38 (blskk: "arpeggiator, note edit and sampler make the digitone crash"):
-             * each key's notes go into an EMPTY vector, which stock grows on the heap as a
-             * std::vector grows, and we free (its operator delete). v0.26..v0.37 handed stock
-             * an 8-note vector on our stack; a key with more notes (a chord keyboard mode,
-             * a chord memory, a scale's reserve()) made stock reallocate it and FREE OUR
-             * STACK ADDRESS to the heap (0x4018b772 / 0x4018b7ec -> 0x40120270): the heap
-             * corrupt, a crash later anywhere (docs/user-reports.md) */
-            u32 tv[3];
-            int note[16], mine = -1;
-            for (u32 j = 0; j < 16u; j++) {
-                tv[0] = tv[1] = tv[2] = 0;
-                u32 got = KEYNOTES(kbd, tv, j);
-                note[j] = got && tv[0] && tv[1] > tv[0] ? (int)*(u32 *)tv[0] : -1;
-                VEC_FREE(tv[0]);
-            }
-            mine = note[k];
-            if (mine < 0)
-                return 0;                       /* a key with no note: none */
-            int rank = 0, per = 0;
-            for (int j = 0; j < 16; j++) {      /* distinct notes: below the key's, and in all */
-                if (note[j] < 0)
-                    continue;
-                int dup = 0;
-                for (int i = 0; i < j; i++)
-                    if (note[i] == note[j])
-                        dup = 1;
-                if (dup)
-                    continue;
-                per++;
-                if (note[j] < mine)
-                    rank++;
-            }
-            int bank = 0;                       /* the octave: TRIG 9's note against the middle C */
-            if (note[8] >= 0) {
-                bank = (note[8] - (int)KB_C0) / 12;
-                if (note[8] < (int)KB_C0 && ((int)KB_C0 - note[8]) % 12)
-                    bank--;
-            }
-            slc_kb_c = (u32)mine;
-            int idx = (rank + per * bank) % 64;
-            if (idx < 0)
-                idx += 64;
-            *(u32 *)vec[0] = 24u + (u32)idx;    /* the DSP: (note - 24) mod the slices (v0.33: from C1) */
-            vec[1] = vec[0] + 4u;
-            return 1;
-        }
-    }
+    /* v0.48 (impbox; the owner: "keep the dt2 stock behavior for slices"): every key plays
+     * its own note, as the DT2's KEYBOARD does with SLICE at NOTE ("slices play from C1 and
+     * upwards, wrapping around after the last slice", its manual 8.5.2): the same slice as a
+     * trig with that note (v0.26..v0.47 ranked the lit keys' notes instead, which put the
+     * keyboard's C one slice off a C trig's, and on the last slice). The DSP turns the note
+     * into its slice. Kept as the site's target (coldfire.py KEYNOTES_SITE): stock's call */
+    slc_kb_c = k;
     return KEYNOTES(kbd, vec, k);
 }
