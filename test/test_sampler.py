@@ -418,8 +418,8 @@ def test_a_loop_follows_len_loop_and_play_while_it_sounds():
     out = []
     for b in range(10):
         out += h.block(ONE, 60.0, b == 0)
-    h.set(SM.LEN_REC, 2)                         # the end moves in to 756 frames, mid-note
-    h.set(SM.LOOP_REC, 1)                        # and the loop to 377
+    h.set(SM.LEN_REC, 2)                         # the end moves in to 800 frames, mid-note (v0.48: 2.00 of 120.00;
+    h.set(SM.LOOP_REC, 1)                        # and the loop to 400               v0.15..v0.47 2 of 127: 756, 377)
     later = []
     for b in range(100):
         later += h.block(ONE, 60.0, False)
@@ -427,14 +427,14 @@ def test_a_loop_follows_len_loop_and_play_while_it_sounds():
     # v0.18: through the DT2's reader (its interpolator and decimator ring a little at
     # the loop's seam, a few frames' worth of the ramp)
     eps = 100 / n                                 # (a quarter of the seam's step)
-    assert max(tail) < 757 / n + eps and min(tail) >= 377 / n - eps    # looping in the new region
+    assert max(tail) < 801 / n + eps and min(tail) >= 400 / n - eps    # looping in the new region
     h.set(SM.PLAY_REC, 40)                       # REV LOOP, mid-note: it turns round
     rev = []
     for b in range(40):
         rev += h.block(ONE, 60.0, False)
     steps = [rev[k + 16] - rev[k] for k in range(0, len(rev) - 16, 16)]   # (over 16: the filters ripple)
     assert sum(1 for d in steps if d < 0) > 0.9 * len(steps)        # mostly backward
-    assert max(rev[-1000:]) < 757 / n + eps and min(rev[-1000:]) >= 377 / n - eps
+    assert max(rev[-1000:]) < 801 / n + eps and min(rev[-1000:]) >= 400 / n - eps
 
 
 def test_one_detent_a_choice_lands_inside_each_choice():
