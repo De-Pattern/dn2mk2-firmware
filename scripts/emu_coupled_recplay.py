@@ -294,8 +294,11 @@ def main() -> int:
         c.frame_filter = fil
     setup.append(("the note", "UI: KEYBOARD, [TRIG 9] held"))
     kb, trig9 = names.get("KEYBOARD"), 33
-    if kb:
+    KB_ON = 0x42431A99                                           # KEYBOARD's state byte (the gate's kbrec step)
+    kb_was = c.read(KB_ON, 1)[0]
+    if kb and not kb_was:                                        # a tap toggles it: only when it is off
         tap(kb)
+    rep["numbers"]["keyboard"] = {"before": kb_was, "after": c.read(KB_ON, 1)[0], "overlay": c.long(lay["rec_overlay"])}
     c.periods(2)
     c.machine.pc = c.panel.panelin.press(c.machine.m, c.panel.profile, *key(trig9))
     fw = []
