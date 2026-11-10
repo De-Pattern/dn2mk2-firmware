@@ -182,32 +182,36 @@ static u32 ctl(u32 t, u32 slot)                 /* a track's control, as its sou
     return snd ? (u32)(*(const u16 *)(snd + SOUND_PARAMS + 2u * slot)) >> 8 : 0;
 }
 
-int rt_is_bounce(u32 t)                         /* BOUNCE on track t */
+int rt_is_bounce(u32 t)                         /* v0.49: FLEX (type 17, BOUNCE's) on track t */
 {
-    /* v0.48 (docs/bounce-removal-plan.md, step 1): BOUNCE does nothing: no track is one for the
-     * recorder trigs, the buffers or the BOUNCE REC panel (bn_active). A loaded type-17 track
-     * plays SAMP OFF (link.c: rt_bounce_samp, no take ever) */
-    (void)t;
-    return 0;
+    const u8 *snd = sound_of(t);
+    return snd && snd[SOUND_TYPE] == BOUNCE_TYPE;
 }
 
-u32 rt_buf_of(u32 t)                            /* the buffer a BOUNCE track names, 0..BUF_N-1 */
+/* v0.49: BUF over the knob's whole travel, BUF 1..8 an eighth of it each (BOUNCE's read 0..7 of a
+ * 0..100 control: its default and most of the knob were BUF 8). fmt.c draws it the same way */
+#define REC_W(id) ((const int *)(0x401F7F94u + 60u * (id)))
+u32 rt_buf_value(u32 v)                         /* the control's value (0..its top) -> 0..BUF_N-1 */
 {
-    u32 b = ctl(t, SLOT_BUF);
+    int top = REC_W(SMP_BUF_ID)[3] >> 8, lo = REC_W(SMP_BUF_ID)[2] >> 8;
+    int span = top - lo + 1, x = (int)v - lo;
+    if (span < BUF_N)
+        span = BUF_N;
+    if (x < 0)
+        x = 0;
+    u32 b = (u32)(x * BUF_N / span);
     return b >= BUF_N ? BUF_N - 1 : b;
+}
+
+u32 rt_buf_of(u32 t)                            /* the buffer a FLEX track names, 0..BUF_N-1 */
+{
+    return rt_buf_value(ctl(t, SLOT_BUF));
 }
 
 static u32 rlen_of(u32 t)                       /* R.LEN steps (0 MAX: the pattern's length) */
 {
     u32 n = ctl(t, SLOT_RLEN);
     return n > 0 && n < 128 ? n : (u32)master_len();
-}
-
-static void swap(int b)
-{
-    rt_play[b] ^= 1;
-    rt_pend[b] = 0;
-    rt_swaps++;
 }
 
 /* does [PLACE, PLACE + BYTES) cross a live half region other than IX's own? */
@@ -243,7 +247,15 @@ int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
         refuse(track, !rt_on ? 1 : 2);
         return 0;
     }
-    int half = rt_play[b] ^ 1;                  /* (a take still waiting is replaced) */
+    /* v0.49 FLEX: one buffer, recorded where it plays (half 0); a take already running is
+     * never cut by a trig: refused (BUSY), unless it is this buffer's own, ending now (a trig
+     * every pass with R.LEN the pattern's length meets its last take's end) */
+    if (rt_cur >= 0 && (int)(now - rt_cur_end) < 0
+        && !(rt_cur == (int)b && (int)(rt_cur_end - now) <= 6)) {
+        refuse(track, 4);
+        return 0;
+    }
+    int half = 0;
     int ix = HALF_IX(b, half), slot = HALF_SLOT(b, half);
     u32 place = rt_nx_place[b], room = rt_nx_room[b];
     u32 steps = rlen_of(track);
@@ -259,12 +271,6 @@ int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
     if (frames < 4800u || clash(ix, place, frames * 2u)) {   /* under a tenth of a second, or no room */
         refuse(track, 3);
         return 0;
-    }
-    /* one recorder: a take of another buffer still running is cut here, and that buffer
-     * keeps playing what it played (its waiting take, cut short, is dropped) */
-    if (rt_cur >= 0 && rt_cur != (int)b && (int)(now - rt_cur_end) < 0) {
-        rt_pend[rt_cur] = 0;
-        rt_rbytes[HALF_IX(rt_cur, rt_play[rt_cur] ^ 1)] = 0;
     }
     u32 src = ctl(track, SLOT_SRC), chan = ctl(track, SLOT_CHAN);
     u32 seq = 0x80008000u | (++rt_n & 0x7FFFu);  /* low half's bit 15: a buffer take (rec.c) */
@@ -285,37 +291,16 @@ int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
     rt_fired++;
     rt_fired_at = now | 1u;
     rt_fired_trk = (u8)track;
-    if (QSTEPS[rt_qplay] == 0 || !SEQ_PLAYING) {
-        rt_play[b] = (u8)half;                  /* QPLAY OFF: heard as it records */
-        rt_pend[b] = 0;
-        rt_swaps++;
-    } else {
-        /* the master steps since PLAY at this step: this step counted already, or (the
-         * audio interrupt has not seen it yet) about to be */
-        int p = master_pos();
-        rt_pfrom[b] = rt_steps + (p != rt_pos ? 1u : 0u);
-        rt_plen[b] = steps;
-        rt_pt0[b] = now;
-        rt_pfr[b] = frames / 32u + 3u;
-        rt_pend[b] = 1;
-    }
+    rt_play[b] = 0;                             /* v0.49: heard as it records (no Q.PLAY) */
+    rt_pend[b] = 0;
     return 1;
 }
 
 /* a manual take starts (rec.c, or a QREC take at its boundary): the recorder is its, so a
  * buffer take still running ends here; one waiting for QPLAY, cut short, is dropped (the
  * buffer plays what it played); one heard live (QPLAY OFF) keeps what it got */
-void rt_cut(void)
+void rt_cut(void)                               /* v0.49: the buffer keeps what its take got */
 {
-    if (rt_cur < 0 || (int)(FRAMES - rt_cur_end) >= 0) {
-        rt_cur = -1;
-        return;
-    }
-    int b = rt_cur;
-    if (rt_pend[b]) {
-        rt_pend[b] = 0;
-        rt_rbytes[HALF_IX(b, rt_play[b] ^ 1)] = 0;
-    }
     rt_cur = -1;
 }
 
@@ -335,9 +320,6 @@ void rt_frame(void)
         rt_pos = -1;
         for (int t = 0; t < 16; t++)
             rt_last_step[t] = 0xFF;             /* PLAY: the first step fires */
-        for (int b = 0; b < BUF_N; b++)         /* stopped: a waiting take is heard once it is over */
-            if (rt_pend[b] && FRAMES - rt_pt0[b] >= rt_pfr[b])
-                swap(b);
         if (q_gen != q_cancel && q_gen != q_fire) {   /* no clock to wait for: at once */
             rt_cut();
             q_fire = q_gen;
@@ -367,9 +349,6 @@ void rt_frame(void)
         rt_steps = 0;                           /* PLAY: counted from here */
     rt_pos = p;
     rt_steps++;
-    for (int b = 0; b < BUF_N; b++)
-        if (rt_pend[b] && rt_steps - rt_pfrom[b] >= rt_plen[b] && on_boundary(rt_qplay, p))
-            swap(b);
     if (q_gen != q_cancel && q_gen != q_fire && on_boundary(rt_qrec, p)) {
         rt_cut();
         q_fire = q_gen;
@@ -403,7 +382,7 @@ int rt_regions(int dest, u32 s, u32 *next)
             *next = a & ~511u;
     }
     for (int b = 0; b < BUF_N; b++) {
-        if (!rt_on || !rt_nx_need[b] || HALF_SLOT(b, rt_play[b] ^ 1) == dest)
+        if (!rt_on || !rt_nx_need[b] || HALF_SLOT(b, 0) == dest)
             continue;
         u32 a = rt_nx_place[b], z = a + rt_nx_need[b];
         if (a <= s && s < z)
@@ -464,7 +443,7 @@ void rt_poll(void)
         u32 n = need[b] > REC_FRAMES_MAX ? REC_FRAMES_MAX : need[b];
         n = (n * 2u + 511u) & ~511u;
         u32 room;
-        u32 place = smp_rec_place(HALF_SLOT(b, rt_play[b] ^ 1), &room);
+        u32 place = smp_rec_place(HALF_SLOT(b, 0), &room);   /* v0.49: where it plays (one buffer) */
         rt_nx_place[b] = place;
         rt_nx_room[b] = room;
         rt_nx_need[b] = room < n ? room : n;    /* kept clear for it */
@@ -484,7 +463,7 @@ void rt_knob(int index, int delta)
     qk_acc += delta;
     int n = qk_acc / 4;
     qk_acc -= n * 4;
-    int *q = index == 5 ? &rt_qrec : index == 6 ? &rt_qplay : 0;
+    int *q = index == 5 ? &rt_qrec : 0;         /* v0.49: no Q.PLAY */
     if (!q || !n)
         return;
     *q += n;
@@ -522,14 +501,11 @@ int rt_state(int b, int *tenths, int *steps)
         *tenths = *steps = 0;
         return 0;
     }
-    int playing = HALF_IX(b, rt_play[b]), idle = HALF_IX(b, rt_play[b] ^ 1);
+    int playing = HALF_IX(b, 0);               /* v0.49: one buffer */
     int ix = -1, st = 0;
     if (rt_cur == b && (int)(FRAMES - rt_cur_end) < 0) {
-        ix = rt_pend[b] ? idle : playing;
+        ix = playing;
         st = 1;
-    } else if (rt_pend[b]) {
-        ix = idle;
-        st = 2;
     } else if (rt_rbytes[playing]) {
         ix = playing;
         st = 3;
@@ -600,7 +576,7 @@ u32 rt_take_handover(u32 t, u32 *bytes, u32 *steps)
 {
     u32 b = rt_buf_of(t);
     int ix = HALF_IX(b, rt_play[b]);
-    if (!rt_on || !rt_rbytes[ix] || rt_pend[b] || (rt_cur == (int)b && (int)(FRAMES - rt_cur_end) < 0)) {
+    if (!rt_on || !rt_rbytes[ix] || (rt_cur == (int)b && (int)(FRAMES - rt_cur_end) < 0)) {
         *bytes = 0;
         *steps = 0;
         return 0;

@@ -1539,7 +1539,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             u32 step = (u32)bn_page * 16u + (u32)(code - K_TRIG1);
             unsigned char *table = sl_ui_table_now();
             if (table && step < bn_len())
-                rt_trig_toggle(table, UI_TRACK_B, step, smp_func_held);
+                rt_trig_toggle(table, UI_TRACK_B, step, !smp_func_held);   /* v0.49: a one-shot; FUNC + [TRIG] a trig every pass */
             smp_overlay_dirty = 1;
             eaten |= 1u << code;
             it[0] = IT_DROP;

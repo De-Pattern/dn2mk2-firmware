@@ -349,9 +349,10 @@ def start(p: Prog, L: Layout) -> None:
     vs(p, "on", 0)
     vs(p, "fixed", 0)
     p.ld(0, C["type"])
-    # v0.44: BOUNCE is STRETCH on its buffer (the ColdFire writes the buffer half's SAMP)
-    p.iconst(12, SM.TYPE_OF["BOUNCE"])
-    p.if_(0, "EQ", 12, lambda: p.iconst(0, SM.TYPE_OF["STRETCH"]), kind="i")
+    # v0.49: FLEX is ONESHOT on its buffer (the ColdFire writes the buffer's SAMP; v0.44..v0.47
+    # BOUNCE was STRETCH, fitted to the take's steps)
+    p.iconst(12, SM.TYPE_OF["FLEX"])
+    p.if_(0, "EQ", 12, lambda: p.iconst(0, SM.TYPE_OF["ONESHOT"]), kind="i")
     vs(p, "mach", 0)
     p.ld(9, C["t"])
     PP.t146(p, 10, 9)

@@ -55,7 +55,7 @@ LONG_NAME, SHORT_NAME = "Perc", "PRC"           # v0.11: PERC in Waverider's pla
 MACHINE_NAMES = {5: ("Perc", "PRC"),
                  8: ("Oneshot", "ONE"), 9: ("Werp", "WRP"), 10: ("Stretch", "STR"),
                  11: ("Repitch", "RPT"), 12: ("Grid", "GRD"), 13: ("Slice", "SLC"),
-                 _smpm.BOUNCE_TYPE: ("Bounce", "BNC"),       # v0.44: a section of its own, after the sample machines
+                 _smpm.BOUNCE_TYPE: ("Flex", "FLX"),       # v0.44: a section of its own, after the sample machines
                  **{t: _mnm.LIST_NAMES[n] for t, n in zip(_mnm.TYPES, _mnm.NAMES)}}   # v0.26
 if set(MACHINE_NAMES) != set(NEW_TYPES):
     raise ImportError(f"machine types {sorted(set(NEW_TYPES) - set(MACHINE_NAMES))} have no machine")

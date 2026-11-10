@@ -393,10 +393,13 @@ static void f_slen(int v, char *buf)            /* GRID's LEN: how many slices, 
     put_num(buf, (coarse(v, SMP_SLEN_ID) >> 1) + 1);
 }
 
-static void f_buf(int v, char *buf)             /* v0.46 BOUNCE's BUF: 1..8 (depaffect: it read 0%..100%) */
+static void f_buf(int v, char *buf)             /* v0.49 FLEX's BUF: 01..08, an eighth of the knob each */
 {
-    int b = coarse(v, SMP_BUF_ID);
-    put_num(buf, (b < 0 ? 0 : b > 7 ? 7 : b) + 1);
+    extern unsigned int rt_buf_value(unsigned int v);
+    unsigned int b = rt_buf_value((unsigned int)(v >> 8) & 0xFFu) + 1u;
+    buf[0] = '0';
+    buf[1] = (char)('0' + b);
+    buf[2] = 0;
 }
 
 /* v0.47: the Monomachine's TUNE as a signed knob, -64..+63 (0 in tune, 32 a semitone),

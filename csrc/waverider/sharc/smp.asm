@@ -3684,7 +3684,7 @@ wr_sm_else_153.:
       R12 = 0x11;
       COMP(R0, R12);
       IF NE JUMP 0xbf32e6;                   // -> wr_sm_else_305.
-      R0 = 0xa;
+      R0 = 0x8;
 .GLOBAL wr_sm_else_305.;
 wr_sm_else_305.:
       DM(1, I2) = R0;                   // mach

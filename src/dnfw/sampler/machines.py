@@ -18,17 +18,21 @@ from __future__ import annotations
 FIRST_TYPE = 8
 # types 8..13 (v0.19: SLICE); v0.44: BOUNCE, type 17 (14..16 are the Monomachine's): to the DSP
 # it is STRETCH on its track's recorder buffer (BUF_*, below); the ColdFire's own machine
-NAMES = ("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID", "SLICE", "BOUNCE")
-SHORT = ("ONE", "WRP", "STRE", "RPI", "GRD", "SLC", "BNC")
+# v0.49 FLEX (docs/flex-design.md) takes BOUNCE's type 17: every table already covers it (v0.44's
+# freeze was a new type a table missed), and an old project's BOUNCE track opens as a FLEX track
+# (the same records: BUF, SRC, R.LEN; recorder trigs in the lock store's record 202)
+NAMES = ("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID", "SLICE", "FLEX")
+SHORT = ("ONE", "WRP", "STRE", "RPI", "GRD", "SLC", "FLX")
 BOUNCE_TYPE = 17
+FLEX_TYPE = BOUNCE_TYPE
 # v0.45 (owner, 2026-11-08): listed again: v0.44's freeze on picking it (wr_label, pages.py) is
 # fixed, and the gate's `machines` step picks every row of the real list. False hides it
 # (still built: its type, pages and DSP path stay, so a project that holds it loads)
 # v0.47 (owner, 2026-11-09): hidden again, to be redesigned ("pull it out for now, without
 # breaking or affecting anything else"): only MACHINE SEL's row goes; a project holding a
 # BOUNCE track loads and plays as on v0.46 (the gate's `machines` power-on still boots one)
-BOUNCE_LISTED = False
-TYPE_OF = {n: FIRST_TYPE + k for k, n in enumerate(NAMES[:6])} | {"BOUNCE": BOUNCE_TYPE}
+BOUNCE_LISTED = True                      # v0.49: FLEX, listed (the name kept for the tables that read it)
+TYPE_OF = {n: FIRST_TYPE + k for k, n in enumerate(NAMES[:6])} | {"FLEX": FLEX_TYPE, "BOUNCE": FLEX_TYPE}
 TYPES = tuple(TYPE_OF[n] for n in NAMES)  # in NAMES' order
 ENGINED = NAMES                           # the machines this build renders (v0.15: all five)
 
@@ -55,10 +59,10 @@ PAGES = {        # v0.15: the DT2's own SRC layout -- A TUNE, B PLAY, C (empty),
     "STRETCH": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
                 (256, "SAMP", "Sample Slot"), (239, "STRT", "Start"), (258, "LEN", "Length"),
                 (240, "BARS", "Bars"), (241, "LEV", "Sample Level")),
-    # v0.44 BOUNCE: STRETCH's page with the slot's place taken by BUF (which buffer, 1..8)
-    "BOUNCE": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
-               (244, "BUF", "Buffer"), (239, "STRT", "Start"), (258, "LEN", "Length"),
-               (0, "-", "Unused"), (241, "LEV", "Sample Level")),
+    # v0.49 FLEX: ONESHOT's page with the slot's place taken by BUF (which buffer, 1..8)
+    "FLEX": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
+             (244, "BUF", "Buffer"), (239, "STRT", "Start"), (258, "LEN", "Length"),
+             (257, "LOOP", "Loop Pos"), (241, "LEV", "Sample Level")),
     "REPITCH": ((0, "-", "Unused"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
                 (256, "SAMP", "Sample Slot"), (239, "STRT", "Start"), (258, "LEN", "Length"),
                 (240, "BARS", "Bars"), (241, "LEV", "Sample Level")),

@@ -65,7 +65,7 @@ SAMPLE_SLIDE = {8: (25, 30, 26, 45, 44),          # ONESHOT
                 11: (30, 26, 45),                 # REPITCH (no TUNE on its page)
                 12: (25, 30),                     # GRID
                 13: (25, 30),                     # SLICE
-                17: (25, 30, 26, 45)}             # v0.44 BOUNCE: STRETCH's (it is STRETCH to the DSP)
+                17: (25, 30, 26, 45, 44)}         # v0.49 FLEX: ONESHOT's (it is ONESHOT to the DSP)
 # PERC (type 5): the Machinedrum's machines (dnfw.md). Their eight controls (dnfw.perc.machines
 # PARAMS: frame slots 25, 31, 41, 30, 43, 44, 47, 29) reach the MD's own DSP code through its
 # host words, recomputed on a block with a change; whether a change is heard while the note

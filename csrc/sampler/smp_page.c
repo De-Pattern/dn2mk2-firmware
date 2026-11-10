@@ -2226,7 +2226,7 @@ static void bn_view_draw(void *c)
     extern u32 rt_count(const unsigned char *table, u32 t, u32 *trigs, u32 *oneshots, u32 *spent);
     extern u32 bn_pages(void);
     static const char *const W[4] = {"EMPTY", "REC", "NEXT", "PLAYS"};
-    static const char *const WHY[4] = {"", "NO BUFFERS", "MANUAL REC", "NO ROOM"};
+    static const char *const WHY[5] = {"", "NO BUFFERS", "MANUAL REC", "NO ROOM", "BUSY"};   /* v0.49: BUSY */
     u32 t = UI_TRACK;
     u32 b = rt_buf_of(t);
     int bx0 = 29, bx1 = 97, by0 = 22, by1 = 48, cx = (bx0 + bx1) / 2;
@@ -2250,7 +2250,7 @@ static void bn_view_draw(void *c)
         LABEL(c, cx, y2, "%s", "NOTHING TO SAVE");
     else if (bn_said_at && now - bn_said_at < 3000u)
         LABEL(c, cx, y2, "%d ARMED", bn_said_n);
-    else if (rt_why_at && now - rt_why_at < 4500u && rt_why_trk == t && rt_why >= 1 && rt_why <= 3)
+    else if (rt_why_at && now - rt_why_at < 4500u && rt_why_trk == t && rt_why >= 1 && rt_why <= 4)
         LABEL(c, cx, y2, "%s", WHY[rt_why]);
     else if (rt_fired_at && now - rt_fired_at < 1500u && rt_fired_trk == t)
         LABEL(c, cx, y2, "%s", "TRIG: RECORDING");
@@ -2284,8 +2284,7 @@ static void bn_view_draw(void *c)
     /* the bottom row */
     LABEL(c, 13, 9, "%s", rt_qname(rt_qrec));
     LABEL(c, 13, 0, "%s", "Q.REC");
-    LABEL(c, 47, 9, "%s", rt_qname(rt_qplay));
-    LABEL(c, 47, 0, "%s", "Q.PLAY");
+    (void)rt_qplay;                             /* v0.49: no Q.PLAY */
     if (rec_rlen <= 0) {                        /* as the RECORDER draws R.LEN */
         LABEL(c, 80, 12, "%s", "MAX");
     } else {
