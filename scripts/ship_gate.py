@@ -209,6 +209,8 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)"),
        ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
        ("thres", "THRES on both processors (coupled)"),
+       ("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"),
+       ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
@@ -2226,6 +2228,38 @@ def main() -> int:
                           f"while armed, it starts without a new ARM")
         later("thres", "THRES on both processors (coupled)", "THRES on both processors (coupled)",
               [th_cmd, sorted(EMU_ENV.items())], th_body)
+
+        # v0.48 (impbox, the owner: "exact dt2"): STRT, LEN, LOOP's fine records (fmt.c
+        # smp_fine), on the ColdFire emulator: swapped in on ONESHOT/STRETCH/REPITCH/BOUNCE,
+        # every byte back on WaveTone, none on GRID/SLICE/WERP, a fresh machine's LEN 120.00
+        fs_js = work / "fineswap.json"
+        fs_cmd = [a.venv, "-u", "scripts/emu_fine_swap.py", "--build", a.build, "--snapshot", snap, "--json", fs_js]
+
+        def fs_body(tdir):
+            rc, out = run("fine swap", fs_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0:
+                return False, "\n".join(l for l in out.splitlines() if l.startswith("FAIL"))[-900:] or out[-900:]
+            return True, (f"{last}: STRT/LEN/LOOP carry FREQ's fine words while ONESHOT (all three), STRETCH, "
+                          f"REPITCH, BOUNCE (STRT, LEN) is the active track; every byte of the records and "
+                          f"runtime entries back on WaveTone; none on GRID, SLICE, WERP; a fine STRT kept "
+                          f"through track changes; a fresh machine's LEN at 120.00")
+        later("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)",
+              "STRT/LEN/LOOP fine records swapped in and out (ColdFire)", [fs_cmd, sorted(EMU_ENV.items())], fs_body)
+
+        # ... and STRT's knob: every knob step with the inputs of one of stock FREQ's makes
+        # the same change (emu_fine_knob.py over emu_encoder_trace.py)
+        fk_js = work / "fineknob.json"
+        fk_cmd = [a.venv, "-u", "scripts/emu_fine_knob.py", "--build", a.build, "--snapshot", snap, "--json", fk_js]
+
+        def fk_body(tdir):
+            rc, out = run("fine knob", fk_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0 or not last.startswith("PASS"):
+                return False, out[-900:]
+            return True, last[6:]
+        later("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)",
+              "STRT's knob against stock's fine FREQ (ColdFire)", [fk_cmd, sorted(EMU_ENV.items())], fk_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()

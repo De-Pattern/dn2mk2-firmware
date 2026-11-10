@@ -367,6 +367,15 @@ static int smp_get(void *view, u32 id)
     return v < 0 ? 0 : v > top ? top : v;
 }
 
+/* v0.48: STRT, LEN, LOOP's place across W from the whole word, 0..120.00 (dnfw.sampler.program.ctl_pos) */
+static int smp_pos(void *view, u32 id, int w)
+{
+    u8 flag;
+    int v = GET_VALUE(view, id, &flag);
+    v = v < 0 ? 0 : v > 0x7800 ? 0x7800 : v;
+    return v * w / 0x7800;
+}
+
 /* the pool's names: the sample link's (csrc/sampler/link.c) once a pool has been sent,
  * the built-in test sounds until then; 0 for a slot the pool does not hold (K from 1) */
 extern int smp_count(void);
@@ -457,9 +466,9 @@ static void smp_picture(void *c, void *view, int kind)
         for (int i = 0; i <= n && n <= 32; i++)
             px(c, x0 + i * w / n, POS_Y + 2);
     } else {
-        a = smp_get(view, SMP_STRT_ID) * w / 120;
-        b = a + smp_get(view, SMP_LEN_ID) * w / 127;
-        loop = smp_get(view, SMP_LOOP_ID) * w / 127;
+        a = smp_pos(view, SMP_STRT_ID, w);     /* v0.48: the fine word (fmt.c smp_fine) */
+        b = a + smp_pos(view, SMP_LEN_ID, w);
+        loop = smp_pos(view, SMP_LOOP_ID, w);
     }
     if (b > w) b = w;
     for (int x = 0; x <= w; x += 2)

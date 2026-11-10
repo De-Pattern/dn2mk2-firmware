@@ -572,6 +572,18 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
     u32 r = MACHINE_COMMIT(model, track, type, a, b);
     if (keep > 0 && SOUND_TYPE(track) == (int)type && smp_samp_of((int)track) != keep)
         smp_set_samp((int)track, keep);
+    /* v0.48: a fresh ONESHOT/STRETCH/REPITCH/BOUNCE starts at the DT2's LEN, 120.00 (fmt.c
+     * smp_fine). The commit sets the shared record's default, WaveTone's 0x7f00 while the
+     * records are still stock; anything left above 120.00 is put at it. */
+    extern int smp_fine_mask(int kind);
+    if (track < 16 && KIT && SOUND_TYPE(track) == (int)type && was != (int)type
+        && (smp_fine_mask((int)type - 4) & 2)) {
+        volatile unsigned short *len = (volatile unsigned short *)(KIT + 52u + 1163u * track + 0x14u + 2u * 45u);
+        u32 owner = UI_OWNER();
+        u32 ps = owner && *len > 0x7800 ? PARAM_SET(owner, SMP_LEN_ID, track) : 0;
+        if (ps)
+            SET_VALUE(ps, SMP_LEN_ID, 0x7800u, track, 0, 0, 1);
+    }
     /* v0.33: a Monomachine machine starts as its own (dnfw.mnm DEFAULTS: SID on a square
      * wave), not at the shared records' defaults (the owner: SID silent at first, on MIX) */
     int mi = track < 16 && KIT && SOUND_TYPE(track) == (int)type && was != (int)type ? mnm_index((int)type - 4) : -1;

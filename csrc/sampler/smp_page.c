@@ -106,6 +106,16 @@ static int value(void *view, u32 id, int *top)
     return v < 0 ? 0 : v > t ? t : v;
 }
 
+/* v0.48: STRT, LEN, LOOP's place across W, from the whole word (0..120.00 in 1/256, fmt.c
+ * smp_fine), as the DSP reads it (dnfw.sampler.program.ctl_pos) */
+static int pos_x(void *view, u32 id, int w)
+{
+    u8 flag;
+    int v = GET_VALUE(view, id, &flag);
+    v = v < 0 ? 0 : v > 0x7800 ? 0x7800 : v;
+    return v * w / 0x7800;
+}
+
 static int widget_of(u32 id, int kind)
 {
     if (kind == SMP_GRID_KIND && id == SMP_GRID_ID)
@@ -1859,8 +1869,8 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         for (int j = 0; j <= n && n <= 32; j++)
             marker(c, x0 + j * (w - 1) / n, cy, j != 0 && j != n);
     } else {
-        int a = value(view, SMP_STRT_ID, 0) * (w - 1) / 120;
-        int b = a + value(view, SMP_LEN_ID, 0) * (w - 1) / 127;
+        int a = pos_x(view, SMP_STRT_ID, w - 1);   /* v0.48: the fine word, 0..120.00 */
+        int b = a + pos_x(view, SMP_LEN_ID, w - 1);
         if (b > w - 1) b = w - 1;
         marker(c, x0 + a, cy, 0);
         marker(c, x0 + b, cy, 0);
@@ -1871,7 +1881,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
                 marker(c, x0 + a + (b - a) * j / n, cy, 1);
         }
         if (kind == SMP_KIND0) {
-            int lp = value(view, SMP_LOOP_ID, 0) * (w - 1) / 127;
+            int lp = pos_x(view, SMP_LOOP_ID, w - 1);
             int mode = value(view, SMP_PLAY_ID, 0) * 4 / 128;
             if (mode == 1 || mode == 2)
                 marker(c, x0 + lp, cy, 1);
