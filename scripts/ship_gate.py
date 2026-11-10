@@ -208,6 +208,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("bouncegone", "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)"),
        ("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)"),
        ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
+       ("thres", "THRES on both processors (coupled)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
@@ -2207,6 +2208,24 @@ def main() -> int:
                           "RECORD twice leaves it off")
         later("kbrec", "KEYBOARD kept through grid recording (ColdFire)",
               "KEYBOARD kept through grid recording (ColdFire)", [kb_cmd, sorted(EMU_ENV.items())], kb_body)
+
+        # v0.48 (Error Kit): THRES on the coupled emulator (emu_coupled.py: the ColdFire and the
+        # DSP together, block by block): a -34 dB tone on IN; THRES 30 (tick -45 dB) starts the
+        # take on the ARM; THRES 110 holds it back, and turned to 30 while armed it starts
+        th_js = work / "thres.json"
+        th_cmd = [a.venv, "-u", "scripts/emu_coupled_thres.py", "--build", a.build, "--stock", a.stock,
+                  "--snapshot", snap, "--json", th_js]
+
+        def th_body(tdir):
+            rc, out = run("thres coupled", th_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0 or not last.startswith("PASS"):
+                return False, out[-900:]
+            return True, (f"{last[6:]}: on the ColdFire and the DSP together, a -34 dB tone on IN: THRES 30 (its "
+                          f"tick at -45 dB) starts the take on the ARM; THRES 110 holds it back, and turned to 30 "
+                          f"while armed, it starts without a new ARM")
+        later("thres", "THRES on both processors (coupled)", "THRES on both processors (coupled)",
+              [th_cmd, sorted(EMU_ENV.items())], th_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()
