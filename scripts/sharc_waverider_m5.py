@@ -2530,7 +2530,7 @@ def step_mainrec(init, sound, machines, blocks) -> dict:
     TRIM preview (CMD_PREVIEW slot, first, end, as rec.c's preview(1)); then the slot on a
     ONESHOT track once the count covers it (link.c's K_HEAD). Checks: the recording is the
     mix (one block late: the tap is the last block's) within 2 LSB and not silence; the
-    SPORT page carries the mix plus the preview at half level while it plays; the slot
+    SPORT page carries the mix plus the preview at a quarter level (v0.47: 6 dB under v0.40..v0.46's half) while it plays; the slot
     plays back."""
     import math as _m
     n = 10
@@ -2611,7 +2611,7 @@ def step_mainrec(init, sound, machines, blocks) -> dict:
     # the snapshot left it, then the mix of blocks 0 .. n - 2
     want = [q((mixL[k] + mixR[k]) * 0.5) for k in range(32 * (n - 1))]
     close = ok and len(got) >= 32 * n and max(abs(a - b) for a, b in zip(got[32:32 * n], want)) <= 2 / 32768
-    # the preview: frames [0, 32 n) at half level, 32 a block from block n + 1's master mix
+    # the preview: frames [0, 32 n) at a quarter level (v0.47), 32 a block from block n + 1's master mix
     pv_ok = False
     if ok and len(dac) > n + 2:
         diffs = []
@@ -2620,7 +2620,7 @@ def step_mainrec(init, sound, machines, blocks) -> dict:
                 f = 32 * j + k
                 for c, mx in ((0, mixL), (1, mixR)):
                     heard = dac[b][2 * k + c] / 2147483648.0
-                    diffs.append(abs(heard - mx[32 * b + k] - got[f] * 0.5))
+                    diffs.append(abs(heard - mx[32 * b + k] - got[f] * 0.25))
         pv_ok = max(diffs) < 1e-4 and max(abs(x) for x in got[:64]) > 0.05
     f32 = lambda x: V.bits_f32(bits(x))         # noqa: E731  (as the DSP holds it)
     tap_ok = ok and all(all(t[k] == f32(mixL[32 * b + k]) and t[32 + k] == f32(mixR[32 * b + k])
@@ -2634,7 +2634,7 @@ def step_mainrec(init, sound, machines, blocks) -> dict:
             and words[3] & 0xFF == SM.FMT_I16,
         "the recording is the mix, one block late, within 2 LSB, and not silence":
             bool(close) and max(abs(x) for x in got[32:32 * n]) > 0.2,
-        "TRIM's preview (FUNC + YES): the SPORT page carries the mix plus the recording at half level": pv_ok,
+        "TRIM's preview (FUNC + YES): the SPORT page carries the mix plus the recording at a quarter level (v0.47)": pv_ok,
         "the slot plays on a ONESHOT track once the count covers it": back > 0.05,
     }
     return {"ok": all(checks.values()), "checks": checks,
