@@ -28,8 +28,9 @@ enough of a plan that it can be picked up cold. Upstream's own parked ideas are 
 
 1. **The playhead moves with STRT while a sample plays** (owner: "the start indicator should move with
    the start knob, but the sample playhead indicator shouldn't move with it ... it should accurately
-   show where the playhead is on the sample as it reads it"). To confirm: the drawn position follows
-   the region, not the read position.
+   show where the playhead is on the sample as it reads it"). **Fixed in v0.49** (cb1eaf1): the DSP
+   no longer moves a sounding note's position when STRT/LEN/LOOP turn; they apply at the next trig
+   or loop pass.
 2. p-locks are not visible on sample page 2.
 3. R.LEN 64 with R.STRT (on PLAY): the take does not stop after 64 steps.
 4. TUNE's text rounds badly: -0.01 shows -1, -4.00 shows -5.
@@ -38,6 +39,18 @@ enough of a plan that it can be picked up cold. Upstream's own parked ideas are 
 7. (request) SLD/SLEN settable without a lock (a default), or the lock icon as FILL/COND show.
 
 1..6 into v0.49 where small and contained, else a fix release before v0.50; 7 for the owner to schedule.
+Owner, 2026-11-11: proceed with v0.49 (the playhead fix in it); 2..6 to the fix release.
+
+8. STRETCH, an old project on v0.48 (impbox, 2026-11-11): plays once briefly, then all sound on every
+   track stops until reboot; not reproduced on a new project (the owner: none on v0.48 with a new
+   project). The sampler model plays STRETCH/REPITCH/ONESHOT cleanly with STRT/LEN at every awkward
+   stored word (old 127, 120.00, out of range). impbox is uploading a video. Owner: "not worry about
+   that specifically so much" for now.
+9. STRETCH clicks when looping short segments, more with higher BARS (the owner, from v0.46: at the
+   loop's end and at a trig after STRT moved). Minor; "in the back of our minds".
+10. Gate gaps (from 8): an old-projects step (projects saved on earlier firmware, every sample machine,
+   played in the coupled emulator: sound never stops) and a full-range check of every stored control
+   word through the DSP (finite output, bounded position and time).
 
 ## After v0.40 (owner, 2026-11-02 / 11-03)
 
