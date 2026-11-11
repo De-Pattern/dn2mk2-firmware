@@ -290,7 +290,8 @@ def main() -> int:
         start = next(i for i, x in enumerate(out) if abs(x) > 1e-4)
         seg = out[start + 256:start + 768]
         lag, corr = best_match(seg, take, range(0, max(1, frames - 512)))
-        rep["numbers"]["audio"] = {"lag": lag, "corr": corr}
+        rep["numbers"]["audio"] = {"lag": lag, "corr": corr, "start": start,
+                                   "render": [round(x, 5) for x in out], "take": [round(x, 5) for x in take[:4096]]}
         link("7. the render is the take", corr is not None and corr > 0.95, f"corr {corr:.4f} at take frame {lag}")
     return finish()
 
