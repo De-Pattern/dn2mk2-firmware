@@ -437,6 +437,37 @@ def test_a_loop_follows_len_loop_and_play_while_it_sounds():
     assert max(rev[-1000:]) < 801 / n + eps and min(rev[-1000:]) >= 400 / n - eps
 
 
+def test_v049_strt_turned_mid_note_moves_the_start_not_the_playhead():
+    # impbox, the owner: "the start indicator should move with the start knob, but the sample
+    # playhead ... should accurately show where the playhead is on the sample as it reads it".
+    # The note keeps reading where it is; the new STRT is where the next trig starts.
+    n = 48000
+    ramp = [k / n for k in range(n)]
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0, samples=[ramp], rates=[1.0], fmts=[0])
+    h.defaults()
+    h.set(SM.PLAY_REC, 127)                      # FWD
+    h.set(SM.LEN_REC, 127)
+    h.set(SM.STRT_REC, 0)
+    out = []
+    for b in range(40):
+        out += h.block(ONE, 60.0, b == 0)
+    at = out[-1]
+    assert 0.01 < at < 0.1                       # reading near the start
+    h.set(SM.STRT_REC, 60)                       # STRT to the middle, past the playhead, mid-note
+    later = []
+    for b in range(8):
+        later += h.block(ONE, 60.0, False)
+    eps = 100 / n
+    assert max(later) < 0.25                     # still reading on from where it was (before: 0.5..)
+    steps = [later[k + 16] - later[k] for k in range(0, len(later) - 16, 16)]
+    assert all(d > -eps for d in steps) and later[-1] > at   # forward, no jump
+    nxt = []
+    for b in range(8):                            # the next trig: from the new STRT
+        nxt += h.block(ONE, 60.0, b == 0)
+    assert 0.5 - eps < nxt[-1] < 0.6
+
+
 def test_one_detent_a_choice_lands_inside_each_choice():
     # every value the setter sets is read by the DSP (and the page) as that choice
     def zone(th, c):
