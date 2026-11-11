@@ -206,10 +206,11 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("drivenav", "+DRIVE keys and long names (ColdFire)"),
        ("jump", "DIRECT JUMP (ColdFire)"),
        ("slides", "parameter slides (ColdFire)"),
-       ("bouncegone", "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)"),
+       ("flexcore", "FLEX on the ColdFire: recorder trigs, ARM, the panel, an older BOUNCE track's trigs (ColdFire)"),
        ("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)"),
        ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
        ("thres", "THRES on both processors (coupled)"),
+       ("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)"),
        ("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"),
        ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
@@ -2141,27 +2142,27 @@ def main() -> int:
             later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
                   [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
 
-        # v0.48 (docs/bounce-removal-plan.md): BOUNCE is out; it replaces v0.44..v0.47's rectrig
-        # step and keeps that step's other checks (SAMP never glides, the RECORDER's CHAN knob and
-        # FILE NAME keys, the Monomachine's TUNE). Always run: not keyed to a symbol, so it can
-        # never drop out unseen
-        bg_js = work / "bouncegone.json"
-        bg_cmd = [a.venv, "-u", "scripts/emu_bouncegone.py", "--build", bdir, "--snapshot", snap,
-                  "--json", bg_js, "--png-dir", work / "bouncegone"]
+        # v0.49 FLEX (docs/flex-design.md), on BOUNCE's type 17: replaces v0.48's bouncegone and keeps
+        # its other checks (SAMP never glides, the RECORDER's CHAN knob and FILE NAME keys, the
+        # Monomachine's TUNE). Always run: not keyed to a symbol, so it can never drop out unseen
+        fc_js = work / "flexcore.json"
+        fc_cmd = [a.venv, "-u", "scripts/emu_flexcore.py", "--build", bdir, "--snapshot", snap,
+                  "--json", fc_js, "--png-dir", work / "flexcore"]
 
-        def bg_body(tdir):
-            rc, out = run("bounce gone", bg_cmd, logs, env=EMU_ENV, trace=tdir)
+        def fc_body(tdir):
+            rc, out = run("flex core", fc_cmd, logs, env=EMU_ENV, trace=tdir)
             last = out.strip().splitlines()[-1] if out.strip() else ""
             if rc != 0 or not last.startswith("PASS"):
                 return False, out[-900:]
-            return True, (f"{last[6:]}: a BOUNCE track from an older project plays SAMP OFF with the "
-                          f"sequencer over its recorder trigs, nothing sent to the DSP, nothing kept clear "
-                          f"in the recordings' area; recorder trigs and a slide through SAVE/LOAD byte for "
-                          f"byte; the LED site stock's; record 244's text stock's; FUNC + VOICE the plain "
-                          f"RECORDER; SAMP never glides; CHAN, FILE NAME; the Monomachine's TUNE")
-        later("bouncegone", "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)",
-              "BOUNCE out: an older project's BOUNCE track and recorder trigs (ColdFire)",
-              [bg_cmd, sorted(EMU_ENV.items())], bg_body)
+            return True, (f"{last[6:]}: recorder trigs and a slide through SAVE/LOAD byte for byte; the buffers on "
+                          f"with a directory, a manual recording kept clear of a buffer's plan; over two passes "
+                          f"the trig fires each pass and the one-shot once (then spent), each a take sent to the "
+                          f"DSP, the voice on buffer 1; ARM OFF fires nothing; the LED site ours; record 244 BUF "
+                          f"on FLEX only; FUNC + VOICE opens FLEX REC, its LEDs the trigs; SAMP never glides; "
+                          f"CHAN, FILE NAME; the Monomachine's TUNE")
+        later("flexcore", "FLEX on the ColdFire: recorder trigs, ARM, the panel, an older BOUNCE track's trigs (ColdFire)",
+              "FLEX on the ColdFire: recorder trigs, ARM, the panel, an older BOUNCE track's trigs (ColdFire)",
+              [fc_cmd, sorted(EMU_ENV.items())], fc_body)
 
         # v0.48 (owner, 2026-11-09): no text outside its place, every value of a control at one
         # place and size: the RECORDER in every state of its centre box and R.LEN through its values
@@ -2230,6 +2231,27 @@ def main() -> int:
                           f"while armed, it starts without a new ARM")
         later("thres", "THRES on both processors (coupled)", "THRES on both processors (coupled)",
               [th_cmd, sorted(EMU_ENV.items())], th_body)
+
+        # v0.49 FLEX on the coupled emulator (emu_coupled.py: the ColdFire and the DSP together): a
+        # one-shot recorder trig on step 1 placed with [TRIG 1] on FLEX REC, PLAY, the DSP's take into
+        # buffer 1 (the input to the sample), the one-shot spent, then a FLEX note playing the take
+        # (its render read after the voices, correlated with the take)
+        fx_js = work / "flex.json"
+        fx_cmd = [a.venv, "-u", "scripts/emu_coupled_flex.py", "--build", a.build, "--stock", a.stock,
+                  "--snapshot", snap, "--json", fx_js]
+
+        def fx_body(tdir):
+            rc, out = run("flex coupled", fx_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0 or not last.startswith("PASS"):
+                return False, out[-900:]
+            return True, ("on the ColdFire and the DSP together: [TRIG 1] on FLEX REC places a one-shot on step "
+                          "1; the step fires it, the DSP records R.LEN into buffer 1 (the input, sample for "
+                          "sample), the one-shot is spent; a FLEX note plays the take (the voice's render "
+                          "correlates with it)")
+        later("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)",
+              "FLEX: a recorder trig's take played by a note, on both processors (coupled)",
+              [fx_cmd, sorted(EMU_ENV.items())], fx_body)
 
         # v0.48 (impbox, the owner: "exact dt2"): STRT, LEN, LOOP's fine records (fmt.c
         # smp_fine), on the ColdFire emulator: swapped in on ONESHOT/STRETCH/REPITCH/BOUNCE,

@@ -128,6 +128,7 @@ def main() -> int:
     bufv = c.call(lay["rt_buf_of"], T)[0]
     link("1c. a fresh FLEX track is on BUF 01", bufv == 0, f"rt_buf_of {bufv}")
     tap(12)                                                      # NO: the panel closed
+    link("1d. NO closes FLEX REC", c.long(lay["rec_overlay"]) == 0, f"rec_overlay {c.long(lay['rec_overlay'])}")
     fired0 = c.long(lay["rt_fired"])
     tap(20)                                                      # PLAY
     rep["setup"].append(("PLAY", "UI"))
