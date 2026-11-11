@@ -3,7 +3,7 @@
 
 For each case: the same build, snapshot and turn (counts on one encoder, one every GAP
 instructions, a key held or not, the knob's rest counter emptied at its first step), once on
-FREQ (FLTR, encoder E, record 36: stock's fine unipolar control; v0.49: at eight phases of
+FREQ (FLTR, encoder E, record 36: stock's fine unipolar control; v0.49: at 24 phases of
 the turn against the timer wheel, LEADS) and once on the target on
 ONESHOT's SRC page (STRT E, LEN F, LOOP G, with fmt.c smp_fine's words). Every knob step
 0x4011336e is logged with its inputs (the bundle's delta, the knob's state) and its output
@@ -28,7 +28,7 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 MIN_SHARED = 0.6
-LEADS = tuple(156_000 * k for k in range(8))   # the FREQ references: 0 .. 7/8 of the wheel's 4-tick flush (1.25 M instructions)
+LEADS = tuple(52_000 * k for k in range(24))   # the FREQ references: 0 .. 23/24 of the wheel's 4-tick flush (1.25 M instructions)
 
 
 # name: (target slot, encoder, plan, gap, held key or None); the reference is FREQ (FLTR,
