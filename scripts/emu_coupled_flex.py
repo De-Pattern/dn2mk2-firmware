@@ -102,13 +102,13 @@ def main() -> int:
     from dnfw.waverider import dsp as D                         # noqa: PLC0415
     c = Coupled(a.build, a.snapshot, a.stock, verbose=True)
     c.watchdog()
+    rep = {"setup": [], "links": {}, "numbers": {}, "break": a.brk}
     if not a.raw_smoother:
         install_smoother_model(c)
         rep["setup"].append(("the stock smoother 0x400db12a modelled (emu_slides.py's model)",
                              "digikit's EMAC halves every fractional product (0.5 x 0.5 = 0x10000000, "
                              "not 0x20000000), so emulated it decays every parameter to about 3% of its "
                              "value: TUNE, PLAY, LEN and LEV the DSP reads go wrong"))
-    rep = {"setup": [], "links": {}, "numbers": {}, "break": a.brk}
 
     def link(name, ok, detail=""):
         rep["links"][name] = {"ok": bool(ok), "detail": detail}
