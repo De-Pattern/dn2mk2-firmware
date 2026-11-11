@@ -46,7 +46,9 @@ without a redesign.
 
 ## Machine
 
-- Type **19** (FASCIA 18; BOUNCE's 17 stays a silent stub).
+- Type **17**, BOUNCE's (decided 2026-11-10, reversible until v0.49 ships; first planned as 19):
+  every table already covers 17 (v0.44's freeze was a new type one table missed), and an older
+  project's BOUNCE track opens as a FLEX track with its recorder trigs (no conversion code).
 - SYN page 1: A TUNE, B PLAY, C -, D **BUF**, E STRT, F LEN, G LOOP, H LEV (ONESHOT's, BUF in SAMP's
   place). BUF 01..08, a detent each over the knob's travel (BOUNCE's BUF: default 8, only the first
   8 clicks chose). STRT/LEN/LOOP: v0.48's fine controls, against the take's length.
@@ -131,3 +133,15 @@ Tested with the runner's stress scenario plus SID + PERC with an ONESHOT on a la
 
 ColdFire 2,076,257 of 2,097,152 bytes stored (20,895 free); DSP 1,010,704 of 1,048,575 (37,871
 free). v0.47 with BOUNCE was 2,080,802; FASCIA added about 15 KB (not in v0.49 unless FLEX leaves room).
+
+## Found while building (v0.49)
+
+- BOUNCE's panel knobs (SRC, CHAN, R.LEN) set the recorder's own settings while its engine read three
+  sound slots the panel never wrote: a take ignored its panel. FLEX takes all three from the panel.
+- BOUNCE waited for a pool directory a unit with no pool image (nothing ever sent to the +Drive)
+  never has: every take there was refused (NO +DRIVE POOL). FLEX's buffers are on once start-up
+  is over with no image (the pool is empty; the allocator keeps this session's takes clear).
+- A fresh FLEX track read BUF 06 (slot 35's shared default); it starts on BUF 01.
+- Playing while recording needs the DSP voice to follow a growing take (a note latches the take's
+  length; one started on the trig's own step sees an almost empty take and ends): not in v0.49's
+  first cut; a finished take plays normally.
