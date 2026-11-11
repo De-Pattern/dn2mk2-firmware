@@ -63,6 +63,19 @@ def run(build, snapshot, out, extra):
     return d, steps, outs
 
 
+def inputs(st):
+    """A knob step's inputs, as stock's 0x4011336e reads them (disassembled, 2026-11-11): the
+    bundle's delta, the state's acceleration (+8), remainder (+12) and whether its rest counter
+    (+16) is above 24 (the guard's branch; below it the counter only gets 48 added). +0 is
+    written from 0x40055b3a's tick and never read back here, +4 never touched, so neither is an
+    input. (st: (delta, the five state words before the step); the first step's is logged before
+    --rest empties it, alike in every run.) The step's other inputs, the parameter's descriptor
+    and the flag byte, are the target's own: those are what is compared. Every reference input
+    must decide one change (checked), or the key misses one."""
+    d, w = st
+    return (d, w[2], w[3], w[4] > 24)
+
+
 def _unused(steps, sets, values, v0):
     """-> [(step inputs, the value change it made)], each knob step paired with its value
     after it (a step that made no change calls no setter)"""
@@ -83,7 +96,9 @@ def one(a, work, name):
     # split the first bundle 1 + 1 where FREQ's lead-0 run had 2, so its acceleration ran a
     # step behind and only 1 of 20 steps had a lead-0 twin). Every reference step is stock's
     # own; the rule is unchanged: a target step whose inputs any reference step had must ask
-    # for the same change, and most target steps must have such a twin.
+    # for the same change, and most target steps must have such a twin. (A step's inputs are
+    # what the stock step reads, inputs(); v0.48 keyed on all five state words, two of which
+    # it never reads, so twins that were twins went uncounted.)
     refs = [run(a.build, a.snapshot, work / f"{name}-freq{'' if ld == 0 else f'-{ld}'}.json",
                 ["--slot", "67", "--page", "0,2", "--enc", "4", "--lead", str(ld)] + common) for ld in LEADS]
     fd = refs[0][0]
@@ -94,17 +109,20 @@ def one(a, work, name):
     tch = list(zip(ts, to))
     if a.brk == "offby1":                     # the negative control: every target change one more
         tch = [(st, dv + 1) for st, dv in tch]
+    shared, bad = 0, []
     fmap = {}
     for st, dv in fch:
-        fmap.setdefault(st, set()).add(dv)
-    shared, bad = 0, []
+        fmap.setdefault(inputs(st), set()).add(dv)
+    for key, outs in fmap.items():         # a twin's inputs must decide its change
+        if len(outs) > 1:
+            bad.append(f"FREQ's own steps with inputs {key} made {sorted(outs)}: the inputs do not decide it")
     t0, tend = td["start"]["value"], td["end"]["value"]
     for k, (st, dv) in enumerate(tch):
-        if st in fmap:
+        if inputs(st) in fmap:
             shared += 1
-            ok = dv in fmap[st]
+            ok = dv in fmap[inputs(st)]
             if not ok:
-                bad.append(f"step {k} {st}: {dv:+d}, FREQ made {sorted(fmap[st])}")
+                bad.append(f"step {k} {st}: {dv:+d}, FREQ made {sorted(fmap[inputs(st)])}")
     if not 0 <= tend <= TOP:
         bad.append(f"ended outside 0..120.00: {tend:#06x}")
     if name == "strt-low" and tend != 0:
