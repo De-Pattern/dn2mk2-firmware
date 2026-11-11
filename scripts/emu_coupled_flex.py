@@ -47,6 +47,44 @@ SLOT_TRACK = 0x80005308
 KB_ON = 0x42431A9C                       # KEYBOARD's state (1 on; measured on stock, 2026-11-10)
 
 
+STATE, SRC, OUT = 0x8000DE60, 0x80003AF0, 0x800068E4
+
+
+def install_smoother_model(c):
+    """The stock smoother 0x400db12a as the instrument computes it (emu_slides.py's model, kept
+    in step with it): its one-pole filter runs in the EMAC's fractional mode (the frame code
+    sets MACSR = 0x20 before it), and digikit's EMAC halves every fractional product, so
+    emulated the state decays to about half a frame. The routine's entry runs this instead:
+    state' = (0x7c29 state + 0x3d7 (src << 16)) >> 15, out = (state' + 0x8000) >> 16, then its
+    block copy (slots at +42, +58, +74 of each voice) and its 0x990-byte copy, as its code does."""
+    from unicorn import UC_HOOK_CODE                            # noqa: PLC0415
+    from unicorn import m68k_const as K                         # noqa: PLC0415
+    m = c.machine
+
+    def smoother(uc_, address, size, user):
+        src_at = struct.unpack(">I", bytes(uc_.mem_read(uc_.reg_read(K.UC_M68K_REG_A7) + 4, 4)))[0]
+        src = struct.unpack(">1734H", bytes(m.read(src_at, 2 * 1734)))
+        st = list(struct.unpack(">1734i", bytes(m.read(STATE, 4 * 1734))))
+        out = []
+        for i in range(1734):
+            v = (0x7C29 * st[i] + 0x3D7 * (src[i] << 16)) >> 15
+            v = max(-0x80000000, min(0x7FFFFFFF, v))
+            st[i] = v
+            out.append(((v + 0x8000) >> 16) & 0xFFFF)
+        m.write(STATE, struct.pack(">1734i", *st))
+        for t in range(16):
+            for off in (42, 58, 74):
+                out[(off + 202 * t) // 2] = src[(off + 202 * t) // 2]
+        m.write(OUT, struct.pack(">1734H", *out))
+        m.write(0x80007670, bytes(m.read(src_at + 3468, 0x990)))
+        sp = uc_.reg_read(K.UC_M68K_REG_A7)
+        ret = struct.unpack(">I", bytes(uc_.mem_read(sp, 4)))[0]
+        uc_.reg_write(K.UC_M68K_REG_A7, sp + 4)
+        uc_.reg_write(K.UC_M68K_REG_D0, OUT)
+        uc_.reg_write(K.UC_M68K_REG_PC, ret)
+    c.uc.hook_add(UC_HOOK_CODE, smoother, begin=0x400DB12A, end=0x400DB12A)
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
@@ -55,12 +93,21 @@ def main() -> int:
     p.add_argument("--snapshot", default=str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
     p.add_argument("--break", dest="brk", default=None, choices=("notrig", "nosamp", "wrongbuf"))
     p.add_argument("--json", default=None)
+    p.add_argument("--raw-smoother", action="store_true",
+                   help="leave the stock smoother to the emulated EMAC (its fractional products halved): "
+                        "link 7 then fails, the voice's TUNE/PLAY/LEN decayed (the reason for the model)")
     a = p.parse_args()
     lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
     from dnfw.sampler import machines as SM                     # noqa: PLC0415
     from dnfw.waverider import dsp as D                         # noqa: PLC0415
     c = Coupled(a.build, a.snapshot, a.stock, verbose=True)
     c.watchdog()
+    if not a.raw_smoother:
+        install_smoother_model(c)
+        rep["setup"].append(("the stock smoother 0x400db12a modelled (emu_slides.py's model)",
+                             "digikit's EMAC halves every fractional product (0.5 x 0.5 = 0x10000000, "
+                             "not 0x20000000), so emulated it decays every parameter to about 3% of its "
+                             "value: TUNE, PLAY, LEN and LEV the DSP reads go wrong"))
     rep = {"setup": [], "links": {}, "numbers": {}, "break": a.brk}
 
     def link(name, ok, detail=""):
