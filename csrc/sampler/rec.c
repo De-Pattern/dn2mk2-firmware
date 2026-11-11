@@ -804,6 +804,14 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
         if (ps)
             SET_VALUE(ps, SMP_LEN_ID, 0x7800u, track, 0, 0, 1);
     }
+    /* v0.49: a fresh FLEX track starts on BUF 01 (docs/flex-design.md): BUF sits on PERC's slot 35,
+     * whose shared default is not 0 (it read BUF 06) */
+    if (track < 16 && KIT && SOUND_TYPE(track) == (int)type && was != (int)type && (int)type == SMP_BOUNCE_KIND + 4) {
+        u32 owner = UI_OWNER();
+        u32 ps = owner ? PARAM_SET(owner, SMP_BUF_ID, track) : 0;
+        if (ps)
+            SET_VALUE(ps, SMP_BUF_ID, 0u, track, 0, 0, 1);
+    }
     /* v0.33: a Monomachine machine starts as its own (dnfw.mnm DEFAULTS: SID on a square
      * wave), not at the shared records' defaults (the owner: SID silent at first, on MIX) */
     int mi = track < 16 && KIT && SOUND_TYPE(track) == (int)type && was != (int)type ? mnm_index((int)type - 4) : -1;

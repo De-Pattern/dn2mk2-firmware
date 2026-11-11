@@ -125,6 +125,8 @@ def main() -> int:
     table = pat + PAT_LOCK_TABLE
     tv = c.call(lay["rt_trig_get"], table, T, 0)[0] & 0xFFFF
     link("1b. [TRIG 1] put a one-shot recorder trig on step 1 (the lock store: 2)", tv == 2, f"rt_trig_get {tv}")
+    bufv = c.call(lay["rt_buf_of"], T)[0]
+    link("1c. a fresh FLEX track is on BUF 01", bufv == 0, f"rt_buf_of {bufv}")
     tap(12)                                                      # NO: the panel closed
     fired0 = c.long(lay["rt_fired"])
     tap(20)                                                      # PLAY
