@@ -17,11 +17,20 @@ Links, each reported: 0 FLEX on track 1; 1a the panel up; 1b the one-shot in the
 directory's entry for buffer 1 (address, frames); 4b the take is the input (correlation); 4c the
 one-shot spent (3); 5 the frame selects the buffer on track 1's voice (SAMP 129); 6 the DSP renders
 it (the voice's buffer read right after the voices render, before the stock chain); 7 the render
-is the take (correlation). Negative controls (--break): notrig (no [TRIG 1]: link 1b and 2 fail),
-nosamp (track 1's voices' SAMP zeroed in the frame: link 5 and 6 fail), wrongbuf (the SAMP word
-one buffer on: link 5 and 7 fail).
+is the take at the note's pitch, from its start: rate 2^((note-60+TUNE)/12) from the DSP's note
+cell and the frame's TUNE (the test's KEYBOARD key plays note 24, so 1/8), the take resampled at
+that rate from a lag of 0..32 frames, passing at correlation > 0.95 with a lag of at most 8.
 
-Usage: emu_coupled_flex.py --build out/v049.syx [--break notrig|nosamp|wrongbuf] [--json OUT]"""
+The stock smoother (0x400db12a) is modelled (install_smoother_model; --raw-smoother runs it as
+emulated): digikit's EMAC halves every fractional product, so emulated it leaves the DSP about 3%
+of each parameter (docs/ROADMAP.md item 11). Run raw, link 7 fails (measured 2026-11-11).
+
+Negative controls (--break), each measured 2026-11-11: notrig (no [TRIG 1]: fails at 1b),
+nosamp (track 1's voices' SAMP zeroed in the frame: fails at 6, silence), wrongbuf (the SAMP word
+one buffer on: fails at 6, silence: the next buffer is empty).
+
+Usage: emu_coupled_flex.py --build out/v049.syx [--break notrig|nosamp|wrongbuf]
+       [--raw-smoother] [--json OUT]"""
 
 from __future__ import annotations
 
