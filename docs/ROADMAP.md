@@ -51,6 +51,12 @@ Owner, 2026-11-11: proceed with v0.49 (the playhead fix in it); 2..6 to the fix 
 10. Gate gaps (from 8): an old-projects step (projects saved on earlier firmware, every sample machine,
    played in the coupled emulator: sound never stops) and a full-range check of every stored control
    word through the DSP (finite output, bounded position and time).
+11. The coupled emulator's EMAC (found 2026-11-11 on v0.49's FLEX test): digikit's unicorn halves every
+   fractional product (0.5 x 0.5 = 0x10000000), so the stock smoother 0x400db12a decays every voice
+   parameter to ~3% (FLEX played reversed, ~52 semitones low). emu_slides.py already modelled the
+   smoother; emu_coupled_flex now does too. Other ColdFire EMAC users (the modulation apply, maybe the
+   note) are still emulated wrong: fix the EMAC itself (or model each), then put every coupled test on
+   it. emu_coupled_recplay (not a gate step) fails at 6a on v0.48 and v0.49 alike: out of date.
 
 ## After v0.40 (owner, 2026-11-02 / 11-03)
 
