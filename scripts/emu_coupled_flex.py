@@ -212,7 +212,10 @@ def main() -> int:
     rep["setup"].append(("a note", "UI: KEYBOARD, [TRIG 9] held"))
     rep["numbers"]["keyboard"] = c.read(KB_ON, 1)[0]
     c.machine.pc = P.press(c.machine.m, c.panel.profile, *key(33))
-    fw, outs = [], []
+    # track 1 can hold more than one voice (the sequencer's earlier note on step 1 keeps one,
+    # releasing): every one of track 1's voices is read, block by block, and the note's is the
+    # one that sounds (v0.49: reading only the first gave silence, the released voice's)
+    fw, per = [], {}
     c.phase = "the note"
     for n in range(60):
         if not c.period():
@@ -221,8 +224,11 @@ def main() -> int:
         vs = [v for v in range(16) if vt[v] == T]
         for v in vs:
             fw.append(struct.unpack(">H", c.read(CF_FRAME + 168 + 2 * SLOT_SAMP + 146 * v, 2))[0])
-        if vs and "bufs" in mid:
-            outs.append(mid["bufs"][vs[0]])
+            if "bufs" in mid:
+                per.setdefault(v, []).append(mid["bufs"][v])
+    note_v = max(per, key=lambda v: max(abs(x) for blk in per[v] for x in blk), default=None)
+    outs = per.get(note_v, [])
+    rep["numbers"]["voices"] = {v: max(abs(x) for blk in b for x in blk) for v, b in per.items()}
     c.machine.pc = P.release(c.machine.m, c.panel.profile, *key(33))
     c.periods(2)
     out = [x for blk in outs for x in blk]
@@ -231,7 +237,8 @@ def main() -> int:
     rep["numbers"]["note"] = {"frame_samp": sorted(set(fw)), "peak": peak, "want_samp": want}
     link("5. the frame selects buffer 1 on track 1's voice (SAMP 129)", want in fw,
          f"SAMP words {sorted(hex(x) for x in set(fw))}, want {want:#x}")
-    link("6. the DSP renders the FLEX voice", peak > 0.001, f"peak {peak:.4f} over {len(outs)} blocks")
+    link("6. the DSP renders the FLEX voice", peak > 0.001, f"peak {peak:.4f} over {len(outs)} blocks (voice {note_v}; track 1's voices' peaks "
+         f"{ {v: round(p, 4) for v, p in rep['numbers']['voices'].items()} })")
     if peak > 0.001:
         start = next(i for i, x in enumerate(out) if abs(x) > 1e-4)
         seg = out[start + 256:start + 768]
