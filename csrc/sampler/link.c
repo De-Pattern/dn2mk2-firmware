@@ -2970,6 +2970,20 @@ void smp_mod_apply(void *mirror)
     MOD_APPLY(mirror);
     extern void rt_frame(void);
     rt_frame();                                 /* v0.41: QPLAY switches and QREC starts on their step */
+    /* v0.49 FLEX: each FLEX voice hears its buffer (or OFF), with or without a pool directory.
+     * v0.44..v0.48 did this after the return below, so with no pool image (a unit nothing was
+     * sent to) a BOUNCE voice never got its buffer: SAMP 0, silence (emu_coupled_flex) */
+    for (u32 b = 0; b < 16; b++) {
+        u8 *snd = VOICE_SOUND(b);
+        if (!snd || snd[SOUND_TYPE] != BOUNCE_TYPE)
+            continue;
+        extern u32 rt_bounce_samp(u32 t);
+        u32 ot = SLOT_TRACK[b];                 /* the voice's track */
+        volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
+        u32 want = ot < 16 ? rt_bounce_samp(ot) : 0;
+        if ((u32)(*cell >> 8) != want)
+            *cell = (u16)(want << 8);
+    }
     if (!dir_ok)
         return;
     /* v0.33: the loaded slots, listed once a frame and only if a voice needs them (this runs
@@ -2981,15 +2995,6 @@ void smp_mod_apply(void *mirror)
         u8 *snd = VOICE_SOUND(b);
         if (!snd)
             continue;
-        if (snd[SOUND_TYPE] == BOUNCE_TYPE) {   /* v0.44 BOUNCE: its buffer's playing half, or OFF */
-            extern u32 rt_bounce_samp(u32 t);
-            u32 ot = SLOT_TRACK[b];              /* the voice's track */
-            volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
-            u32 want = ot < 16 ? rt_bounce_samp(ot) : 0;
-            if ((u32)(*cell >> 8) != want)
-                *cell = (u16)(want << 8);
-            continue;
-        }
         if (snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
             continue;                           /* not a sample machine */
         u32 set = *TARGET_CELL(b, SAMP_SLOT) >> 8;   /* the sound's or the lock's: 0 OFF, k: slot k - 1 */
