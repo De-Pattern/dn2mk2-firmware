@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import pathlib
 import struct
 import sys
@@ -48,6 +49,8 @@ KB_ON = 0x42431A9C                       # KEYBOARD's state (1 on; measured on s
 
 
 STATE, SRC, OUT = 0x8000DE60, 0x80003AF0, 0x800068E4
+NOTE_CELLS = 0x254B14                    # the DSP's note a voice (perc/program.py)
+SLOT_TUNE = 25
 
 
 def install_smoother_model(c):
@@ -241,6 +244,7 @@ def main() -> int:
 
     def at_mid(r, cc):
         mid["bufs"] = [cc.M.m2.floats(r.state, cc.M.m2.word(r.state, cc.M.V.TRACK_BUFFERS + 4 * v), 32) for v in range(16)]
+        mid["notes"] = cc.M.m2.floats(r.state, NOTE_CELLS, 16)   # each voice's note as the DSP reads it
     c.taps[c.M.dsp.PING_SW] = at_mid
     if a.brk in ("nosamp", "wrongbuf"):
         def fil(fr):
@@ -262,7 +266,7 @@ def main() -> int:
     # track 1 can hold more than one voice (the sequencer's earlier note on step 1 keeps one,
     # releasing): every one of track 1's voices is read, block by block, and the note's is the
     # one that sounds (v0.49: reading only the first gave silence, the released voice's)
-    fw, per = [], {}
+    fw, per, notes, tunes = [], {}, {}, {}
     c.phase = "the note"
     for n in range(60):
         if not c.period():
@@ -273,6 +277,9 @@ def main() -> int:
             fw.append(struct.unpack(">H", c.read(CF_FRAME + 168 + 2 * SLOT_SAMP + 146 * v, 2))[0])
             if "bufs" in mid:
                 per.setdefault(v, []).append(mid["bufs"][v])
+            if "notes" in mid:
+                notes[v] = mid["notes"][v]
+            tunes[v] = struct.unpack(">H", c.read(OUT + 2 * (17 + 101 * v + SLOT_TUNE), 2))[0]
     note_v = max(per, key=lambda v: max(abs(x) for blk in per[v] for x in blk), default=None)
     outs = per.get(note_v, [])
     rep["numbers"]["voices"] = {v: max(abs(x) for blk in b for x in blk) for v, b in per.items()}
@@ -287,12 +294,42 @@ def main() -> int:
     link("6. the DSP renders the FLEX voice", peak > 0.001, f"peak {peak:.4f} over {len(outs)} blocks (voice {note_v}; track 1's voices' peaks "
          f"{ {v: round(p, 4) for v, p in rep['numbers']['voices'].items()} })")
     if peak > 0.001:
+        # v0.49: the take at the note's pitch, from STRT 0. The DSP's rate is PERC's,
+        # 2^((note - 60 + TUNE) / 12) (sampler/program.py), with the note the DSP read for the
+        # voice and TUNE the word the frame's smoother gave it; the test's KEYBOARD key plays
+        # C1 (24), so the take sounds three octaves down. (Before, rate 1 was assumed: corr 0.04.)
         start = next(i for i, x in enumerate(out) if abs(x) > 1e-4)
-        seg = out[start + 256:start + 768]
-        lag, corr = best_match(seg, take, range(0, max(1, frames - 512)))
-        rep["numbers"]["audio"] = {"lag": lag, "corr": corr, "start": start,
-                                   "render": [round(x, 5) for x in out], "take": [round(x, 5) for x in take[:4096]]}
-        link("7. the render is the take", corr is not None and corr > 0.95, f"corr {corr:.4f} at take frame {lag}")
+        note = notes.get(note_v)
+        tw = tunes.get(note_v, 0x4000)
+        tune = max(0, min(120, (tw >> 8) - 4)) - 60
+        rate = 2.0 ** ((note - 60 + tune) / 12.0) if note is not None else None
+        seg = out[start + 32:start + 32 + 1536]
+        best = (None, -2.0)
+        if rate:
+            for lag8 in range(0, 8 * 32 + 1):                  # the head at 0 .. 32 frames, in 1/8
+                f0 = lag8 / 8.0 + 32 * rate
+                ref = []
+                for i in range(len(seg)):
+                    x = f0 + i * rate
+                    k = int(x)
+                    if k + 1 >= len(take):
+                        break
+                    ref.append(take[k] + (take[k + 1] - take[k]) * (x - k))
+                n = len(ref)
+                if n < 256:
+                    continue
+                a_, b_ = seg[:n], ref
+                num = sum(p * q for p, q in zip(a_, b_))
+                den = math.sqrt(sum(p * p for p in a_) * sum(q * q for q in b_)) or 1.0
+                if num / den > best[1]:
+                    best = (lag8 / 8.0, num / den)
+        lag, corr = best
+        rep["numbers"]["audio"] = {"note": note, "tune_word": tw, "tune": tune, "rate": rate, "lag": lag, "corr": corr,
+                                   "start": start, "render": [round(x, 5) for x in out],
+                                   "take": [round(x, 5) for x in take[:4096]]}
+        link("7. the render is the take at the note's pitch, from its start", rate is not None and corr > 0.95
+             and lag is not None and lag <= 8, f"note {note}, TUNE {tune:+d}: rate {rate}; corr {corr:.4f} with the "
+             f"head {lag} frames in")
     return finish()
 
 
