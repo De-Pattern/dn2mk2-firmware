@@ -24,6 +24,21 @@ enough of a plan that it can be picked up cold. Upstream's own parked ideas are 
   the emulator can prove, what only hardware can).
 - After v0.48: the gate split into runs that fit the two-hour job limit and resume themselves.
 
+## impbox's reports, 2026-11-10 (owner: the playhead first)
+
+1. **The playhead moves with STRT while a sample plays** (owner: "the start indicator should move with
+   the start knob, but the sample playhead indicator shouldn't move with it ... it should accurately
+   show where the playhead is on the sample as it reads it"). To confirm: the drawn position follows
+   the region, not the read position.
+2. p-locks are not visible on sample page 2.
+3. R.LEN 64 with R.STRT (on PLAY): the take does not stop after 64 steps.
+4. TUNE's text rounds badly: -0.01 shows -1, -4.00 shows -5.
+5. Holding TRK inverts the track area, but a sample track's text is not inverted.
+6. p-locks on SLD/SLEN cannot be cleared.
+7. (request) SLD/SLEN settable without a lock (a default), or the lock icon as FILL/COND show.
+
+1..6 into v0.49 where small and contained, else a fix release before v0.50; 7 for the owner to schedule.
+
 ## After v0.40 (owner, 2026-11-02 / 11-03)
 
 In this order unless the owner changes it:
