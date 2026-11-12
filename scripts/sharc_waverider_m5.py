@@ -2470,12 +2470,19 @@ def step_flexlevel(init, sound, machines) -> dict:
     GAIN index as FLEX sends it (25: 0 dB); STOP; then track 0 plays the take, same defaults. The
     take's playback at the amp's output against the source's there, RMS over the same stretch (the
     take a block late: the bucket is the last block's): within 0.5 dB. Negative control: the same
-    with index 0 (the RECORDER's command): about 22 dB under (the sample chain's loss twice), and
-    must fail the 0.5 dB test; and GAIN +6 (index 31) plays 6 dB over, within 0.5 dB."""
+    with index 0 (the RECORDER's command, v0.49's scaling): 6 dB under, and
+    must fail the 0.5 dB test; and GAIN -6 (index 19) plays 6 dB under, within 0.5 dB (+6 would
+    clip this loud a source: the meter's CLIP).
+    Measured 2026-11-12 (v0.50's first take on it): v0.49's scaling 0.4991 of the source; a
+    x 12.44 first guess clipped (+9.4 dB); x 2.0 (the output's ratio) came out -1.8 dB (the
+    chain compresses a little); TRK_UNITY is the render's ratio, 2.339."""
     import math as _m
     ONE = SM.TYPE_OF["ONESHOT"]
     cmd_at = dsp.SMP_POOL_DDR + SM.CMD_OFFSET
     n, gap, w = 24, 3, 12                           # recording blocks; then STOP, the playback's trigger; the window
+    # the windows sit past the amp envelope's attack (about 5 blocks) in both: the source's blocks
+    # n - w .. n, and the same stretch of the take as it plays (its frame k is the source's block
+    # k / 32 - 1: the bucket is the last block's), n + gap + (n - w) + 1 on
     loop = {SM.SAMP_REC: 3, SM.PLAY_REC: 80, SM.LOOP_REC: 20}
 
     def command(r, seq, cmd, src=0, chan=0, dest=0, frames=SM.REC_FRAMES, place=0, thres=0):
@@ -2498,34 +2505,49 @@ def step_flexlevel(init, sound, machines) -> dict:
 
         def fb(b):
             if b < n + gap:
-                return base_frame(sound, machines, t0=ONE, trigger=b == 1, overrides=smp_words(loop)).to_bytes()
-            take = {**loop, SM.SAMP_REC: SM.REC_FIRST + 1}
-            return base_frame(sound, machines, t0=ONE, trigger=b == n + gap, overrides=smp_words(take)).to_bytes()
-        r = run_blocks(init, fb, n + gap + w + 2, extra_hooks={m3.DISPATCH: at_dispatch})
+                f = base_frame(sound, machines, t0=ONE, trigger=b == 1, overrides=smp_words(loop))
+            else:
+                take = {**loop, SM.SAMP_REC: SM.REC_FIRST + 1}
+                f = base_frame(sound, machines, t0=ONE, trigger=b == n + gap, overrides=smp_words(take))
+            for t in range(16):                         # each track to its own slot of 0x1c244d's buffer
+                f.put(0xA5A + 2 * t, t)                 # (docs/link-research.md; all zero sums every
+            return f.to_bytes()                         # track, unset buffers too, into TRK1: NaN)
+        r = run_blocks(init, fb, n + gap + n + 2, extra_hooks={m3.DISPATCH: at_dispatch})
         if not r["ok"]:
             return None
-        ao = r["amp_out"]
-        blocks = [b if isinstance(b, list) else [b] for b in ao]
-        flat = [x for b in blocks for x in b]
-        per = len(flat) // len(blocks) if blocks else BLOCK
-        src = flat[per * 2: per * (2 + w)]                       # the source, from its second block
-        back = flat[per * (n + gap + 2): per * (n + gap + 2 + w)]  # the take, a block on (its leading block)
+        flat, per = r["amp_out"], BLOCK                   # track 0 at the amp's output, BLOCK a block
+        ren = smp_series(r, 0)                            # track 0's voice, before the stock chain
+        p0 = n + gap + (n - w) + 1
+        st = r["state"].state
+        ent = [m2.word(st, dsp.SMP_POOL_DDR + 8 + 16 * SM.REC_FIRST + 4 * k) or 0 for k in range(4)]
+        take = []
+        for k in range(ent[1] // 2):
+            word = m2.word(st, ent[0] + 4 * k) or 0
+            take += [((h ^ 0x8000) - 0x8000) / 32768.0 for h in (word & 0xFFFF, word >> 16)]
         r.pop("state", None)
-        a, b_ = rms(src), rms(back)
-        return {"src_rms": a, "take_rms": b_, "db": 20 * _m.log10((b_ or 1e-30) / (a or 1e-30))}
-    unity, recorder, plus6 = run(SM.GAIN_ZERO), run(0), run(SM.GAIN_ZERO + 6)
+
+        def db(x, y):
+            return 20 * _m.log10((rms(y) or 1e-30) / (rms(x) or 1e-30))
+        return {"out_db": db(flat[per * (n - w): per * n], flat[per * p0: per * (p0 + w)]),
+                "render_db": db(ren[per * (n - w): per * n], ren[per * p0: per * (p0 + w)]),
+                "take_rms": rms(take[per * (n - w): per * n]), "take_frames": ent[1],
+                "take_peak": max((abs(v) for v in take), default=0.0)}
+    unity, recorder, minus6 = run(SM.GAIN_ZERO), run(0), run(SM.GAIN_ZERO - 6)
     checks = {
-        "v0.50: a FLEX take of a track (GAIN 0) plays back at its source's level on the same machine "
-        "at its defaults, within 0.5 dB (RMS at the amp's output)":
-            unity is not None and abs(unity["db"]) <= 0.5,
-        "v0.50 negative control: the RECORDER's command (no GAIN) plays the same take about 22 dB under "
-        "(the sample chain's loss twice), outside 0.5 dB":
-            recorder is not None and recorder["db"] < -15.0,
-        "v0.50: GAIN +6 plays the take 6 dB over its source, within 0.5 dB":
-            plus6 is not None and abs(plus6["db"] - 6.0) <= 0.5,
+        "v0.50: a FLEX take of a track (GAIN 0) reaches its track's chain at its source's level: the "
+        "take's render against the source's, within 0.5 dB (RMS)":
+            unity is not None and abs(unity["render_db"]) <= 0.5,
+        "v0.50: .. and comes out of the amp within 1 dB of its source (the chain compresses a little)":
+            unity is not None and abs(unity["out_db"]) <= 1.0,
+        "v0.50 negative control: the RECORDER's command (no GAIN: v0.49's scaling) renders the same take "
+        "over 4 dB under its source":
+            recorder is not None and recorder["render_db"] < -4.0,
+        "v0.50: GAIN -6 records the take 6 dB under GAIN 0's (its frames' RMS, within 0.1 dB), unclipped":
+            unity is not None and minus6 is not None and unity["take_peak"] < 1.0
+            and abs(20 * _m.log10((minus6["take_rms"] or 1e-30) / (unity["take_rms"] or 1e-30)) + 6.0) <= 0.1,
     }
     return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"unity": unity, "recorder": recorder, "plus6": plus6}}
+            "numbers": {"unity": unity, "recorder": recorder, "minus6": minus6}}
 
 
 # -- step 3e: the fast link (v0.16, docs/sampler.md) -------------------------------------------------

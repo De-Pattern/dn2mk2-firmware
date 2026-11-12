@@ -167,11 +167,17 @@ TRK_ROUTE = 0x257898                       # k = the s16 at TRK_ROUTE + 2t (the 
 TRK_GAIN = 11.627                          # 0x1c244d's gain into that buffer, between triggers
 REC_STAGE = 0x2DF800                       # 32 floats of the block being recorded (dnfw.waverider.dsp)
 REC_GAIN = 0x2E0080                        # v0.50: a FLEX take's GAIN index (0 none) and factor (dnfw.waverider.dsp)
-# v0.50 (impbox: FLEX takes far quieter than their source): TRKn is a track's block after its amp,
-# and a sample voice at its defaults reaches there at -21.9 dB of its render (the SHARC runner,
-# 2026-11-12: ONESHOT, LEV 100, render rms 0.61623, amp out 0.049529). A FLEX take of a track is
-# scaled up by that, so at the FLEX track's defaults it plays back as loud as its source
-TRK_UNITY = 0.61623 / 0.049529             # 12.442: x the 1 / TRK_GAIN the RECORDER keeps
+# v0.50 (impbox: FLEX takes far quieter than their source): measured on the SHARC runner
+# (2026-11-12, step 3f flexlevel: track 0 ONESHOT looping at its defaults, each track routed to
+# its own slot, RMS past the amp envelope's attack). A take of TRK1 made with the RECORDER's
+# scaling (/ TRK_GAIN), played on the same machine at its defaults, renders at 0.0725 RMS where
+# its source rendered 0.1696, and comes out of the amp 6.0 dB under the source. A FLEX take of a
+# track is scaled by that render ratio, so it reaches the track's chain at its source's level and
+# comes out as loud (the chain is not quite linear: matching the output by a fixed factor, x 2.0,
+# came out 1.8 dB short; a first estimate, x 12.44 from the chain's -21.9 dB, clipped). Not
+# measured on hardware: the runner does not model everything after the per-track buffer; GAIN's
+# range (-24..+38 dB) covers either way
+TRK_UNITY = 0.1696 / 0.0725                # 2.339 (+7.4 dB): x the 1 / TRK_GAIN the RECORDER keeps
 GAIN_ZERO = 25                             # the index of 0 dB: 1..63 is -24..+38 dB
 CMD_OFFSET = 0xF00                         # the command block in the pool's directory page:
 CMD_WORDS = 6                              #   seq, cmd, src, chan, thres (0..32767), dest << 24 | frames
