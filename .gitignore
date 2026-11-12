@@ -38,3 +38,6 @@ desktop.ini
 !.claude/settings.json
 !.claude/hooks/
 out/
+
+# the code generator's temporary header folder (cpage.compile_page), while a build or the gate compiles
+csrc/waverider/wr_gen_*/
