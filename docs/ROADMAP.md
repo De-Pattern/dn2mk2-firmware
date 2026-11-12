@@ -40,6 +40,11 @@ enough of a plan that it can be picked up cold. Upstream's own parked ideas are 
 
 1..6 into v0.49 where small and contained, else a fix release before v0.50; 7 for the owner to schedule.
 Owner, 2026-11-11: proceed with v0.49 (the playhead fix in it); 2..6 to the fix release.
+v0.50 (2026-11-12): 2 page 2's locked bottom-row controls inverted; 3 **not reproduced**: on both
+processors (scripts/emu_coupled_rstrt.py) R.LEN 1 with R.STRT PLAY ends at its length (8,896 frames
+for 8,888) and does not start again; R.LEN 64 is hours of emulated audio, so impbox's tempo, screen
+(RECORDER or FLEX REC) and Q.REC are needed; 4 TUNE's box from the whole word, rounded; 5 the SMP box
+cut out with TRK held (screenshot-checked); 6 E/F pushed with a trig held clears SLD/SLEN.
 
 8. STRETCH, an old project on v0.48 (impbox, 2026-11-11): plays once briefly, then all sound on every
    track stops until reboot; not reproduced on a new project (the owner: none on v0.48 with a new
@@ -73,12 +78,22 @@ before v0.50, after the gate speed-up lands; 3 and 4 not in it.
    or a louder LEV range for FLEX. **Owner, 2026-11-12: "gain knob please"**: a GAIN on REC SETUP
    (set before recording, with the input meter there), no normalising. First measure any fixed
    loss in the emulator (MONO L+R averaging, LEV 100 vs 127) so GAIN's default plays at unity.
+   **v0.50**: GAIN on REC SETUP's G (-24..+38 dB, a dB a detent) with a level meter (CLIP) in H's place;
+   a FLEX take of a track scaled x 2.339 so it reaches its track's chain at its source's level (the
+   SHARC runner, step 3f flexlevel: v0.49's scaling rendered 7.4 dB under, played back 6 dB under).
+   **Unverified on hardware**: the testers heard far worse than 6 dB, and the runner does not model
+   everything after the per-track buffer. MAIN and IN keep their scaling (GAIN only).
 3. (request) **Double buffering**: a REC trig every pass on step 1 should let step 1's note play the
    previous pass's take, not the growing one. BOUNCE's two halves per buffer are still in rectrig.c
    (`rt_play[b]`, forced to the recording half in v0.49): record into one half, play the other, flip
    when the take completes.
 4. (request) **The buffers as samples in the other machines** (GRID, ONESHOT ...), as REC 1/REC 2 and
    SAMP 124-127 were.
+6. **NiKo (v0.49, 2026-11-12): on the FLEX recording screen the PAGE key's green LED is wrong and does
+   not follow the page.** FLEX REC claims the 16 [TRIG] LEDs (rec.c bn_led_walk) but not the page
+   LEDs, which stay stock's (the pattern's page). Not fixed in v0.50: in the emulator no LED changed
+   with PAGE on a 64-step pattern (the refresh may not run there), so which LED he means is to be
+   confirmed (a photo) before the panel claims it.
 5. AnnKorr: a good sample chop needs about 3 voices; voices are "a juggling act" with sampling and the
    new machines (and she likes the sound of voices being eaten). A comment, not a bug report yet.
 
