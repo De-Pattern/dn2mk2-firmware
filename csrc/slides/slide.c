@@ -636,6 +636,27 @@ int sl_knob(u32 index, int delta)
     return 1;
 }
 
+/* v0.50 (impbox: "p-locks on SLD/SLEN cannot be cleared"): E or F pushed while the page is up
+ * and a trig is held clears that lock on every held step, stock's gesture for a p-lock.
+ * -> 1, taken; 0 (no trig held, another knob) leaves the push to stock */
+int sl_knob_push(u32 index)
+{
+    if ((index != 5 && index != 6) || !sl_page_up)
+        return 0;
+    struct held h;
+    if (!held(&h))
+        return 0;
+    u8 *obj = HELD_OBJ;
+    u32 k = index == 6;
+    for (u32 s = 0; s < h.len; s++)
+        if (BIT_TEST(obj + 600, s) & 0xFF)
+            sl_lock_set(h.table, h.track, s, k, 0xFFFF);
+    sl_ui_table = h.table;
+    ((void (*)(void *, void *))((*(void ***)h.model)[4]))(h.model, 0);
+    smp_overlay_dirty = 1;
+    return 1;
+}
+
 /* ---- v0.41: the REC trig's lock, from the RECORDER overlay (rec.c, rectrig.c) -----------
  *
  * The RECORDER is ours (an overlay, over any track's page), so it is where a REC trig is

@@ -46,13 +46,15 @@ typedef unsigned char u8;
 #define CTL_FRAME ((volatile u16 *)0x80005E60u)
 #define TEMPO_WORD 108                                   /* the frame's BPM x 120 */
 /* a track's sound in the kit (the frame is per voice, and a track's voice moves): its type
- * byte and its parameter words (slide.c's SOUND_BASE/SOUND_TYPE; the lock-list builder takes
- * the parameters from sound + 48) */
+ * byte and its parameter words, slot s at sound + 20 + 2 s as the knobs write them (slice.c
+ * SOUND_VALUE, smp_page.c SAMP_FSLOT; 0xDE, the type, is slot 101's place). v0.50 (impbox:
+ * "BUF can't be set .. no effect"): v0.44..v0.49 read sound + 48, slot s + 14: BUF was slot
+ * 49's word, whatever the knob said */
 #define KIT_POINTER (*(u8 *volatile *)0x800052A0u)
 #define SOUND_STRIDE 1163u
 #define SOUND_BASE 52u
 #define SOUND_TYPE 0xDEu
-#define SOUND_PARAMS 48u
+#define SOUND_PARAMS 20u
 #define SLOT_BUF 35                                      /* BUF (record 244): 0..7 */
 #define SLOT_SRC 38                                      /* SRC (record 252): 0 IN, 1 MAIN, 2.. TRK */
 #define SLOT_RLEN 40                                     /* R.LEN (record 253): 0 MAX, 1..127 steps */

@@ -151,7 +151,7 @@ def main() -> int:
 
     def ctl_put(t, slot, value):
         snd = kit + 52 + SOUND_STRIDE * t
-        put16(snd + 48 + 2 * slot, value << 8)
+        put16(snd + 20 + 2 * slot, value << 8)          # v0.50: where the knob writes (was + 48)
         put16(CTL_FRAME + 168 + 2 * slot + 146 * t, value << 8)
 
     def type_put(t, ty):

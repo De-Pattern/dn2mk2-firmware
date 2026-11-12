@@ -677,6 +677,8 @@ static int rec_choice_step(int index, int delta)    /* -> the choices to move */
 }
 
 /* a knob on the recorder's screen: INDEX 1..8 (A..H), DELTA detents */
+static void buf_turn(int delta);               /* v0.50: FLEX REC's C, BUF (below) */
+
 static void knob(int index, int delta)
 {
     /* v0.41 (docs/rectrig.md): a step held, H is its REC trig's lock (slide.c), on either
@@ -692,6 +694,8 @@ static void knob(int index, int delta)
             rt_knob(7, delta);                  /* ARM: four detents a choice */
         else if (index == 4)
             rec_rlen = clamp(rec_rlen + delta, 0, 128);
+        else if (index == 3)
+            buf_turn(delta);                    /* v0.50: C BUF, the SYN page's (record 244) */
         else if (index == 1 || index == 2)
             goto as_recorder;
         return;
@@ -732,6 +736,37 @@ static int closes(u32 code)
 #define MACHINE_COMMIT ((u32 (*)(u32, u32, u32, u32, u32))0x40031880u)
 #define KIT (*(volatile u32 *)0x800052A0u)
 #define SOUND_TYPE(t) (*(volatile signed char *)(KIT + 52u + 1163u * (u32)(t) + 0xDEu))
+
+/* v0.50 (impbox: "can't set the record buffer"): FLEX REC's C turns the track's BUF, the SYN page's
+ * record 244, through the knob's own path (setValue: undo, the kit, the frame all see it), a
+ * buffer per four detents as every choice knob (the owner, v0.26). BUF n is the value
+ * ceil(n x span / 8) of the record's range, the first value rt_buf_value reads as n */
+static int bt_acc __attribute__((section(".data"))) = 0;
+static u32 bt_at __attribute__((section(".data"))) = 0;
+static void buf_turn(int delta)
+{
+    extern u32 rt_buf_of(u32 t);
+    u32 t = UI_TRACK_B, now = *(volatile u32 *)0x4058E8D4u;     /* rectrig.c's FRAMES */
+    if (now - bt_at > 3000u || (bt_acc > 0 && delta < 0) || (bt_acc < 0 && delta > 0))
+        bt_acc = 0;
+    bt_at = now;
+    bt_acc += delta;
+    int n = bt_acc / 4;
+    bt_acc -= n * 4;
+    if (!n || t > 15u || !KIT)
+        return;
+    int b = (int)rt_buf_of(t) + n;
+    b = b < 0 ? 0 : b > 7 ? 7 : b;
+    const int *rw = (const int *)(0x401F7F94u + 60u * SMP_BUF_ID);
+    int lo = rw[2] >> 8, top = rw[3] >> 8, span = top - lo + 1;
+    if (span < 8)
+        span = 8;
+    u32 v = (u32)(lo + (b * span + 7) / 8);
+    u32 owner = UI_OWNER();
+    u32 ps = owner ? PARAM_SET(owner, SMP_BUF_ID, t) : 0;
+    if (ps)
+        SET_VALUE(ps, SMP_BUF_ID, v << 8, t, 0, 0, 1);
+}
 #define ONESHOT 8                               /* dnfw.sampler.machines.TYPE_OF; the pool-playing sample
                                                  * machines are 8..13 (v0.44: SMP_N is 7 with BOUNCE, type 17,
                                                  * which plays its buffer, not a SAMP: not one of these; 14 is
@@ -807,8 +842,9 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
     /* v0.49: a fresh FLEX track starts on BUF 01 (docs/flex-design.md): BUF sits on PERC's slot 35,
      * whose shared default is not 0 (it read BUF 06) */
     if (track < 16 && KIT && SOUND_TYPE(track) == (int)type && was != (int)type && (int)type == SMP_BOUNCE_KIND + 4) {
-        /* the sound's BUF word where rectrig.c's ctl() reads it (sound + 48 + 2 x slot 35) */
-        volatile unsigned short *buf = (volatile unsigned short *)(KIT + 52u + 1163u * track + 48u + 2u * 35u);
+        /* the sound's BUF word where the knob writes it and rectrig.c's ctl() reads it (sound + 20 +
+         * 2 x slot 35; v0.49 wrote + 48, slot 49, and BUF stayed at its shared default) */
+        volatile unsigned short *buf = (volatile unsigned short *)(KIT + 52u + 1163u * track + 20u + 2u * 35u);
         *buf = 0;
     }
     /* v0.33: a Monomachine machine starts as its own (dnfw.mnm DEFAULTS: SID on a square
@@ -1515,6 +1551,22 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         extern int slc_stock_asked;             /* v0.30: a stock question's keys; its */
         slc_stock_asked = 0;                    /* answer is not left for the next YES */
         return (u32)it;
+    }
+    if (!rec_overlay && it[0] == IT_KEY && (code == K_ENC_A + 4 || code == K_ENC_A + 5)) {
+        /* v0.50: E or F pushed with a trig held on TRIG page 2 clears SLD / SLEN (slide.c); its
+         * release goes with it */
+        extern int sl_knob_push(u32 index);
+        u32 b = 1u << (code - K_ENC_A);
+        if (down && !(flags & F_REPEAT) && sl_knob_push(code - K_ENC_A + 1)) {
+            enc_eaten |= b;
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+        if (!down && (enc_eaten & b)) {
+            enc_eaten &= ~b;
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
     }
     if (!rec_overlay && it[0] == IT_KNOB) {     /* parameter slides: E and F on TRIG page 2 */
         extern int sl_knob(u32 index, int delta);

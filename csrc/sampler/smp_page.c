@@ -170,15 +170,21 @@ static void w_play(void *c, int x, int y, int mode)
     }
 }
 
-static void w_bipolar(void *c, int x, int y, int v, int top)
+static void w_bipolar(void *c, int x, int y, int word, u32 id)
 {
     /* the DT2's TUNE: a box 21 x 15 with a tick at the middle of its top and bottom, the
-     * value in the middle */
+     * value in the middle: its whole semitones. v0.50 (impbox: "-0.01 shows -1, -4.00 shows
+     * -5"): from the whole word (1/256 steps), rounded to hundredths as the value's text is,
+     * then toward 0; v0.20..v0.49 took the word's top byte, which floors every fraction below
+     * the middle one semitone down */
     int cx = x + 12, x0 = cx - 10, x1 = cx + 10, y0 = y + 1, y1 = y + 15;
     box(c, x0, y0, x1, y1, 0);
     vline(c, cx, y1 - 2, y1 - 1, 0);
     vline(c, cx, y0 + 1, y0 + 2, 0);
-    int semis = v - top / 2;
+    const int *r = RECORD(id);
+    int d = word - (r[2] + r[3]) / 2;           /* from the middle, in 1/256 */
+    int h = (d * 100 + (d >= 0 ? 128 : -128)) / 256;   /* hundredths, to nearest */
+    int semis = h / 100;                        /* toward 0 */
     if (semis == 0)
         LABEL(c, cx + 1, y + 6, "%s", "0");
     else
@@ -454,8 +460,10 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
         int gi = v / 24;
         w_gridicon(c, x, y, smp_grids[gi > 4 ? 4 : gi]);
     }
-    else if (w == W_BIPOLAR)
-        w_bipolar(c, x, y, v, top);
+    else if (w == W_BIPOLAR) {
+        u8 bflag;
+        w_bipolar(c, x, y, GET_VALUE(view, id, &bflag), id);
+    }
     else if (w == W_PLAY)
         w_play(c, x, y, v * 4 / 128 > 3 ? 3 : v * 4 / 128);
     else if (w == W_EMPTY)
@@ -637,6 +645,17 @@ static void playhead(void *c, int x0, int w, int cy)
 
 /* the machine box at the left, as the DT2 labels it: SMP over the page number (the stock
  * page draws SYN there; its letters are overwritten in the same 3 x 6 hand) */
+/* (noipa: not inlined nor cloned for its constant x, where GCC folds x x words x 4 into a scaled index of 8, a 68020 mode
+ * the ColdFire refuses -- cbuild's check caught it on 2026-11-12) */
+__attribute__((noipa)) static int pixel(void *c, int x, int y)   /* the canvas's pixel (invert()'s layout) */
+{
+    const int *cv = (const int *)c;
+    const u32 *bits = (const u32 *)cv[4];
+    if (x < 0 || y < 0 || x >= cv[1] || y >= cv[2])
+        return 0;
+    return (bits[x * cv[3] + (y >> 5)] >> (31 - (y & 31))) & 1;
+}
+
 static void smp_box(void *c)
 {
     static const char *g[3][6] = {
@@ -644,10 +663,15 @@ static void smp_box(void *c)
         {"#.#", "###", "###", "#.#", "#.#", "#.#"},             /* M */
         {"##.", "#.#", "#.#", "##.", "#..", "#.."},             /* P */
     };
+    /* v0.50 (impbox: "holding TRK inverts the track area, but a sample track's text is not
+     * inverted"): with TRK held stock draws the box filled and SYN cut out of it. Stock's S is
+     * ours, so its first pixel (a gap in S's top row) is the box's ground: lit, the box is
+     * filled and SMP is cut out of it as SYN was */
+    int filled = pixel(c, 2, 48);
     for (int k = 0; k < 3; k++)
         for (int r = 0; r < 6; r++)
             for (int b = 0; b < 3; b++)
-                SET_PIXEL(c, 2 + 4 * k + b, 48 - r, g[k][r][b] == '#');
+                SET_PIXEL(c, 2 + 4 * k + b, 48 - r, (g[k][r][b] == '#') != filled);
 }
 
 /* a small icon for WERP's waveform page, as the DT2 draws its bottom row there */
@@ -1927,6 +1951,12 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         int top, v = value(view, ids[7], &top);
         w_pill(c, CELL_X(3), 0, v, top);
     }
+    /* v0.50 (impbox: "p-locks are not visible on sample page 2"): a locked control's place on
+     * the bottom row inverted, as page 1's cells are (cell()); v0.20..v0.49 drew this row's
+     * labels and LEV's pill without looking */
+    for (int i = 4; i < 8; i++)
+        if (ids[i] && locked(view, ids[i]))
+            invert(c, CELL_X(i - 4) - 1, 0, CELL_X(i - 4) + 24, 6);
     sample_list(c, view, slot, kind);
 }
 
