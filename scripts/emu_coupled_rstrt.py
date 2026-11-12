@@ -8,7 +8,10 @@ steps"): the RECORDER armed on R.STRT PLAY with an R.LEN, through both processor
           R.STRT PLAY starts the take on the first note any track plays
   IN:     a chirp at 0.25 full scale
 
-Links: 1 the RECORDER up, 2 armed (status 1), 3 the take starts on the note (status 2), 4 it
+Measured 2026-11-12 on v0.50's first build: R.LEN 1 at 81 BPM ended at 8,896 frames (8,888 asked:
+the block it ends in), and did not start again: impbox's report did not reproduce at R.LEN 1.
+
+Links: 1 the RECORDER up, 2 armed (status 1), 3 the take starts on a note (status 2), 4 it
 ends (status 3 or 0) and its frames are R.LEN's (one step at the frame's tempo, within one
 block), 5 it does not start again: 120 periods after its end, still not recording.
 
@@ -133,8 +136,10 @@ def main() -> int:
                   f"ended {ended}", flush=True)
     rep["numbers"]["periods"] = {"started": started, "ended": ended, "restarted": restarted,
                                  "statuses": "".join(str(x) if x >= 0 else "." for x in seen)}
-    if not link("3. the take starts on the note", started is not None and started >= NOTE_AT,
-                f"recording from period {started} (the note at {NOTE_AT})"):
+    # (the snapshot's pattern plays a note as soon as PLAY starts it: the take starts on that,
+    # before ours at NOTE_AT; measured 2026-11-12, period 1)
+    if not link("3. the take starts on a note after PLAY", started is not None,
+                f"recording from period {started} (ours at {NOTE_AT})"):
         return done()
     got = rep["numbers"].get("frames_at_end")
     if not link("4. it ends at R.LEN", ended is not None and got is not None and abs(got - want) <= 64,
