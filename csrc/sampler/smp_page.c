@@ -170,25 +170,45 @@ static void w_play(void *c, int x, int y, int mode)
     }
 }
 
+/* v0.51 (impbox: "the tuning display could probably also just use the WAVETONE's display"; the
+ * owner's photos of WaveTone's Osc1 Tune, the same record 238): a ruler that scrolls under a fixed
+ * centre tick, a pixel a semitone: the octave's number every 12 (-5..5), a dot every 3 between,
+ * the value itself in the label while turned (7.22). v0.20..v0.50 showed the DT2's box with the
+ * whole semitones in it */
+static void glyph_in(void *c, int x, int y, char ch, int xa, int xb)   /* a glyph cut at xa..xb */
+{
+    for (int k = 0; smp_glyph_chars[k]; k++)
+        if (smp_glyph_chars[k] == ch) {
+            for (int r = 0; r < 5; r++)
+                for (int b = 0; b < 3; b++)
+                    if ((smp_glyph[k][r] & (4 >> b)) && x + b >= xa && x + b <= xb)
+                        SET_PIXEL(c, x + b, y + 4 - r, 1);
+            return;
+        }
+}
+
 static void w_bipolar(void *c, int x, int y, int word, u32 id)
 {
-    /* the DT2's TUNE: a box 21 x 15 with a tick at the middle of its top and bottom, the
-     * value in the middle: its whole semitones. v0.50 (impbox: "-0.01 shows -1, -4.00 shows
-     * -5"): from the whole word (1/256 steps), rounded to hundredths as the value's text is,
-     * then toward 0; v0.20..v0.49 took the word's top byte, which floors every fraction below
-     * the middle one semitone down */
     int cx = x + 12, x0 = cx - 10, x1 = cx + 10, y0 = y + 1, y1 = y + 15;
     box(c, x0, y0, x1, y1, 0);
     vline(c, cx, y1 - 2, y1 - 1, 0);
     vline(c, cx, y0 + 1, y0 + 2, 0);
     const int *r = RECORD(id);
-    int d = word - (r[2] + r[3]) / 2;           /* from the middle, in 1/256 */
-    int h = (d * 100 + (d >= 0 ? 128 : -128)) / 256;   /* hundredths, to nearest */
-    int semis = h / 100;                        /* toward 0 */
-    if (semis == 0)
-        LABEL(c, cx + 1, y + 6, "%s", "0");
-    else
-        LABEL(c, cx + 1, y + 6, "%c%d", semis < 0 ? '-' : '+', semis < 0 ? -semis : semis);
+    int d = word - (r[2] + r[3]) / 2;           /* from the middle, in 1/256 semitone */
+    int s0 = (d >> 8) - 11;
+    for (int s = s0; s <= s0 + 23; s++) {
+        if (s < -60 || s > 60)
+            continue;
+        int q = s * 256 - d;
+        int px = cx + (q + (q >= 0 ? 128 : -128)) / 256;
+        if (s % 12 == 0) {
+            int n = s / 12;
+            glyph_in(c, px - 1, y + 6, (char)('0' + (n < 0 ? -n : n)), x0 + 1, x1 - 1);
+            if (n < 0)
+                glyph_in(c, px - 5, y + 6, '-', x0 + 1, x1 - 1);
+        } else if (s % 3 == 0 && px > x0 && px < x1)
+            SET_PIXEL(c, px, y + 6, 1);
+    }
 }
 
 static void w_empty(void *c, int x, int y)
