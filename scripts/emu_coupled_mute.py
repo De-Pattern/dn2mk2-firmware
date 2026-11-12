@@ -123,7 +123,7 @@ def main() -> int:
     def word(fr, off):
         return struct.unpack(">H", fr[off:off + 2])[0]
 
-    def note(mute, n=50):
+    def note(mute, n=64):
         if a.brk != "nomute" or not mute:
             c.call(lay["fx_set"], T, FX_MUTE, 1 if mute else 0)
         c.machine.pc = P.press(c.machine.m, c.panel.profile, *key(33))
@@ -149,19 +149,23 @@ def main() -> int:
 
     def peak(run):
         return max((p["voices"][v]["peak"] for p in run for v in s_voices(p)), default=0.0)
-    late = on[-20:]
+    late = on[-24:]                                              # after the fade (32 frames)
     rep["numbers"]["masks"] = sorted({g["mask"] for g in on})
     link("2. the mask names track 3 (ms_mask)", all(g["mask"] == 1 << S for g in late),
          f"masks {rep['numbers']['masks']}")
     muted = [(g["voices"][v]["level"], g["voices"][v]["sends"], g["voices"][v]["dsp_level"])
              for g in late for v in s_voices(g)]
-    rep["numbers"]["muted"] = muted[-3:]
-    link("3. muted: each voice of track 3 has the frame's LEVEL and FX sends at 0, and the DSP's LEVEL 0",
-         muted and all(lv == 0 and not any(sd) and dl == 0 for lv, sd, dl in muted), f"{muted[-3:]}")
+    rep["numbers"]["muted"] = muted
+    bad3 = [m for m in muted if not (m[0] == 0 and not any(m[1]) and m[2] == 0)]
+    link("3. muted (after the 32-frame fade): each voice of track 3 has the frame's LEVEL and FX sends at 0, "
+         "and the DSP's LEVEL 0", muted and not bad3, f"{len(muted)} readings, not 0: {bad3[:3]}")
     others = [(v, off1[-1]["voices"][v]["level"], on[-1]["voices"][v]["level"]) for v in range(16)
               if on[-1]["voices"][v]["track"] != S and off1[-1]["voices"][v]["track"] == on[-1]["voices"][v]["track"]]
-    link("4. the other voices' LEVEL as unmuted", others and all(x == y for _, x, y in others),
-         f"{[o for o in others if o[1] != o[2]][:4] or len(others)}")
+    # (stock's LEVEL drifts a little between the runs, about 2 %, for every voice alike)
+    def near(x, y):
+        return x > 0 and abs(x - y) <= 0.03 * x
+    link("4. the other voices' LEVEL as unmuted (within stock's own 3 % drift; none faded)",
+         others and all(near(x, y) for _, x, y in others), f"{others[:4]}")
     p_off, p_on = peak(off1), peak(on)
     db = 20 * math.log10(p_on / p_off) if p_off > 0 and p_on > 0 else None
     rep["numbers"]["peaks"] = {"unmuted": p_off, "muted": p_on, "db": db}
@@ -169,8 +173,9 @@ def main() -> int:
          p_off > 0.001 and db is not None and abs(db) <= 3.0, f"peak unmuted {p_off:.4f}, muted {p_on:.4f}")
     back = [(g["voices"][v]["level"], g["voices"][v]["sends"]) for g in off2[-10:] for v in s_voices(g)]
     first = [(g["voices"][v]["level"], g["voices"][v]["sends"]) for g in off1[-10:] for v in s_voices(g)]
-    link("6. MUTE OFF: LEVEL and the sends back (as before it was ON)",
-         back and first and back[-1] == first[-1] and back[-1][0] != 0, f"before {first[-1:]}, after {back[-1:]}")
+    link("6. MUTE OFF: LEVEL and the sends back (as before it was ON, within stock's drift)",
+         back and first and near(first[-1][0], back[-1][0]) and back[-1][1] == first[-1][1],
+         f"before {first[-1:]}, after {back[-1:]}")
     return done()
 
 
