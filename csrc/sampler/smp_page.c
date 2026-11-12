@@ -2357,26 +2357,25 @@ static void bn_view_draw(void *c, int heard)
         }
         /* v0.49 (owner): the buffer's state, no box: a dot and REC while it records, WAIT while a
          * take waits for Q.REC, else READY and its length, or EMPTY. v0.50: in the title line's
-         * right end (G and H are GAIN and the meter) */
+         * right end (G and H are GAIN and the meter). v0.51 (owner: "weirdly shifted to the right";
+         * the grid leaves the screen's left 21 pixels free, the DT2's way): in that left column,
+         * the word level with the top row's values, the take's length under it, LEFT's arrow at
+         * the bottom */
         {
             int tenths, steps, st = rt_state((int)b, &tenths, &steps);
-            int x = 125, y = 57;
+            int x = 10, y = TOP_Y + 6;
             (void)steps;
+            const char *word = st == 1 ? "REC" : st ? "READY" : "EMPTY";
             if (bn_cleared == 2 && FRAMES_NOW - bn_cleared_at < 3000u)   /* v0.51: CLEAR while it records */
-                LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%s", "BUSY");
+                word = "BUSY";
             else if (rt_req_waiting())
-                LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%s", "WAIT");
-            else if (st == 1) {
-                fill(c, 94, y + 1, 96, y + 3);
-                LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%d.%dS", tenths / 10, tenths % 10);
-            } else if (st)
-                LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%d.%dS", tenths / 10, tenths % 10);
-            else
-                LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%s", "EMPTY");
+                word = "WAIT";
+            LABEL(c, x, y, "%s", word);
+            if (st == 1 && word[0] == 'R')                       /* recording: a dot over the word */
+                fill(c, x - 1, y + 9, x + 1, y + 11);
+            if (st)
+                LABEL(c, x, TOP_Y - 7, "%d.%dS", tenths / 10, tenths % 10);
         }
-        /* v0.51 (owner: LEVEL's label sat on it since v0.50's meter took H): LEFT's arrow in the
-         * bottom row's left corner, clear of ARM's cell (22..44), as REC TRIGS's '>' sits in the
-         * right corner */
         LABEL_TEXT(c, LABEL_FONT, 2, 0, 0, 0, 0, "%s", "<");
         return;
     }
