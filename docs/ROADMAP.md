@@ -43,7 +43,7 @@ Owner, 2026-11-11: proceed with v0.49 (the playhead fix in it); 2..6 to the fix 
 v0.50 (2026-11-12): 2 page 2's locked bottom-row controls inverted; 3 **not reproduced**: on both
 processors (scripts/emu_coupled_rstrt.py) R.LEN 1 with R.STRT PLAY ends at its length (8,896 frames
 for 8,888) and does not start again; R.LEN 64 is hours of emulated audio, so impbox's tempo, screen
-(RECORDER or FLEX REC) and Q.REC are needed; 4 TUNE's box from the whole word, rounded; 5 the SMP box
+(RECORDER or FLEX REC) and Q.REC are needed (owner, 2026-11-12: parked until he gets a further report); 4 TUNE's box from the whole word, rounded; 5 the SMP box
 cut out with TRK held (screenshot-checked); 6 E/F pushed with a trig held clears SLD/SLEN.
 
 8. STRETCH, an old project on v0.48 (impbox, 2026-11-11): plays once briefly, then all sound on every
