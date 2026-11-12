@@ -2020,20 +2020,24 @@ def step_smp(init, sound, machines, blocks) -> dict:
         """the rate a render plays its sample at, against the same sample at rate 1 (ref): the r
         whose resampling of ref best matches it, 0.9..1.1 in steps of 1/20000"""
         a, b = smp_series(run, 0), smp_series(ref, 0)
-        n = min(len(a), len(b)) * 9 // 10
-        if n < 512:
+        sa = next((i for i, v in enumerate(a) if v != 0.0), None)     # each from its note's start
+        sb = next((i for i, v in enumerate(b) if v != 0.0), None)
+        if sa is None or sb is None:
+            return None
+        n = min(len(a) - sa, len(b) - sb) * 9 // 10
+        if n < 128:                             # (8 blocks: about 200 samples from the note)
             return None
         best = (None, float("inf"))
         for k in range(-2000, 2001):
             r = 1.0 + k / 20000.0
             e = 0.0
-            for i in range(64, n, 7):
-                x = i * r
+            for i in range(4, n, 3):
+                x = sb + i * r
                 m = int(x)
                 if m + 1 >= len(b):
                     e = float("inf")
                     break
-                d = a[i] - (b[m] + (b[m + 1] - b[m]) * (x - m))
+                d = a[sa + i] - (b[m] + (b[m + 1] - b[m]) * (x - m))
                 e += d * d
             if e < best[1]:
                 best = (r, e)
@@ -2041,6 +2045,7 @@ def step_smp(init, sound, machines, blocks) -> dict:
     fine_rates = [(rate_of(runs["kick_half"], runs["kick"]), 2 ** (0.5 / 12)),
                   (rate_of(runs["kick_hair"], runs["kick"]), 2 ** (-3 / 256 / 12))] \
         if runs["kick"]["ok"] and runs["kick_half"]["ok"] and runs["kick_hair"]["ok"] else [(None, 1.0)]
+    n["fine_rates"] = [[r, w] for r, w in fine_rates]
     checks = {
         "every run returns every block": ok_runs,
         "the sample machines are entered from PERC's tail, once a block": runs["kick"].get("smp_entries") == blocks,

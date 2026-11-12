@@ -34,6 +34,12 @@ GAIN = 0x6186
 S_A, S_B, S_PW, S_NA, S_NB, S_HX, S_HV, S_DEC = 0, 1, 2, 3, 4, 5, 6, 7
 M24 = 0xFFFFFF
 TAPS = 0x658100
+# v0.51 (owner, the lighter Monomachine machines: "we can make them sound good without being exact
+# replicas"): the oscillators at OS times the output rate (the Monomachine's: 12, 192 samples a
+# half), then the decimator. At 4, DPRO-WAVE's rate and its decimator (its coefficients, two inner
+# rounds), every per-sample loop a third as long. OS = 12 is the Monomachine's SID, bit for bit
+OS = 4
+N = 16 * OS                                     # samples a half (192 at OS 12)
 
 
 def init(p: Prog, L: C.Layout) -> None:
@@ -102,7 +108,7 @@ def pitch(p: Prog, L: C.Layout) -> None:
 
 
 def phases(p: Prog, L: C.Layout) -> None:
-    """192 of each phase into XB (the one the wave reads) and YB."""
+    """N of each phase into XB (the one the wave reads) and YB."""
     W = L.W
     p.iconst(12, L.XB)
     p.seti(5, 12)
@@ -120,7 +126,7 @@ def phases(p: Prog, L: C.Layout) -> None:
         p.ld(11, W["x0"])
         p.ld(10, W["minc"])
         p.iconst(8, M24)
-        p.loop_r(9, 192, one)
+        p.loop_r(9, N, one)
         C.sts(p, S_B, 1)
         C.sts(p, S_A, 3)
         p.st(W["n4"], 9)
@@ -178,9 +184,9 @@ def wave_(p: Prog, L: C.Layout) -> None:
             fabs(3)
             sat(3)
             p.stpost(5, 3)
-            p.iconst(12, 190)
+            p.iconst(12, N - 2)
             p.if_(0, "LE", 12, lambda: p.ldpost(13, 2), kind="i")
-        p.loop_r(0, 192, one)
+        p.loop_r(0, N, one)
         p.st(W["n4"], 0)
 
     def plain():
@@ -239,7 +245,7 @@ def _tri(p: Prog, L: C.Layout) -> None:
         p.fop(3, 3, "+", 3)
         sat(3)
         p.stpost(5, 3)
-    p.loop_r(0, 192, one)
+    p.loop_r(0, N, one)
     p.st(L.W["n4"], 0)
 
 
@@ -251,7 +257,7 @@ def _saw(p: Prog, L: C.Layout) -> None:
         p.ldpost(3, 1)
         q23(3, 3)
         p.stpost(5, 3)
-    p.loop_r(0, 192, one)
+    p.loop_r(0, N, one)
     p.st(L.W["n4"], 0)
 
 
@@ -286,7 +292,7 @@ def _puls(p: Prog, L: C.Layout) -> None:
         p.fop(3, 3, "*", 9)
         sat(3)
         p.stpost(5, 3)
-    p.loop_r(0, 192, one)
+    p.loop_r(0, N, one)
     p.st(W["n4"], 0)
 
 
@@ -323,7 +329,7 @@ def _mix(p: Prog, L: C.Layout) -> None:
         p.iconst(13, 1)
         p.iop(6, 12, "+", 13)
         p.st(W["c"], 6)
-    p.loop(W["n4"], 48, one)
+    p.loop(W["n4"], N // 4, one)
 
 
 def _rol(p: Prog, r: int) -> None:
@@ -357,7 +363,7 @@ def _noise(p: Prog, L: C.Layout) -> None:
 
     def one():
         p.ld(0, W["n4"])
-        p.iconst(12, 24)
+        p.iconst(12, N // 8)
 
         def keep():
             p.stpost(2, 1)
@@ -369,7 +375,7 @@ def _noise(p: Prog, L: C.Layout) -> None:
         p.if_(0, "LE", 12, keep, kind="i")
         _rol(p, 1)
         _rol(p, 2)
-    p.loop(W["n4"], 48, one)
+    p.loop(W["n4"], N // 4, one)
     C.sts(p, S_NA, 1)
     C.sts(p, S_NB, 2)
     p.iconst(12, L.XB)
@@ -399,18 +405,27 @@ def _noise(p: Prog, L: C.Layout) -> None:
             p.stpost(5, 9)
             p.ldpost(13, 1)
             p.ldpost(13, 2)
-    p.loop(W["n4"], 48, hold)
+    p.loop(W["n4"], N // 4, hold)
 
 
 def half(p: Prog, L: C.Layout) -> None:
     W = L.W
-    C.vw(p, 1, "i1")
-    p.st(W["x0"], 1)
-    C.vw(p, 1, "i2")
-    p.st(W["minc"], 1)
+    for w, d in (("i1", "x0"), ("i2", "minc")):  # v0.51: a sample's increment at OS (x 12 / OS)
+        C.vw(p, 1, w)
+        if OS != 12:
+            p.ipass(13, 1)
+            for _ in range(12 // OS - 1):
+                p.iop(1, 13, "+", 1)
+            p.iconst(12, M24)
+            p.if_(1, "GT", 12, lambda: p.iconst(1, M24), kind="i")
+        p.st(W[d], 1)
     phases(p, L)
     wave_(p, L)
-    coefs(p, L, COEF, GAIN, 10, 6)
+    if OS == 12:
+        coefs(p, L, COEF, GAIN, 10, 6)
+    else:                                       # v0.51: DPRO-WAVE's decimator (4:1)
+        from . import wave as WV
+        coefs(p, L, WV.COEF, WV.GAIN, OS - 2, 6)   # (shift 6: SID's level, as at 12)
     p.iconst(12, L.IN)
     p.seti(5, 12)
     p.ld(14, L.md.C["mdb"])

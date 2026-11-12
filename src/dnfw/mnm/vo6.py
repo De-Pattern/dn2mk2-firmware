@@ -44,6 +44,10 @@ PNAMES = ("VOC1", "VOC2", "V-SW", "VOIC", "CONS", "CLEN", "CVOL", "TUNE")
 DEFAULTS = (64, 64, 96, 0, 0, 64, 64, 64)
 M24 = 0xFFFFFF
 Q23 = C.Q23
+# v0.51 (owner, the lighter Monomachine machines): the four series formants in float (the same
+# resonator as the parallel bank's, each output floored to the 56300's grid and limited), not in
+# its exact 24-bit arithmetic. SER_EXACT = True is the Monomachine's VO-6, bit for bit
+SER_EXACT = False
 
 _S = ("x31", "y31", "x32", "y32", "x33", "y33", "x34", "x35", "y35", "x36", "y36", "x37", "y37",
       "x39", "y39", "x40", "y40", "k", "y54", "x55", "y55",
@@ -1393,12 +1397,15 @@ def _formant_loop(p: Prog, L: C.Layout) -> None:
                            p.iconst(12, _a(L, "EXC")), p.seti(2, 12)))
             p.ld(9, _a(L, "f"))
             p.lsh(9, 9, 2)
-            p.iconst(12, _a(L, "R0i"))
+            p.iconst(12, _a(L, "R0i" if SER_EXACT else "r0"))   # v0.51: the float R for the float form
             p.iop(9, 12, "+", 9)
             p.seti(1, 9)
             p.ldi(9, 0, 1)
             p.st(_a(L, "R"), 9)
-            p.call("vo6_ser", lambda: _ser_body(p, L))
+            if SER_EXACT:
+                p.call("vo6_ser", lambda: _ser_body(p, L))
+            else:
+                p.call("vo6_sef", lambda: _res_body(p, L, False))
 
         def parallel():
             p.iconst(12, 4)

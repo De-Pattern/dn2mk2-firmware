@@ -32,6 +32,23 @@ from ..perc.dsl import Prog, bits
 
 NBUF = 37                                     # samples built a level (the kernel's n2 + 1)
 DEC_WORDS = 18
+# v0.51 (owner, the lighter Monomachine machines): the waves read at OS times the output rate
+# (the Monomachine's: 2, 32 samples a half, then the 2:1 decimator). At 1: 16 samples a half from
+# the next mip level up (the increment doubled: the level's shift goes up one, so the wave stays
+# band-limited for the output rate), the decimator gone. The phase moves as before (16 x 2b = 32 b).
+# OS = 2 is the Monomachine's DDRW and DENS, bit for bit
+OS = 1
+N2 = 16 * OS                                  # samples a half the interpolator writes
+PHASE_SH = 3 if OS == 2 else 2                # u += b << PHASE_SH (u: 22 fraction bits, b: 24)
+
+
+def b_scaled(p: Prog, r: int) -> None:
+    """Rr = the 2x increment in Rr as this rate's (doubled at OS 1, held under 2^32). Clobbers R12."""
+    if OS == 2:
+        return
+    p.ifz(r, "LT", lambda: p.iconst(r, 0x7FFFFFFF))   # (an unsigned word at or past 2^31: kept)
+    p.ipass(12, r)
+    p.iop(r, 12, "+", r)
 
 
 def q23(p: Prog, d: int, r: int) -> None:
@@ -191,7 +208,7 @@ def _interp(p: Prog, L: C.Layout) -> None:
         p.iconst(12, 4)
         p.iop(14, 14, "+", 12)
         p.fop(0, 0, "+", 11)
-    p.loop_r(15, 32, one)
+    p.loop_r(15, N2, one)
     p.st(W["P"], 0)
     p.st(W["out"], 14)
     p.st(W["t"], 15)                            # (v0.41's tap count, 0 at the end)
@@ -258,8 +275,19 @@ def _dec2(p: Prog, L: C.Layout) -> None:
 
 
 def dec2(p: Prog, L: C.Layout) -> None:
-    """MIX (32) -> 16 at I4 (walked); I2 the 18 state words. Clobbers R0-R13, I1, I2, I5, I12."""
-    p.call("dp_dec2", lambda: _dec2(p, L))
+    """MIX (32) -> 16 at I4 (walked); I2 the 18 state words. Clobbers R0-R13, I1, I2, I5, I12.
+    v0.51, at OS 1: MIX (16) to I4 as it is, limited (no decimator)."""
+    if OS == 2:
+        p.call("dp_dec2", lambda: _dec2(p, L))
+        return
+    p.iconst(12, L.MIX)
+    p.seti(5, 12)
+
+    def out():
+        p.ldpost(1, 5)
+        C.sat(p, 1)
+        p.stpost(4, 1)
+    p.loop(L.W["j"], 16, out)
 
 
 def state_ptr(p: Prog, L: C.Layout, i: int, k: int) -> None:

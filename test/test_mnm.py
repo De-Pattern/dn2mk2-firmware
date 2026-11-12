@@ -34,11 +34,42 @@ def _golden(name):
     return _G[name]
 
 
+def _trimmed(M) -> bool:
+    """v0.51: a machine re-made lighter, not bit for bit: SID below 12x (sid.OS), DDRW and DENS
+    below 2x (dpro.OS), VO-6's series formants in float (vo6.SER_EXACT)"""
+    from dnfw.mnm import dpro
+    if M is sid:
+        return sid.OS != 12
+    if M in (ddrw, dens):
+        return dpro.OS != 2
+    if M is vo6:
+        return not vo6.SER_EXACT
+    return False
+
+
 @pytest.mark.parametrize("name,case", _cases())
 def test_against_the_monomachine(name, case):
-    ours, theirs = bench.run_case(MACHINES[name], _golden(name)[case])
+    M = MACHINES[name]
+    g = _golden(name)[case]
+    ours, theirs = bench.run_case(M, g)
+    if _trimmed(M):
+        # v0.51: held by its level and spectrum (bench.likeness); NOIS by its level
+        noise = name == "SID" and any(e[1] and e[1][3] >= 103 for e in g["events"])
+        r = bench.likeness(ours, theirs, noise)
+        assert r["ok"], {k: v for k, v in r.items() if k != "ok"}
+        return
     r = bench.compare(ours, theirs)
     assert r["snr_db"] >= 60.0 or r["rms_err"] < 2.0 ** -20, r
+
+
+@pytest.mark.parametrize("name", [n for n, M in MACHINES.items() if _trimmed(M)])
+def test_trimmed_likeness_fails_a_wrong_level(name):
+    """the negative control: the likeness test refuses the same output 6 dB down (a trimmed
+    machine's decimator shift one bit off: v0.51's first measurement of SID at 4x)"""
+    g = bench.golden(name)["cases"][0]
+    ours, theirs = bench.run_case(MACHINES[name], g)
+    assert bench.likeness(ours, theirs)["ok"]
+    assert not bench.likeness([v * 0.5 for v in ours], theirs)["ok"]
 
 
 @pytest.mark.parametrize("name", list(MACHINES))

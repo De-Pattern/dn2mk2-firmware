@@ -22,6 +22,12 @@ COEF = (0x3CE85F, 0xF9F156, 0x939958, 0x04D33E, 0x36F789, 0x11B451, 0x9023EC, 0x
 GAIN = 0x6186
 FRAC = 21                                    # the phase's fraction bits
 S_PH, S_POS, S_SYNC, S_DEC = 0, 1, 2, 3
+# v0.51 (owner, the lighter Monomachine machines): read at OS times the output rate (the
+# Monomachine's: 4, 64 samples a half), then the decimator (OS - 2 inner rounds). OS = 4 is the
+# Monomachine's DPRO-WAVE, bit for bit. (v0.51: 2 measured and refused: the decimator with no inner
+# round lets the 2x read's images through, 59 of 78 golden cases out of shape by 16..20 dB)
+OS = 4
+N = 16 * OS
 
 
 def s24(v: int) -> int:
@@ -155,6 +161,10 @@ def half(p: Prog, L: C.Layout) -> None:
     """One Monomachine block: 64 samples into IN, decimated to 16 at I4."""
     W = L.W
     C.vw(p, 1, "i1")
+    if OS != 4:                                   # v0.51: a sample's increment at OS (x 4 / OS)
+        p.ipass(13, 1)
+        for _ in range(4 // OS - 1):
+            p.iop(1, 13, "+", 1)
     p.st(W["inc"], 1)
     C.vw(p, 4, "i2")
     p.ifz(4, "GT", lambda: count(p))
@@ -248,9 +258,9 @@ def half(p: Prog, L: C.Layout) -> None:
             p.iop(1, 12, "+", 1)
         p.if_(1, "GE", 2, back, kind="i")
         C.sts(p, S_PH, 1)
-    p.loop(W["n4"], 64, one)
+    p.loop(W["n4"], N, one)
     # decimate
-    coefs(p, L, COEF, GAIN, 2, 5)
+    coefs(p, L, COEF, GAIN, OS - 2, 5)
     p.iconst(12, L.IN)
     p.seti(5, 12)
     p.ld(12, L.md.C["mdb"])
