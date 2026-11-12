@@ -70,7 +70,9 @@ before v0.50, after the gate speed-up lands; 3 and 4 not in it.
    track's BUF 01 (flex link 1c): a step turning BUF through 01..08 and recording into each is missing.
 2. **A FLEX take is much quieter than the input** (impbox), with no way to bring it up. Takes are
    never normalised (rectrig.c), unlike the RECORDER's (v0.40). Options: a record GAIN on REC SETUP,
-   or a louder LEV range for FLEX.
+   or a louder LEV range for FLEX. **Owner, 2026-11-12: "gain knob please"**: a GAIN on REC SETUP
+   (set before recording, with the input meter there), no normalising. First measure any fixed
+   loss in the emulator (MONO L+R averaging, LEV 100 vs 127) so GAIN's default plays at unity.
 3. (request) **Double buffering**: a REC trig every pass on step 1 should let step 1's note play the
    previous pass's take, not the growing one. BOUNCE's two halves per buffer are still in rectrig.c
    (`rt_play[b]`, forced to the recording half in v0.49): record into one half, play the other, flip
