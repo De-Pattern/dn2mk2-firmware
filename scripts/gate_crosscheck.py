@@ -4,8 +4,9 @@ The gate runs the SHARC emulator's steps (the SHARC runner's parts, the coupled 
 under PyPy. This reruns each of them under CPython, on the same build, and compares what each
 wrote with the gate's own reports:
 
-- the SHARC runner: m5_report_part_*.json (every field but `wall_s`, the run's own timing) and
-  every frame WAV, byte for byte;
+- the SHARC runner: m5_report_part_*.json (every field but `wall_s` and `seconds`, the run's
+  own timing; `rms`, numpy's after the run, to 1e-12 relative), every frame WAV and every WAV
+  the report names, byte for byte;
 - THRES and FLEX: their JSON reports, every field; floating-point numbers that are computed
   from the emulation afterwards (correlations, levels) equal to 1e-12 relative, everything else
   exact; the work folder's path, which they record, normalised.
@@ -70,6 +71,15 @@ def diff(a, b, path="", tol=0.0, skip=("wall_s",)) -> list[str]:
     return [] if a == b and type(a) is type(b) else [f"{path}: {a!r} vs {b!r}"]
 
 
+def wav_names(x):
+    """The WAV files a report names (basenames)."""
+    if isinstance(x, dict):
+        return [w for v in x.values() for w in wav_names(v)]
+    if isinstance(x, list):
+        return [w for v in x for w in wav_names(v)]
+    return [os.path.basename(x)] if isinstance(x, str) and x.endswith(".wav") else []
+
+
 def run(cmd, log: pathlib.Path, env=None) -> int:
     with open(log, "w") as f:
         f.write("$ " + " ".join(map(str, cmd)) + "\n")
@@ -120,14 +130,29 @@ def main() -> int:
             if not gate_rep.exists():
                 done(name, [f"no gate report {gate_rep.name}"])
                 continue
+            g = json.loads(gate_rep.read_text())
+            # the WAVs a report names (smp_0.wav, perc_*.wav) are rewritten by the CPython run under
+            # the same names: kept first
+            named = sorted(set(wav_names(g)))
+            keep = out / f"{name}.gate_wavs"
+            keep.mkdir(exist_ok=True)
+            for w in named:
+                if (WAV / w).exists():
+                    (keep / w).write_bytes((WAV / w).read_bytes())
             rc = run(gate_sharc.command(a.stock, a.digikit_sharc, steps, ctag, python=sys.executable),
                      out / f"{name}.log")
             cpy_rep = WAV / f"m5_report_{ctag}.json"
             if rc != 0 or not cpy_rep.exists():
                 done(name, [f"CPython's run failed (rc {rc}): {out / (name + '.log')}"])
                 continue
-            g, c = json.loads(gate_rep.read_text()), json.loads(cpy_rep.read_text())
-            d = diff(g, c, skip=("wall_s", "wavs"))
+            c = json.loads(cpy_rep.read_text())
+            # wall_s and seconds: the run's own timing; rms (numpy, after the run) to 1e-12
+            d = diff(g, c, tol=1e-12, skip=("wall_s", "seconds"))
+            for w in named:
+                if not (keep / w).exists() or not (WAV / w).exists():
+                    d.append(f"WAV {w} missing")
+                elif (keep / w).read_bytes() != (WAV / w).read_bytes():
+                    d.append(f"WAV {w} differs")
             gw = sorted(f.name[len(f"m5_frame_{gtag}_"):] for f in WAV.glob(f"m5_frame_{gtag}_*.wav"))
             cw = sorted(f.name[len(f"m5_frame_{ctag}_"):] for f in WAV.glob(f"m5_frame_{ctag}_*.wav"))
             if gw != cw:

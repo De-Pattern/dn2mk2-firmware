@@ -75,6 +75,36 @@ fineknob) are likely the same, to be profiled one by one. A possible later route
 exact instruction count kept in C (a counting hook in our patched libunicorn), not in Python.
 digikit is m-dwyer's toolkit, so a change there is a change to a dependency, not to our gate.
 
+## C + D in the gate: the cross-check on v0.49's build (2026-11-12)
+
+`ship_gate.py --pypy` (default `../pypy-venv/bin/python`: PyPy 3.11, numpy 2.4.6, the same
+patched libunicorn; CPython if it is missing) runs the SHARC runner's ten parts and the coupled
+THRES and FLEX. Run in speed-wt on `out/v049.syx`, each report compared with v0.49's own gate
+pass under CPython:
+
+| step | CPython (v0.49) | PyPy | reports |
+|---|---|---|---|
+| SHARC runner, 10 parts | ~181 min | **43.6 min** | every emulated value identical; all 38 WAVs byte-identical; 35 `rms` values (numpy, after the run) differ past the 12th digit; `seconds`/`wall_s` are timing |
+| FLEX (coupled) | 60 min | **18 min** | identical but two correlations (numpy, after the run) in the 16th digit |
+| THRES (coupled) | ~6 min | **2.4 min** | identical |
+
+numpy cannot be pinned to the same version: PyPy has no numpy 2.5.3 (CPython's), so the
+last-digit differences in numbers computed *after* the emulation are expected and are what the
+cross-check allows (1e-12 relative), never in the emulation itself.
+
+**The cross-check, every release** (`scripts/gate_crosscheck.py STOCK BUILD.syx GATE_WORK_DIR`,
+in the background after the gate, before the next gate overwrites `out/waverider`): reruns those
+twelve steps under CPython and compares every report and WAV. It does not clear or block a
+build; a `CROSS-CHECK DIFFERS` means PyPy is no longer trusted until the difference is found.
+
+## Totals
+
+ColdFire ~8 h → ~5.8 h (B), SHARC ~3 h → ~45 min, the coupled 66 → 20 min (C, D). On two
+cores, the full gate from scratch: about **3 h instead of 5+ h** of wall time. The rest is the
+steps built on digikit's per-instruction boot hook (boot, engine, erase, fuzz, machines, +DRIVE,
+fineknob, jump's rapid presses, slides: about 3 h of CPU), to be profiled one by one before
+anything there is proposed. (The earlier 1.5-2 h estimate assumed B would reach them; it does not.)
+
 ## Proposed plan
 
 1. **B everywhere** (low risk, large): the same `emu_start(count=)` guard is copied into
