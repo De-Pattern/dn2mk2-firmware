@@ -341,6 +341,12 @@ def main() -> int:
     p.add_argument("build", type=pathlib.Path, nargs="?", help="the exact .syx that will be flashed")
     p.add_argument("--venv", default=str(ROOT.parent / "digikit/.venv/bin/python"),
                    help="python with digikit's emulator deps (unicorn)")
+    # 2026-11-12 (owner: "Yes, with a cross-check"; docs/gate-speed.md D, C): the pure-Python SHARC
+    # emulator's steps (the SHARC runner, the coupled THRES and FLEX) run under PyPy, 3-4x faster,
+    # same checks. Its venv holds the same patched libunicorn. scripts/gate_crosscheck.py reruns
+    # them under CPython and compares every report. "" (or no such file) runs them under CPython.
+    p.add_argument("--pypy", default=str(ROOT.parent / "pypy-venv/bin/python"),
+                   help="PyPy with numpy and the patched unicorn, for the SHARC emulator's steps")
     p.add_argument("--digikit-sharc", default=os.environ.get(
         "DNFW_DIGIKIT_SHARC", str(ROOT.parent / "digikit-wt-sharcemu")))
     p.add_argument("--only", metavar="STEP[,STEP...]",
@@ -348,6 +354,8 @@ def main() -> int:
                         "would; never a gate pass, never the build's .gate.json")
     p.add_argument("--list", action="store_true", help="print the steps' names, in the full run's order")
     a = p.parse_args()
+    a.sharc_py = a.pypy if a.pypy and os.path.isfile(a.pypy) else sys.executable
+    a.coupled_py = a.pypy if a.pypy and os.path.isfile(a.pypy) else a.venv
 
     if a.list:
         for i, n in all_ids():
@@ -503,7 +511,8 @@ def main() -> int:
                 # cached on its own; the verdict is every part's
                 try:
                     for steps in sharc_want:
-                        cmd = gate_sharc.command(a.stock, a.digikit_sharc, steps, "part_" + "_".join(steps))
+                        cmd = gate_sharc.command(a.stock, a.digikit_sharc, steps, "part_" + "_".join(steps),
+                                                 python=a.sharc_py)
 
                         def body(tdir, cmd=cmd, steps=steps):
                             rc, out = run(f"sharc_m5_{'_'.join(steps)}", cmd, logs, trace=tdir)
@@ -2218,7 +2227,7 @@ def main() -> int:
         # DSP together, block by block): a -34 dB tone on IN; THRES 30 (tick -45 dB) starts the
         # take on the ARM; THRES 110 holds it back, and turned to 30 while armed it starts
         th_js = work / "thres.json"
-        th_cmd = [a.venv, "-u", "scripts/emu_coupled_thres.py", "--build", a.build, "--stock", a.stock,
+        th_cmd = [a.coupled_py, "-u", "scripts/emu_coupled_thres.py", "--build", a.build, "--stock", a.stock,
                   "--snapshot", snap, "--json", th_js]
 
         def th_body(tdir):
@@ -2237,7 +2246,7 @@ def main() -> int:
         # buffer 1 (the input to the sample), the one-shot spent, then a FLEX note playing the take
         # (its render read after the voices, correlated with the take)
         fx_js = work / "flex.json"
-        fx_cmd = [a.venv, "-u", "scripts/emu_coupled_flex.py", "--build", a.build, "--stock", a.stock,
+        fx_cmd = [a.coupled_py, "-u", "scripts/emu_coupled_flex.py", "--build", a.build, "--stock", a.stock,
                   "--snapshot", snap, "--json", fx_js]
 
         def fx_body(tdir):
@@ -2407,6 +2416,8 @@ def main() -> int:
     record = {"build": a.build.name, "sha256": sha, "stock": a.stock.name,
               "date": datetime.datetime.now().isoformat(timespec="seconds"),
               "gates": results, "logs": str(logs),
+              "interpreters": {"SHARC runner": a.sharc_py, "coupled (THRES, FLEX)": a.coupled_py,
+                               "ColdFire steps": a.venv},
               "reused": {k: f"the pass of {v}: every file it read is byte-identical" for k, v in reused.items()}}
     out = a.build.with_name(a.build.name + ".gate.json")
     out.write_text(json.dumps(record, indent=2))

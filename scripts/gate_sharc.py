@@ -50,8 +50,10 @@ def parts() -> list[list[str]]:
     return out
 
 
-def command(stock: str, digikit_sharc: str, steps: list[str] | None = None, tag: str = "") -> list:
-    cmd = [sys.executable, "scripts/sharc_waverider_m5.py", "--image", stock, "--digikit", digikit_sharc]
+def command(stock: str, digikit_sharc: str, steps: list[str] | None = None, tag: str = "",
+            python: str | None = None) -> list:
+    """PYTHON: the interpreter (2026-11-12: the gate passes PyPy; scripts/gate_crosscheck.py CPython)."""
+    cmd = [python or sys.executable, "scripts/sharc_waverider_m5.py", "--image", stock, "--digikit", digikit_sharc]
     if steps is not None:
         cmd += ["--steps", ",".join(steps), "--tag", tag or "part"]
     return cmd
