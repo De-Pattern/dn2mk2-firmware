@@ -67,6 +67,9 @@ def main() -> int:
     p.add_argument("--json", default=None)
     p.add_argument("--snapshot", default=SNAP)
     p.add_argument("--hook", action="append", default=[], help="ADDR: log its entries and first 4 stack args")
+    p.add_argument("--lead", type=int, default=0,
+                   help="instructions more of the UI before the turn (default 0, as before): moves the turn's phase "
+                        "against the timer wheel's flush (emu_fine_knob's FREQ references at several phases)")
     p.add_argument("--rest", type=int, default=None,
                    help="put this in the knob's rest counter (+16 of its state) before the turn: the causal check")
     p.add_argument("--no-wheel", action="store_true",
@@ -199,6 +202,8 @@ def main() -> int:
         return out_
     panel.tap(tuple(int(x) for x in a.page.split(",")))
     panel.settle(10_000_000)
+    if a.lead:
+        panel.settle(a.lead)
     plan = []
     for part in a.detents.split(","):
         d, n = part.split("*")

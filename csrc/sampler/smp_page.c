@@ -688,10 +688,10 @@ static void slot_name(int k, char *out, int max)   /* SAMP value K (0 OFF) */
 {
     const char *n = 0;
     int cnt = smp_count();
-    extern int smp_dir_ok;                      /* (v0.48: rectrig.c's rt_on, which copied it) */
+    extern int rt_on;
     if (k <= 0)
         n = "OFF";
-    else if (smp_dir_ok && k - 1 >= REC_FIRST && k - 1 < REC_FIRST + 4)
+    else if (rt_on && k - 1 >= REC_FIRST && k - 1 < REC_FIRST + 4)
         n = k - 1 == REC_FIRST ? "REC 1" : k - 1 == REC_FIRST + 1 ? "REC 2" : "---";   /* v0.41: the buffers */
     else if (cnt >= 0 && k <= cnt && !smp_slot_empty(k - 1))
         n = smp_long_name(k - 1);
@@ -2205,7 +2205,177 @@ static void recording_draw(void *c, int heard)
     LABEL(c, 106, 2, "%s", "YES: STOP");
 }
 
-/* (v0.48: BOUNCE's panel, bn_view_draw, is gone: docs/bounce-removal-plan.md) */
+/* v0.41 (docs/rectrig.md): H's place with a step held: that step's REC trig (OFF, REC 1,
+ * REC 2), drawn inverted when the step has one, as a p-lock; -> 1 drawn */
+/* v0.44 BOUNCE: the RECORDER of a BOUNCE track (rec.c bn_*; rectrig.c), one page: its title,
+ * meter and SRC/CHAN (drawn by rec_screen_draw), then the RECORD box's place as the status
+ * line (what the buffer and the track's recorder trigs are doing, always), THRES's place
+ * the page's sixteen steps (a filled cell a recorder trig, an open one a one-shot, a struck
+ * one a spent one-shot; the [TRIG] keys toggle them, PAGE turns the page), and the bottom
+ * row E Q.REC, F Q.PLAY, G R.LEN, H the one-shots (YES YES arms them again) */
+/* v0.49 FLEX REC (docs/flex-design.md; the owner's mockup sheets, docs/flex-mockups/): two pages,
+ * LEFT and RIGHT between them. REC TRIGS: the title with the track and the page of steps, the
+ * buffer's state (EMPTY, READY and its length, REC with its steps so far and a progress bar),
+ * what just happened or what to do, the page's 16 steps as two rows of eight numbered cells
+ * (filled a recorder trig, hatched a one-shot, struck a spent one, the playing step underlined),
+ * and the legend. REC SETUP: the grid of eight, A SRC, B CHAN, C BUF (inverted, as the track's
+ * BUF), D R.LEN, E ARM, F Q.REC, each a choice in its box, its name under it (four detents a
+ * choice; G and H empty). Every value at its cell's place and baseline */
+static void choice(void *c, int k, int y, const char *text, const char *name, int inverted)
+{
+    int x = CELL_X(k), cx = x + 12;
+    box(c, cx - 11, y + 3, cx + 11, y + 13, 0);
+    LABEL(c, cx, y + 6, "%.5s", text);
+    if (inverted)
+        invert(c, cx - 10, y + 4, cx + 10, y + 12);
+    LABEL(c, cx, y - 7, "%.5s", name);
+}
+
+static void step_cell(void *c, int x, int y, u32 v, int head)
+{
+    if (v == 1)
+        fill(c, x, y, x + 6, y + 6);                     /* a recorder trig: filled */
+    else if (v == 2) {                                   /* a one-shot: hatched */
+        box(c, x, y, x + 6, y + 6, 0);
+        for (int j = 1; j <= 5; j++) {
+            on(c, x + j, y + j);
+            if (j <= 3) on(c, x + j + 2, y + j);
+            if (j >= 3) on(c, x + j - 2, y + j);
+        }
+    } else if (v == 3) {                                 /* a spent one-shot: dotted, one stroke */
+        box(c, x, y, x + 6, y + 6, 1);
+        for (int j = 1; j <= 5; j++)
+            on(c, x + j, y + j);
+    } else
+        box(c, x, y, x + 6, y + 6, 1);                   /* none: a dotted cell */
+    if (head)
+        hline(c, x, x + 6, y - 2, 0);
+}
+
+static void bn_view_draw(void *c, int heard)
+{
+    extern int rt_on, rt_qrec, rt_arm, rec_rlen, bn_page, bn_sub, rec_src, rec_chan;
+    extern u32 rt_why, rt_why_at, rt_why_trk, rt_fired_at, rt_fired_trk, bn_said_at, bn_nothing_at;
+    extern int bn_said_n;
+    extern int rt_state(int b, int *tenths, int *steps);
+    extern u32 rt_buf_of(u32 t);
+    extern const char *rt_qname(int q);
+    extern unsigned char *sl_ui_table_now(void);
+    extern u32 rt_trig_get(const unsigned char *table, u32 t, u32 step);
+    extern u32 rt_count(const unsigned char *table, u32 t, u32 *trigs, u32 *oneshots, u32 *spent);
+    extern u32 bn_pages(void);
+    extern int rt_req_waiting(void);
+    static const char *const WHY[5] = {"", "NO BUFFERS", "MANUAL REC", "NO ROOM", "BUSY"};
+    u32 t = UI_TRACK;
+    u32 b = rt_buf_of(t);
+    char tl[24];
+    if (bn_sub) {                                /* REC SETUP */
+        LABEL_TEXT(c, LABEL_FONT, 2, 57, 0, 0, 0, "T%02d FLEX REC SETUP", (int)t + 1);
+        hline(c, 0, 127, 54, 0);
+        const char *src = smp_rec_src[rec_src > SMP_REC_SOURCES - 1 ? SMP_REC_SOURCES - 1 : rec_src < 0 ? 0 : rec_src];
+        static const char *const CH[3] = {"L+R", "L", "R"};
+        char bufs[4], rl[6];
+        bufs[0] = '0'; bufs[1] = (char)('1' + b); bufs[2] = 0;
+        if (rec_rlen <= 0) {
+            rl[0] = 'M'; rl[1] = 'A'; rl[2] = 'X'; rl[3] = 0;
+        } else {
+            int n = rec_rlen, k = 0;
+            if (n >= 100) rl[k++] = (char)('0' + n / 100);
+            if (n >= 10) rl[k++] = (char)('0' + n / 10 % 10);
+            rl[k++] = (char)('0' + n % 10);
+            rl[k] = 0;
+        }
+        choice(c, 0, TOP_Y, src, "SRC", 0);
+        choice(c, 1, TOP_Y, CH[rec_chan < 0 ? 0 : rec_chan > 2 ? 2 : rec_chan], "CHAN", 0);
+        choice(c, 2, TOP_Y, bufs, "BUF", 1);
+        choice(c, 3, TOP_Y, rl, "RLEN", 0);
+        choice(c, 0, BOT_Y, rt_arm ? "ON" : "OFF", "ARM", rt_arm);
+        choice(c, 1, BOT_Y, rt_qname(rt_qrec), "QREC", 0);
+        /* v0.49 (owner): the buffer's state in G and H's place, no box: a dot and REC while it
+         * records, WAIT while a take waits for Q.REC, else READY and its length, or EMPTY */
+        {
+            int tenths, steps, st = rt_state((int)b, &tenths, &steps);
+            int x = CELL_X(2) + 12, y = BOT_Y + 6;
+            (void)steps;
+            if (rt_req_waiting())
+                LABEL(c, x + 13, y, "%s", "WAIT QREC");
+            else if (st == 1) {
+                fill(c, x - 6, y + 1, x - 4, y + 3);
+                LABEL(c, x + 13, y, "REC %d.%dS", tenths / 10, tenths % 10);
+            } else if (st)
+                LABEL(c, x + 13, y, "READY %d.%dS", tenths / 10, tenths % 10);
+            else
+                LABEL(c, x + 13, y, "%s", "EMPTY");
+        }
+        LABEL(c, 116, 2, "%s", "<");
+        return;
+    }
+    /* REC TRIGS */
+    u32 pages = bn_pages(), first = (u32)bn_page * 16u;
+    tl[0] = 0;
+    LABEL_TEXT(c, LABEL_FONT, 2, 57, 0, 0, 0, "T%02d FLEX REC TRIGS", (int)t + 1);
+    if (pages > 1)
+        LABEL_TEXT(c, LABEL_FONT, 125, 57, 2, 0, 0, "%d/%d", bn_page + 1, (int)pages);
+    hline(c, 0, 127, 54, 0);
+    unsigned char *table = sl_ui_table_now();
+    u32 nt = 0, no = 0, ns = 0, all = table ? rt_count(table, t, &nt, &no, &ns) : 0;
+    int tenths, steps, st = rt_state((int)b, &tenths, &steps);
+    /* line 1: the buffer */
+    int y1 = 46, y2 = 38;
+    if (!rt_on)
+        LABEL_TEXT(c, LABEL_FONT, 2, y1, 0, 0, 0, "%s", "NO +DRIVE POOL");
+    else if (st == 1) {
+        fill(c, 2, y1 + 1, 4, y1 + 3);           /* a solid dot: recording */
+        LABEL_TEXT(c, LABEL_FONT, 7, y1, 0, 0, 0, "BUF%02d REC %d.%dS", (int)b + 1, tenths / 10, tenths % 10);
+    } else if (st)
+        LABEL_TEXT(c, LABEL_FONT, 2, y1, 0, 0, 0, "BUF%02d READY %d.%dS", (int)b + 1, tenths / 10, tenths % 10);
+    else
+        LABEL_TEXT(c, LABEL_FONT, 2, y1, 0, 0, 0, "BUF%02d EMPTY", (int)b + 1);
+    /* line 2: what just happened, else what to do */
+    u32 now = FRAMES_NOW;
+    if (rt_req_waiting())
+        LABEL_TEXT(c, LABEL_FONT, 2, y2, 0, 0, 0, "WAIT REC: QREC %s", rt_qname(rt_qrec));
+    else if (bn_nothing_at && now - bn_nothing_at < 3000u)
+        LABEL_TEXT(c, LABEL_FONT, 2, y2, 0, 0, 0, "%s", "NOTHING TO SAVE");
+    else if (bn_said_at && now - bn_said_at < 3000u)
+        LABEL_TEXT(c, LABEL_FONT, 2, y2, 0, 0, 0, "%d ONE-SHOTS ARMED", bn_said_n);
+    else if (rt_why_at && now - rt_why_at < 4500u && rt_why_trk == t && rt_why >= 1 && rt_why <= 4)
+        LABEL_TEXT(c, LABEL_FONT, 2, y2, 0, 0, 0, "REC REFUSED: %s", WHY[rt_why]);
+    else if (rt_fired_at && now - rt_fired_at < 1500u && rt_fired_trk == t)
+        LABEL_TEXT(c, LABEL_FONT, 2, y2, 0, 0, 0, "%s", "TRIG: RECORDING");
+    else if (!rt_arm)
+        LABEL_TEXT(c, LABEL_FONT, 2, y2, 0, 0, 0, "%s", "ARM OFF: TRIGS KEPT");
+    else if (!all)
+        LABEL_TEXT(c, LABEL_FONT, 2, y2, 0, 0, 0, "%s", "[TRIG] PLACES A ONE-SHOT");
+    else
+        LABEL_TEXT(c, LABEL_FONT, 2, y2, 0, 0, 0, "%d REC  %d ONE-SHOT", (int)nt, (int)(no + ns));
+    /* the page's 16 steps: two rows of eight, numbered */
+    for (int i = 0; i < 16; i++) {
+        int col = i & 7, row = i >> 3;
+        int x = 4 + 16 * col, y = row ? 8 : 22;
+        u32 step = first + (u32)i;
+        u32 v = table ? rt_trig_get(table, t, step) : 0xFFFFu;
+        LABEL(c, x + 3, y + 8, "%d", (int)step + 1);
+        step_cell(c, x, y, v == 0xFFFFu ? 0 : v, 0);
+    }
+    /* the legend */
+    fill(c, 4, 1, 7, 4);
+    LABEL_TEXT(c, LABEL_FONT, 10, 0, 0, 0, 0, "%s", "REC");
+    box(c, 34, 0, 40, 6, 0);
+    on(c, 35, 1); on(c, 36, 2); on(c, 37, 3); on(c, 38, 4); on(c, 39, 5);
+    LABEL_TEXT(c, LABEL_FONT, 44, 0, 0, 0, 0, "%s", "ONE");
+    LABEL_TEXT(c, LABEL_FONT, 125, 0, 2, 0, 0, "%s", ">");
+    (void)heard;
+    (void)tl;
+}
+
+static int rt_h_draw(void *c)
+{
+    (void)c;
+    return 0;                                   /* v0.44: no lock on H any more (BOUNCE's [TRIG] keys) */
+}
+
+/* (v0.41's REC TRIGS view, rt_view_draw, is gone in v0.44: BOUNCE tracks have bn_view_draw) */
 void rec_screen_draw(void *c)
 {
     if (rec_phase) {
@@ -2222,13 +2392,19 @@ void rec_screen_draw(void *c)
     }
     int heard = rec_heard && FRAMES_NOW + 1u - rec_heard < 1500u;
     int state = heard ? rec_state : 0;
+    extern int rec_rt_take;
     clear(c, 0, 0, 127, 63);
-    if (state == 2) {                           /* v0.25: recording: the DT2's screen */
+    if (state == 2 && !rec_rt_take) {           /* v0.25: recording: the DT2's screen */
         recording_draw(c, heard);
         return;
     }
 
-    /* the title and the meter (v0.41: the REC TRIGS view's too: the source it records) */
+    extern int bn_active(void);
+    if (bn_active()) {                          /* v0.49: FLEX REC, its two pages, its own layout */
+        bn_view_draw(c, heard);
+        return;
+    }
+    /* the title and the meter */
     LABEL(c, 25, 57, "%s", "RECORDER");
     hline(c, 0, 50, 54, 0);
     int mx0 = 68, mx1 = 126, my0 = 55, my1 = 62, w = mx1 - mx0 - 2;
@@ -2241,7 +2417,7 @@ void rec_screen_draw(void *c)
 
     /* SRC, on the left, and over it CHAN (knob B) as its own icon, the DT2's way (v0.44; v0.33
      * ..v0.43 wrote L+R / L / R under SRC): an L and an R cell, the recorded ones filled
-     * (L+R both, L or R one) */
+     * (L+R both, L or R one). The same on the BOUNCE panel, whose right column is the grid. */
     extern int rec_chan;
     const char *src = smp_rec_src[rec_src > SMP_REC_SOURCES - 1 ? SMP_REC_SOURCES - 1 : rec_src];
     LABEL(c, 13, 32, "%s", src);
@@ -2266,7 +2442,19 @@ void rec_screen_draw(void *c)
     int bx0 = 29, bx1 = 97, by0 = 22, by1 = 48;
     box(c, bx0, by0, bx1, by1, 1);
     int cx = (bx0 + bx1) / 2;
-    if (state == 2) {
+    extern int rt_q_waiting(void), rt_qrec;
+    extern const char *rt_qname(int q);
+    if (rt_q_waiting()) {                       /* v0.41: QREC: the take waits for its step */
+        LABEL(c, cx, by0 + 16, "%s", "WAITING");
+        LABEL(c, cx, by0 + 8, "Q.REC %s", rt_qname(rt_qrec));
+        LABEL(c, cx, by0 + 1, "%s", "NO:CANCEL");
+    } else if (state == 2 && rec_rt_take) {     /* v0.41: a REC trig's take, into a buffer */
+        fill(c, bx0 + 5, by0 + 15, bx0 + 11, by0 + 21);
+        int ds = (int)(rec_frames / 4800u);
+        LABEL(c, cx + 6, by0 + 16, "%s", "TRIG");
+        LABEL(c, cx, by0 + 8, "%d.%d S", ds / 10, ds % 10);
+        LABEL(c, cx, by0 + 1, "%s", "YES:RECORD");
+    } else if (state == 2) {
         fill(c, bx0 + 5, by0 + 15, bx0 + 11, by0 + 21);   /* a solid dot: recording */
         int ds = (int)(rec_frames / 4800u);
         LABEL(c, cx + 6, by0 + 16, "%s", "REC");
@@ -2317,7 +2505,9 @@ void rec_screen_draw(void *c)
     LABEL(c, 47, 0, "%s", "R.LEN");
     LABEL(c, 80, 9, "%s", rec_rstrt ? "PLAY" : "THRES");
     LABEL(c, 80, 0, "%s", "R.STRT");
-    int on = state == 1 || state == 2;          /* ARM's switch: what the DSP is doing */
+    if (rt_h_draw(c))                           /* v0.41: a step held: its REC trig */
+        return;
+    int on = (state == 1 || state == 2) && !rec_rt_take;   /* ARM's switch: what the DSP is doing */
     int sx0 = 104, sx1 = 122, sy0 = 8, sy1 = 15;
     box(c, sx0, sy0, sx1, sy1, 0);
     if (on)

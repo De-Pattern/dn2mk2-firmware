@@ -711,6 +711,11 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     mnm_ages(p, L)                             # v0.29: the newest Monomachine voices first
     from . import guard as G
     G.entry(p)                                 # v0.27: the frame's length and the time our voices have
+    from ..sampler import machines as SMx2
+    from ..sampler.program import V as SV
+    from ..waverider import dsp as DSPx
+    G.perc_limit(p, [SMx2.TYPE_OF[n] for n in SMx2.ENGINED], DSPx.SMP_STATE_DM, DSPx.SMP_STATE_STRIDE,
+                 SV["on"], TRIG_WORD, lambda p, d, k: half(p, d, 148, k))   # v0.49: the samples' time first
     p.iconst(0, 0)
     p.st(L.md.mnm.scratch + PERC_I, 0)
     top = p.label("slot")
@@ -743,7 +748,8 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.jump("LT", other)
     G.around(p, L.C["t"], G.COST_PERC, BUFFERS, lambda: voice(p, L),   # v0.27: if it fits in the frame
              rests=L.md.mnm.scratch + RESTS_OFF, rest_blocks=MNM_QUIET_BLOCKS,   # v0.36: else, the second
-             strikes=L.md.mnm.scratch + STRIKES_OFF, steal_at=STEAL_STRIKES)       # time in a note, stolen
+             strikes=L.md.mnm.scratch + STRIKES_OFF, steal_at=STEAL_STRIKES,       # time in a note, stolen
+             limit=G.LIMIT_PERC)                                                    # v0.49: after the samples' share
     p.jump("", nxt)
     # not PERC: its voice is silenced, so a track that comes back to PERC starts clean
     # (v0.12: v0.11 resumed what it had left ringing)

@@ -53,7 +53,13 @@ BLOWN_INFO = GUARD + 0xC4        # the last: slot | machine type << 8
 BLOWN_WHERE = GUARD + 0xC8       # the last: WHERE_NONE, or the first non-finite word's index
 BLOWN_WORD = GUARD + 0xCC        # that word's bits
 BLOWN_MASK = GUARD + 0xD0        # bit t: slot t wiped since the ColdFire last heard (sent, then cleared)
-END = GUARD + 0xD4
+# v0.49 (NiKo's report: an ONESHOT kick crunchy at ~85 % beside SID and three PERC voices): the
+# sample voices' time is held back from PERC's, and a sample voice left out twice in a note stops
+RESERVE = GUARD + 0xD4           # the sample voices' expected cost this block (sounding or triggered)
+LIMIT_PERC = GUARD + 0xD8        # LIMIT less RESERVE: PERC's and the Monomachine's limit
+STRUCK = GUARD + 0xDC            # bit t: sample slot t left out once in its current note
+RES_I = GUARD + 0xE0             # perc_limit's loop counter
+END = GUARD + 0xE4
 WHERE_NONE = 0xFFFF              # the voice's delay lines held nothing non-finite (its state, input or effects did)
 WHERE_DELAY = 0x8000             # | the first non-finite delay-line word's index (0..2047)
 LIMIT_DEFAULT = 400_000          # until a frame has been measured: 0.6 of 666,667 (1 GHz, 1,500 frames a second)
@@ -199,15 +205,97 @@ def end_mark(p) -> None:
     p.st(OURS_END, 8)
 
 
+def perc_limit(p, smp_types, smp_state: int, smp_stride: int, on_word: int, trig_word: int,
+               frame_type) -> None:
+    """v0.49, once a frame after entry(): RESERVE = the expected cost of every sample voice that
+    is sounding (its state's ON word) or triggered this block, each as around() expects it
+    (its last cost x 1.5, at least FLOOR), at most 3/4 of LIMIT; LIMIT_PERC = LIMIT - RESERVE.
+    PERC's and the Monomachine's voices then give way first, and a sample voice (cheap) is not
+    starved by them. A sample slot's new note clears its STRUCK bit. FRAME_TYPE(p, d, k2):
+    Rd = slot t's machine type from the frame, Rk2 = 2 t. Clobbers R0-R14, I1, I4."""
+    p.comment("v0.49: the sample voices' time held back from PERC's")
+    p.ld(3, trig_word)
+    p.lsh(3, 3, -16)                           # R3: this block's note triggers, bit t
+    p.ld(8, STRUCK)                            # a new note: no strikes
+    p.iop(9, 8, "AND", 3)
+    p.e("R8 = R8 - R9;")
+    if p.run:
+        p.setR(8, p.r[8] - p.r[9])
+    p.st(STRUCK, 8)
+    p.iconst(0, 0)
+    p.st(RESERVE, 0)
+
+    def body():
+        p.ld(9, RES_I)
+        p.iconst(12, 1)
+        p.e("R9 = R9 - R12;", "t")
+        if p.run:
+            p.setR(9, p.r[9] - 1)
+        p.iop(10, 9, "+", 9)
+        frame_type(p, 2, 10)                   # R2: slot t's machine type
+        p.iconst(14, 0)
+        for ty in smp_types:
+            p.iconst(12, ty)
+            p.if_(2, "EQ", 12, lambda: p.iconst(14, 1), kind="i")
+
+        def sample():
+            p.ld(9, RES_I)
+            p.iconst(12, 1)
+            p.e("R9 = R9 - R12;")
+            if p.run:
+                p.setR(9, p.r[9] - 1)
+            p.iconst(10, 1)
+            p.e("R10 = LSHIFT R10 BY R9;")
+            if p.run:
+                p.setR(10, 1 << (p.r[9] & 31))
+            p.iop(10, 10, "AND", 3)            # triggered this block
+            p.lsh(12, 9, {128: 7}[smp_stride])
+            p.iconst(11, smp_state)
+            p.iop(12, 11, "+", 12)
+            p.seti(4, 12)
+            p.ldi(5, on_word, 4, "sounding")
+            p.iop(5, 5, "OR", 10)
+
+            def expect():
+                p.lsh(12, 9, 2)
+                p.iconst(11, COST_SMP)
+                p.iop(12, 11, "+", 12)
+                p.seti(4, 12)
+                p.ldi(13, 0, 4, "its last cost")
+                p.lsh(12, 13, -1)
+                p.iop(13, 13, "+", 12)         # x 1.5
+                p.iconst(12, FLOOR)
+                p.iop(13, 13, "MAX", 12)
+                p.ld(8, RESERVE)
+                p.iop(8, 8, "+", 13)
+                p.st(RESERVE, 8)
+            p.ifz(5, "NE", expect)
+        p.ifz(14, "NE", sample)
+    p.loop(RES_I, 16, body)
+    p.ld(8, LIMIT)
+    p.lsh(9, 8, -1)
+    p.lsh(10, 8, -2)
+    p.iop(9, 9, "+", 10)                       # 3/4 LIMIT
+    p.ld(10, RESERVE)
+    p.iop(10, 10, "MIN", 9)
+    p.e("R8 = R8 - R10;")
+    if p.run:
+        p.setR(8, p.r[8] - p.r[10])
+    p.st(LIMIT_PERC, 8)
+
+
 def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = None,
-           rest_blocks: int = 0, strikes: int | None = None, steal_at: int = 1) -> None:
+           rest_blocks: int = 0, strikes: int | None = None, steal_at: int = 1,
+           limit: int = LIMIT, struck: int | None = None, stop=None) -> None:
     """VOICE() if it fits, else the slot's buffer zeroed and the skip counted. T_WORD:
     the scratch word holding the slot; COST: the slots' cost words; BUFFERS: the track
     buffers' pointers (0x254a60). v0.36: RESTS (the slots' rest counters) given, a voice
     left out (with STRIKES, the slots' strike counters: left out STEAL_AT times in one note) is stolen: its counter set to REST_BLOCKS, so it rests (silent, free) until
     its next note, as a synth steals its oldest voice. Before, it was tried again the next
     block and, with time short, flickered in and out (DDRW's four-note chord: one block
-    two voices, the next one)."""
+    two voices, the next one). v0.49: LIMIT the limit word (PERC's: LIMIT_PERC); STRUCK and
+    STOP (a sample voice): left out a second time in one note (STRUCK's bit t set by the
+    first), STOP() ends the voice until its next note, instead of a crunchy flicker."""
     skip = p.label("gskip")
     done = p.label("gdone")
     p.e("R8 = EMUCLK;")
@@ -225,7 +313,7 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
     p.iconst(10, FLOOR)
     p.iop(9, 9, "MAX", 10)
     p.iop(8, 8, "+", 9)
-    p.ld(10, LIMIT)
+    p.ld(10, limit)
     p.e("COMP(R8, R10);")
     p.jump("GT", skip)
     voice()
@@ -267,6 +355,21 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
             p.sti(0, 4, 9)
             p.iconst(10, steal_at)
             p.if_(9, "GE", 10, steal, kind="i")
+        p.ld(9, t_word)                        # I5 again: the slot's cost word
+        p.lsh(9, 9, 2)
+        p.iconst(10, cost)
+        p.iop(9, 10, "+", 9)
+        p.seti(5, 9)
+    if struck is not None:
+        p.comment("v0.49: a sample voice left out a second time in this note stops until its next")
+        p.ld(9, t_word)
+        p.iconst(10, 1)
+        p.e("R10 = LSHIFT R10 BY R9;")
+        if p.run:
+            p.setR(10, 1 << (p.r[9] & 31))
+        p.ld(8, struck)
+        p.iop(11, 8, "AND", 10)
+        p.ifz(11, "NE", stop, lambda: (p.iop(8, 8, "OR", 10), p.st(struck, 8)))
         p.ld(9, t_word)                        # I5 again: the slot's cost word
         p.lsh(9, 9, 2)
         p.iconst(10, cost)

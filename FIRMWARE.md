@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.48** | 2026-11-10 | STRT/LEN/LOOP as the DT2's fine controls (0.00..120.00, the stock fine knob, push + turn whole steps; the DSP plays from that exact place); THRES fixed (the meter's scale, live while armed); KEYBOARD kept through grid recording; turned values shown on the sample pages; SLICE's keys as the DT2's; the RECORDER's text inside its boxes; BOUNCE's code out (old projects load, the track silent); gate: the first step on both processors together (THRES), fineswap, fineknob | `builds/v0.48-FINE/` | yes |
+| **v0.49** | 2026-11-11 | FLEX, the live-buffer machine that replaces BOUNCE: recorder trigs on steps ([TRIG] a one-shot, FUNC + [TRIG] every pass) record a track, IN or MAIN into one of 8 buffers for R.LEN steps, and the FLEX track plays the take with its own notes (ONESHOT's page, BUF 01..08); FLEX REC's two pages (REC TRIGS, REC SETUP); Q.REC; old BOUNCE tracks open as FLEX; the DSP guard gives sample voices their time first and stops a dropped one cleanly; STRT/LEN/LOOP turned mid-note no longer move the playhead | `builds/v0.49-FLEX/` | yes |
+| v0.48 | 2026-11-10 | STRT/LEN/LOOP as the DT2's fine controls (0.00..120.00, the stock fine knob, push + turn whole steps; the DSP plays from that exact place); THRES fixed (the meter's scale, live while armed); KEYBOARD kept through grid recording; turned values shown on the sample pages; SLICE's keys as the DT2's; the RECORDER's text inside its boxes; BOUNCE's code out (old projects load, the track silent); gate: the first step on both processors together (THRES), fineswap, fineknob | `builds/v0.48-FINE/` | yes |
 | v0.47 | 2026-11-09 | the Monomachine's TUNE reads -64..+63 (0 in tune), FUNC + turn a semitone at a time; the TRIM preview 6 dB quieter (back at v0.37..v0.39's level); the RECORDER's INTO box smaller; BOUNCE out of MACHINE SEL (old BOUNCE tracks still load); gate: its reuse cache refuses passes from another worktree | `builds/v0.47-TUNED/` | yes |
 | v0.46 | 2026-11-09 | recordings (RECORD NOW, a BOUNCE take saved with FUNC + YES) also copied into +DRIVE > RECORDED under their own name; FILE NAME up to 35 characters, RENAME long names, a new folder up to 30; BOUNCE's BUF reads 1..8; gate: the copy with a power cut after every step, a full +Drive, a send mid-copy | `builds/v0.46-KEEPER/` | yes |
 | v0.45 | 2026-11-08 | BOUNCE fixed (v0.44 froze the unit on MACHINE SEL → BOUNCE and at power-on with a BOUNCE track) and back in MACHINE SEL; the +Drive library holds 16,384 samples; SELECT UNUSED in PROJECT RAM; recorder trigs on the [TRIG] LEDs while the BOUNCE REC panel is open; SAMP past the last loaded sample no longer plays the last one; PING removed; gate: every machine through MACHINE SEL's real list and a power-on with ours on the tracks, a wild-read trap in every emulator step | `builds/v0.45-ROOMIER/` | yes |
@@ -86,6 +87,81 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.49 — FLEX (the live-buffer machine, the guard, the playhead)
+
+`DN2mod_v0.49_FLEX_OS1.11.syx`
+sha256 `31c68448759c2f2eea240cbfdb5d60e059caa2b18e3fa7ecede7b8ff65f3de9f`
+Gate: CLEARED TO FLASH, 2026-11-11 (51 gates; 45 reused; run step by step under the two-hour job limit, each reused pass one of this same build whose every input is byte-identical; every emulator step with the wild-read trap on). Source: commit `97cec1a` (branch `v049`). Docs: `docs/flex-design.md`, `docs/flex-mockups/`.
+
+Everything in v0.48, plus (each with the commit that adds it, so it can be taken out alone):
+
+**FLEX, the live-buffer machine** (replaces BOUNCE; `docs/flex-design.md`). In MACHINE SEL after
+SLICE. Its SYN page is ONESHOT's with **BUF** (01..08, a detent each) in SAMP's place: TUNE, PLAY,
+BUF, STRT, LEN, LOOP, LEV, v0.48's fine STRT/LEN/LOOP against the take's length. A new FLEX track
+starts on BUF 01.
+- **Recorder trigs** (FUNC + VOICE opens FLEX REC, then [TRIG]): [TRIG] places a **one-shot** (records
+  once, then spent), FUNC + [TRIG] a trig that records every pass. On its step it records R.LEN steps
+  of the panel's SRC (a track, IN or MAIN) and CHAN into the track's buffer. Also on the [TRIG] LEDs.
+- **YES on REC SETUP** records into the buffer, at the next **Q.REC** boundary when set (NO cancels the
+  wait). **ARM OFF** keeps the trigs from firing.
+- A trig while a take runs is refused (BUSY), never cuts it; one started by hand refuses trigs until it
+  is done.
+- **FLEX REC's two pages** (LEFT/RIGHT), from the owner's mockups: REC TRIGS (the step page's 16 cells:
+  filled a trig, hatched a one-shot, struck a spent one; the buffer's state and what to do), REC SETUP
+  (SRC, CHAN, BUF, R.LEN, ARM, Q.REC; the buffer's state: REC, WAIT QREC, READY and its length, EMPTY).
+- An older project's BOUNCE track opens as a FLEX track with its recorder trigs.
+- FUNC + YES saves a take as a sample (BOUNCE's saving: TRIM, FILE NAME, ASSIGN).
+- Fixed on the way (BOUNCE had them): a take now uses its panel's SRC, CHAN and R.LEN; takes work on a
+  unit with nothing ever sent to the +Drive (BOUNCE refused them: NO +DRIVE POOL, and its voice played
+  silence there).
+Commits `3a6e414`, `83d53e2`, `29fa17e`, `fc94c44`, `331d9a0`, `ca80fea`, `2e2fe16`, `04d291f`.
+
+**The DSP guard gives the sample voices their time first** (NiKo: an ONESHOT crunchy beside SID and
+PERC at ~85 %): PERC and the Monomachine voices leave room for every sample voice sounding, and a
+sample voice the guard has to leave out stops until its next note instead of flickering. Commit `a33ff84`.
+
+**STRT/LEN/LOOP turned while a note plays no longer move its playhead** (impbox): the note reads on,
+the new values apply at the next trig or loop pass. Commit `cb1eaf1`.
+
+**Gate:** new steps `flexcore` (FLEX on the ColdFire: trigs through SAVE/LOAD, the one-shot spent once,
+ARM OFF, the LEDs, FLEX REC; replaces `bouncegone`) and `flex`, a one-shot recorder trig's take played
+by a note with the ColdFire and the DSP running together, checked link by link from the trig to the
+sound (the take equals the input; the render equals the take at the note's pitch), with three negative
+controls that fail at their link. The runner's guard scenario: 12 P-I + SID beside an ONESHOT, whose
+output equals its output alone. `fineknob` now compares each knob step with a stock FREQ step on the
+same inputs.
+
+**Tests**
+1. MACHINE SEL: FLEX after SLICE. Its page: BUF 01, EMPTY on the waveform.
+2. FUNC + VOICE: FLEX REC. LEFT/RIGHT between REC TRIGS and REC SETUP.
+3. REC SETUP: SRC IN, R.LEN 16. REC TRIGS: [TRIG 1] (hatched, a one-shot; its LED yellow). PLAY with
+   a sound into the inputs: one take of 16 steps, then the cell struck (spent).
+4. Close the panel, a note trig on the FLEX track: it plays the take. STRT/LEN/LOOP trim it.
+5. FUNC + [TRIG] a trig every pass: it records again each pass. ARM OFF: it doesn't.
+6. Q.REC 4 and YES on REC SETUP while playing: WAIT QREC, then the take at the boundary; NO while
+   waiting cancels.
+7. SRC TRK n (a track): the take is that track alone. SRC MAIN: the whole mix.
+8. FUNC + YES: the take saved as a sample.
+9. Two FLEX tracks on BUF 01 and BUF 02: each its own take.
+10. SID + three PERC tracks + an ONESHOT kick at a high load: the kick stays clean (or stops cleanly,
+    never crunchy).
+11. ONESHOT playing a long sample, turn STRT: the playhead keeps going; the next trig starts from the
+    new STRT.
+12. A v0.47 project with a BOUNCE track loads; the track is FLEX.
+13. Everything from v0.48.
+
+**Not verified on hardware:** the DSP's real timing (the coupled emulator approximates it; its EMAC
+is modelled for the smoother, ROADMAP item 11); the guard's balance at the unit's real load.
+
+**Known issues**
+- A note on the trig's own step while it records plays an almost empty take (playing a take as it
+  grows is not in v0.49; a finished take plays normally).
+- impbox's reports 2..6 (sample page 2's p-locks, R.LEN 64 with R.STRT, TUNE's rounding, the held TRK
+  inversion, clearing SLD/SLEN locks): the next fix release.
+- STRETCH: an old project that stopped all sound (impbox, not reproduced) and clicks looping short
+  segments: open.
+- Everything listed for v0.48.
 
 ## v0.48 — FINE (STRT/LEN/LOOP as the DT2's, THRES fixed, KEYBOARD kept, BOUNCE out)
 

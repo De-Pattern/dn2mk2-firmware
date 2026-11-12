@@ -349,9 +349,10 @@ def start(p: Prog, L: Layout) -> None:
     vs(p, "on", 0)
     vs(p, "fixed", 0)
     p.ld(0, C["type"])
-    # v0.44: BOUNCE is STRETCH on its buffer (the ColdFire writes the buffer half's SAMP)
-    p.iconst(12, SM.TYPE_OF["BOUNCE"])
-    p.if_(0, "EQ", 12, lambda: p.iconst(0, SM.TYPE_OF["STRETCH"]), kind="i")
+    # v0.49: FLEX is ONESHOT on its buffer (the ColdFire writes the buffer's SAMP; v0.44..v0.47
+    # BOUNCE was STRETCH, fitted to the take's steps)
+    p.iconst(12, SM.TYPE_OF["FLEX"])
+    p.if_(0, "EQ", 12, lambda: p.iconst(0, SM.TYPE_OF["ONESHOT"]), kind="i")
     vs(p, "mach", 0)
     p.ld(9, C["t"])
     PP.t146(p, 10, 9)
@@ -697,28 +698,17 @@ def live(p: Prog, L: Layout) -> None:
         v(p, 5, "hi")
         p.e("COMP(R4, R5);")
 
-        def inside():
-            v(p, 9, "pos")
-            v(p, 0, "mode")
-            p.iconst(12, 2)
-
-            def fwd():
-                v(p, 4, "lo")
-                p.iop(9, 9, "MAX", 4)
-                vs(p, "pos", 9)
-
-            def rev():
-                v(p, 5, "hi")
-                p.iconst(12, -1)
-                p.iop(12, 12, "+", 5)
-                p.iop(9, 9, "MIN", 12)
-                vs(p, "pos", 9)
-            p.if_(0, "GE", 12, fwd, rev, kind="i")
-
+        # v0.49 (impbox, the owner: "the start indicator should move with the start knob, but
+        # the sample playhead ... should accurately show where the playhead is"): the position
+        # is never moved here. A note keeps reading where it is; the new STRT/LEN/LOOP take
+        # effect at the next trig or the next loop pass (the wrap reads them), and a region
+        # whose end has passed the position ends or wraps it as it would anyway. Before, the
+        # position jumped to the region's start when STRT moved past it. (Safe: the position
+        # is inside the slot, 0..frames, from the note's start, and the region never leaves it.)
         def empty():
             p.iconst(0, 0)
             vs(p, "on", 0)
-        p._branch(lambda: s32(p.r[4]) - s32(p.r[5]) < 0, "LT", inside, empty)
+        p._branch(lambda: s32(p.r[4]) - s32(p.r[5]) >= 0, "GE", empty, None)
 
     def not_grid():
         p.iconst(12, SM.TYPE_OF["WERP"])
@@ -3029,7 +3019,16 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.jump("", other)
     p.place(body)
     from ..perc import guard as G
-    G.around(p, L.C["t"], G.COST_SMP, PP.BUFFERS, lambda: voice(p, L))   # v0.27: if it fits in the frame
+    def stop():                              # v0.49: left out twice in a note: ended until the next
+        p.ld(9, L.C["t"])
+        p.lsh(12, 9, 7)
+        p.iconst(11, L.state)
+        p.iop(12, 11, "+", 12)
+        p.seti(2, 12)
+        p.iconst(0, 0)
+        vs(p, "on", 0)
+    G.around(p, L.C["t"], G.COST_SMP, PP.BUFFERS, lambda: voice(p, L),   # v0.27: if it fits in the frame
+             struck=G.STRUCK, stop=stop)
     p.jump("", nxt)
     if any(ty not in ours for ty in SM.TYPES):
         p.place(mute)

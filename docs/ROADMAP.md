@@ -16,7 +16,47 @@ enough of a plan that it can be picked up cold. Upstream's own parked ideas are 
 - **Stereo sampling: not planned** (owner). The DN2's tracks are mono until the stock chain pans
   them; stereo would mean two voices a note or bypassing the stock voice chain, twice the memory
   and the sample voices' DSP time, and every sample machine changed. Not what this box is for.
+- **After v0.49, before v0.50's work: a full stereo assessment** (owner, 2026-11-10; a study, not
+  an implementation): what stereo would take end to end -- resampling (MAIN, TRK, IN), playback on
+  every sample machine, importing without folding to mono (the import tool, the pool and +Drive
+  formats) -- what it would cost (DSP time, memory, polyphony, ColdFire room), what would have to
+  be removed or changed, how long it would take, and how certain we could be that it works (what
+  the emulator can prove, what only hardware can).
 - After v0.48: the gate split into runs that fit the two-hour job limit and resume themselves.
+
+## impbox's reports, 2026-11-10 (owner: the playhead first)
+
+1. **The playhead moves with STRT while a sample plays** (owner: "the start indicator should move with
+   the start knob, but the sample playhead indicator shouldn't move with it ... it should accurately
+   show where the playhead is on the sample as it reads it"). **Fixed in v0.49** (cb1eaf1): the DSP
+   no longer moves a sounding note's position when STRT/LEN/LOOP turn; they apply at the next trig
+   or loop pass.
+2. p-locks are not visible on sample page 2.
+3. R.LEN 64 with R.STRT (on PLAY): the take does not stop after 64 steps.
+4. TUNE's text rounds badly: -0.01 shows -1, -4.00 shows -5.
+5. Holding TRK inverts the track area, but a sample track's text is not inverted.
+6. p-locks on SLD/SLEN cannot be cleared.
+7. (request) SLD/SLEN settable without a lock (a default), or the lock icon as FILL/COND show.
+
+1..6 into v0.49 where small and contained, else a fix release before v0.50; 7 for the owner to schedule.
+Owner, 2026-11-11: proceed with v0.49 (the playhead fix in it); 2..6 to the fix release.
+
+8. STRETCH, an old project on v0.48 (impbox, 2026-11-11): plays once briefly, then all sound on every
+   track stops until reboot; not reproduced on a new project (the owner: none on v0.48 with a new
+   project). The sampler model plays STRETCH/REPITCH/ONESHOT cleanly with STRT/LEN at every awkward
+   stored word (old 127, 120.00, out of range). impbox is uploading a video. Owner: "not worry about
+   that specifically so much" for now.
+9. STRETCH clicks when looping short segments, more with higher BARS (the owner, from v0.46: at the
+   loop's end and at a trig after STRT moved). Minor; "in the back of our minds".
+10. Gate gaps (from 8): an old-projects step (projects saved on earlier firmware, every sample machine,
+   played in the coupled emulator: sound never stops) and a full-range check of every stored control
+   word through the DSP (finite output, bounded position and time).
+11. The coupled emulator's EMAC (found 2026-11-11 on v0.49's FLEX test): digikit's unicorn halves every
+   fractional product (0.5 x 0.5 = 0x10000000), so the stock smoother 0x400db12a decays every voice
+   parameter to ~3% (FLEX played reversed, ~52 semitones low). emu_slides.py already modelled the
+   smoother; emu_coupled_flex now does too. Other ColdFire EMAC users (the modulation apply, maybe the
+   note) are still emulated wrong: fix the EMAC itself (or model each), then put every coupled test on
+   it. emu_coupled_recplay (not a gate step) fails at 6a on v0.48 and v0.49 alike: out of date.
 
 ## After v0.40 (owner, 2026-11-02 / 11-03)
 
