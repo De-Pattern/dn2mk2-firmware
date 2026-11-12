@@ -310,6 +310,12 @@ int rec_view __attribute__((section(".data"))) = 0;      /* v0.41's REC TRIGS vi
  * have passed with no second YES */
 int bn_page __attribute__((section(".data"))) = 0;
 int bn_sub __attribute__((section(".data"))) = 0;          /* v0.49 FLEX REC: 0 REC TRIGS, 1 REC SETUP */
+/* v0.51 (owner; Error Kit: "how do I delete a buffer?"): FUNC + NO on REC SETUP asks CLEAR BUF n?
+ * for the track's buffer (the one BUF names); YES empties it (rectrig.c rt_clear), NO or any
+ * other key leaves it. bn_cleared: 1 emptied, 2 refused (it was recording), at bn_cleared_at */
+int bn_clear_ask __attribute__((section(".data"))) = 0;
+int bn_cleared __attribute__((section(".data"))) = 0;
+u32 bn_cleared_at __attribute__((section(".data"))) = 0;
 u32 bn_yes_at __attribute__((section(".data"))) = 0;    /* a YES waiting for a second (0: none) */
 u32 bn_said_at __attribute__((section(".data"))) = 0;   /* the line's last word, when (ARMED n) */
 int bn_said_n __attribute__((section(".data"))) = 0;
@@ -429,6 +435,7 @@ void bn_open(void)                              /* the screen opened: the page s
     if ((u32)bn_page >= bn_pages())
         bn_page = 0;
     bn_yes_at = 0;
+    bn_clear_ask = 0;
 }
 
 void rec_yes(void)
@@ -1622,6 +1629,29 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         if (it[0] != IT_KEY)
             return (u32)it;
         int press = (flags & F_PRESS) && !(flags & F_RELEASE);
+        if (bn_clear_ask && press) {            /* v0.51: CLEAR BUF n? up: YES empties it, any other key leaves it */
+            bn_clear_ask = 0;
+            smp_overlay_dirty = 1;
+            if (code == K_YES || code == K_NO) {
+                if (code == K_YES && bn_active()) {
+                    extern int rt_clear(u32 b);
+                    extern u32 rt_buf_of(u32 t);
+                    bn_cleared = rt_clear(rt_buf_of(UI_TRACK_B)) ? 1 : 2;
+                    bn_cleared_at = FRAMES | 1u;
+                }
+                eaten |= 1u << code;
+                it[0] = IT_DROP;
+                return (u32)it;
+            }
+        }
+        if (bn_active() && bn_sub && press && code == K_NO && smp_func_held) {   /* v0.51: FUNC + NO: CLEAR BUF n? */
+            bn_clear_ask = 1;
+            bn_yes_at = 0;
+            smp_overlay_dirty = 1;
+            eaten |= 1u << code;
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
         if (bn_active() && press && code >= K_TRIG1 && code <= K_TRIG1 + 15) {   /* v0.44: a recorder trig */
             u32 step = (u32)bn_page * 16u + (u32)(code - K_TRIG1);
             unsigned char *table = sl_ui_table_now();

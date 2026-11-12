@@ -2299,6 +2299,18 @@ static void bn_view_draw(void *c, int heard)
     u32 t = UI_TRACK;
     u32 b = rt_buf_of(t);
     char tl[24];
+    /* v0.51 (owner; Error Kit: "how do I delete a buffer?"): FUNC + NO on REC SETUP asks before
+     * the track's buffer is emptied (rec.c bn_clear_ask, rectrig.c rt_clear) */
+    extern int bn_clear_ask, bn_cleared;
+    extern u32 bn_cleared_at;
+    if (bn_sub && bn_clear_ask) {
+        LABEL_TEXT(c, LABEL_FONT, 2, 57, 0, 0, 0, "T%02d FLEX REC SETUP", (int)t + 1);
+        hline(c, 0, 127, 54, 0);
+        TEXT(c, FONT, 64, 38, CENTRED, "CLEAR BUF %02d?", (int)b + 1);
+        LABEL(c, 64, 26, "%s", "ITS TAKE IS GONE");
+        LABEL(c, 64, 12, "%s", "YES / NO");
+        return;
+    }
     if (bn_sub) {                                /* REC SETUP */
         LABEL_TEXT(c, LABEL_FONT, 2, 57, 0, 0, 0, "T%02d FLEX REC SETUP", (int)t + 1);
         hline(c, 0, 127, 54, 0);
@@ -2350,7 +2362,9 @@ static void bn_view_draw(void *c, int heard)
             int tenths, steps, st = rt_state((int)b, &tenths, &steps);
             int x = 125, y = 57;
             (void)steps;
-            if (rt_req_waiting())
+            if (bn_cleared == 2 && FRAMES_NOW - bn_cleared_at < 3000u)   /* v0.51: CLEAR while it records */
+                LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%s", "BUSY");
+            else if (rt_req_waiting())
                 LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%s", "WAIT");
             else if (st == 1) {
                 fill(c, 94, y + 1, 96, y + 3);

@@ -245,6 +245,8 @@ static void refuse(u32 track, u32 why)
 
 /* a recorder trig on TRACK's STEP, into buffer B: the audio interrupt (rt_frame) */
 u32 rt_last_key D;                      /* the last trig's track << 8 | step (the checks) */
+static u32 rt_last_bytes D = 0;         /* v0.51: the last take's bytes and steps (rt_clear) */
+static u16 rt_last_steps D = 0;
 int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
 {
     u32 now = FRAMES;
@@ -293,6 +295,8 @@ int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
     rt_rplace[ix] = place;
     rt_rbytes[ix] = frames * 2u;
     rt_rsteps[ix] = (u16)steps;
+    rt_last_bytes = frames * 2u;
+    rt_last_steps = (u16)steps;
     rt_cur = (int)b;
     rt_cur_end = now + frames / 32u + 3u;
     rt_nx_room[b] = 0;                          /* used: rt_poll finds the next */
@@ -302,6 +306,33 @@ int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
     rt_fired_trk = (u8)track;
     rt_play[b] = 0;                             /* v0.49: heard as it records (no Q.PLAY) */
     rt_pend[b] = 0;
+    return 1;
+}
+
+/* v0.51 (owner; Error Kit: "how do I delete a buffer?"): buffer B emptied (rec.c, CLEAR BUF n?
+ * answered YES): its takes forgotten, so its FLEX tracks play nothing (rt_bounce_samp: SAMP OFF,
+ * as after a project change) and the allocator may use its place again. A take saved from it
+ * (FUNC + YES) is a pool slot's and stays. -> 0, refused, while it records (the DSP is writing
+ * it). rt_trig runs in the audio interrupt, which never stops partway for this task: if one
+ * started a take of B between the check and the clearing, its take is put back */
+int rt_clear(u32 b)
+{
+    if (b >= BUF_N)
+        return 0;
+    if (rt_cur == (int)b && (int)(FRAMES - rt_cur_end) < 0)
+        return 0;
+    u32 g = rt_gen;
+    for (int h = 0; h < 2; h++) {
+        rt_rbytes[HALF_IX(b, h)] = 0;
+        rt_rsteps[HALF_IX(b, h)] = 0;
+    }
+    rt_play[b] = 0;
+    rt_pend[b] = 0;
+    if (rt_gen != g && rt_cur == (int)b) {      /* a trig of B fired as it was cleared: its take stands */
+        rt_rbytes[HALF_IX(b, 0)] = rt_last_bytes;
+        rt_rsteps[HALF_IX(b, 0)] = rt_last_steps;
+    }
+    rt_dirty = 1;
     return 1;
 }
 

@@ -27,9 +27,13 @@ of each parameter (docs/ROADMAP.md item 11). Run raw, link 7 fails (measured 202
 
 Negative controls (--break), each measured 2026-11-11: notrig (no [TRIG 1]: fails at 1b),
 nosamp (track 1's voices' SAMP zeroed in the frame: fails at 6, silence), wrongbuf (the SAMP word
-one buffer on: fails at 6, silence: the next buffer is empty).
+one buffer on: fails at 6, silence: the next buffer is empty), v0.51 noclear (NO for CLEAR's
+YES: fails at 9b).
 
-Usage: emu_coupled_flex.py --build out/v049.syx [--break notrig|nosamp|wrongbuf]
+v0.51, links 9a..9c: CLEAR BUF n? (FUNC + NO on REC SETUP): NO keeps the take, YES empties the
+buffer, and a note on the track no longer selects it.
+
+Usage: emu_coupled_flex.py --build out/v049.syx [--break notrig|nosamp|wrongbuf|noclear]
        [--raw-smoother] [--json OUT]"""
 
 from __future__ import annotations
@@ -103,7 +107,7 @@ def main() -> int:
     p.add_argument("--layout", default=str(HERE.parent / "src/dnfw/mods/waverider_code.json"))
     p.add_argument("--stock", default=str(HERE.parent.parent / "Digitone_II_OS1.11.syx"))
     p.add_argument("--snapshot", default=str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
-    p.add_argument("--break", dest="brk", default=None, choices=("notrig", "nosamp", "wrongbuf"))
+    p.add_argument("--break", dest="brk", default=None, choices=("notrig", "nosamp", "wrongbuf", "noclear"))
     p.add_argument("--json", default=None)
     p.add_argument("--raw-smoother", action="store_true",
                    help="leave the stock smoother to the emulated EMAC (its fractional products halved): "
@@ -362,6 +366,40 @@ def main() -> int:
         link("7. the render is the take at the note's pitch, from its start", rate is not None and corr > 0.95
              and lag is not None and lag <= 8, f"note {note}, TUNE {tune:+d}: rate {rate}; corr {corr:.4f} with the "
              f"head {lag} frames in")
+    # v0.51 (owner; Error Kit: "how do I delete a buffer?"): FUNC + NO on REC SETUP asks CLEAR BUF
+    # 01?; NO leaves the take; FUNC + NO, YES empties buffer 1: the voice's SAMP goes OFF and a
+    # note on the track plays nothing from it
+    held(17, True); held(49, True); held(49, False); held(17, False)   # FUNC + VOICE: FLEX REC
+    tap(15)                                                      # RIGHT: REC SETUP
+    rb0 = c.long(lay["rt_rbytes"])
+    held(17, True); tap(12); held(17, False)                     # FUNC + NO
+    ask = c.long(lay["bn_clear_ask"])
+    c.panel.screen("v051_clear_ask")
+    tap(12)                                                      # NO: left as it was
+    rb_no = c.long(lay["rt_rbytes"])
+    link("9a. v0.51: FUNC + NO on REC SETUP asks CLEAR BUF 01?, NO keeps the take",
+         rb0 != 0 and ask == 1 and c.long(lay["bn_clear_ask"]) == 0 and rb_no == rb0
+         and c.long(lay["rec_overlay"]) != 0, f"bytes {rb0}, asked {ask}, after NO {rb_no}, panel {c.long(lay['rec_overlay'])}")
+    held(17, True); tap(12); held(17, False)                     # FUNC + NO again
+    tap(12 if a.brk == "noclear" else 10)                        # YES (the negative control: NO)
+    c.panel.screen("v051_cleared")
+    rb_yes = c.long(lay["rt_rbytes"])
+    samp = c.call(lay["rt_bounce_samp"], T)[0]
+    link("9b. .. YES empties it: no take, the track's SAMP OFF (rt_bounce_samp 0)",
+         rb_yes == 0 and samp == 0 and c.long(lay["bn_cleared"]) == 1, f"bytes {rb_yes}, SAMP {samp}, "
+         f"bn_cleared {c.long(lay['bn_cleared'])}")
+    tap(12)                                                      # NO: the panel closed
+    c.machine.pc = P.press(c.machine.m, c.panel.profile, *key(33))
+    fw2 = []
+    for n in range(20):
+        if not c.period():
+            break
+        vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
+        fw2 += [struct.unpack(">H", c.read(CF_FRAME + 168 + 2 * SLOT_SAMP + 146 * v, 2))[0] for v in range(16) if vt[v] == T]
+    c.machine.pc = P.release(c.machine.m, c.panel.profile, *key(33))
+    c.periods(2)
+    link("9c. .. a note on the track no longer selects buffer 1", fw2 and SM.BUF_SAMP0 << 8 not in fw2,
+         f"SAMP words {sorted(hex(x) for x in set(fw2))}")
     # v0.50: the SYN page's BUF (knob D, record 244) pushed and turned: what the stock knob path writes
     # is what rt_buf_of reads (v0.44..v0.49 read slot 49 instead)
     w0 = struct.unpack(">H", c.read(snd + 20 + 2 * 35, 2))[0] >> 8
