@@ -25,6 +25,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "src"))
 
 from emulib.image import differences                           # noqa: E402
+from emulib import bounded                                      # noqa: E402
 from emulib.machine import Machine                             # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
@@ -94,14 +95,7 @@ def main() -> int:
         machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
         machine.write(SENTINEL, bytes.fromhex("4e714e71"))
         uc.reg_write(K.UC_M68K_REG_A7, sp)
-        stepper = getattr(machine.m, "_fast_stepper_obj", None)
-        if stepper is not None:
-            stepper.left = 1 << 40
-        try:
-            uc.emu_start(fn, until if until is not None else SENTINEL, count=limit)
-        finally:
-            if stepper is not None:
-                stepper.left = 0
+        bounded.run(uc, machine.m, fn, until if until is not None else SENTINEL, limit)
         d0 = uc.reg_read(K.UC_M68K_REG_D0)
         pc = uc.reg_read(K.UC_M68K_REG_PC)
         for r, v in zip(regs, saved):

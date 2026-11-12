@@ -68,6 +68,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from emulib.image import differences                           # noqa: E402
+from emulib import bounded                                      # noqa: E402
 from emulib.machine import SNAP, Machine                       # noqa: E402
 from emulib.panel import DOWN, LEFT, NO, RIGHT, UP, YES, Panel  # noqa: E402
 
@@ -2238,14 +2239,9 @@ def main() -> int:
                 machine.write(sp, struct.pack(">HHI", 0x4000 | (SEQ_VECTOR << 2), 0x2000, SENTINEL))
                 machine.write(SENTINEL, bytes.fromhex("4e714e71"))
                 uc.reg_write(K.UC_M68K_REG_A7, sp)
-                stepper = getattr(machine.m, "_fast_stepper_obj", None)
-                if stepper is not None:
-                    stepper.left = 1 << 40
                 try:
-                    uc.emu_start(SEQ_ISR, SENTINEL, count=3_000_000)
+                    bounded.run(uc, machine.m, SEQ_ISR, SENTINEL, 3_000_000)
                 finally:
-                    if stepper is not None:
-                        stepper.left = 0
                     for r, v in zip(regs, saved):
                         uc.reg_write(r, v)
                     uc.reg_write(K.UC_M68K_REG_PC, saved_pc)

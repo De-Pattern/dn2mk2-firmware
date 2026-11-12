@@ -83,6 +83,7 @@ class Paths:
 
     # ---- calls into the firmware from inside the UI's run (the UI's PC and SR put back) ----
     def call(self, fn, *args):
+        from emulib import bounded                                  # noqa: PLC0415 (run from emu_slides)
         K, uc, m = self.K, self.uc, self.m
         regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
         saved = [uc.reg_read(r) for r in regs]
@@ -92,14 +93,7 @@ class Paths:
         m.write(sp, struct.pack(">I", sentinel) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
         m.write(sentinel, bytes.fromhex("4e714e71"))
         uc.reg_write(K.UC_M68K_REG_A7, sp)
-        stepper = getattr(m.m, "_fast_stepper_obj", None)
-        if stepper is not None:
-            stepper.left = 1 << 40
-        try:
-            uc.emu_start(fn, sentinel, count=50_000_000)
-        finally:
-            if stepper is not None:
-                stepper.left = 0
+        bounded.run(uc, m.m, fn, sentinel, 50_000_000)
         d0, pc = uc.reg_read(K.UC_M68K_REG_D0), uc.reg_read(K.UC_M68K_REG_PC)
         for r, v in zip(regs, saved):
             uc.reg_write(r, v)

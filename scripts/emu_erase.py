@@ -61,6 +61,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from emulib.image import differences                           # noqa: E402
+from emulib import bounded                                      # noqa: E402
 from emulib.machine import Machine                             # noqa: E402
 
 BLK_READ, BLK_WRITE, BLK_TRIM = 0x4012C59A, 0x4012C780, 0x4012C4B2
@@ -304,14 +305,9 @@ def guest_call(machine, fn, *args, limit=50_000_000):
     machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
     machine.write(SENTINEL, bytes.fromhex("4e714e71"))
     uc.reg_write(K.UC_M68K_REG_A7, sp)
-    stepper = getattr(machine.m, "_fast_stepper_obj", None)
-    if stepper is not None:
-        stepper.left = 1 << 40
     try:
-        uc.emu_start(fn, SENTINEL, count=limit)
+        bounded.run(uc, machine.m, fn, SENTINEL, limit)
     finally:
-        if stepper is not None:
-            stepper.left = 0
         d0 = uc.reg_read(K.UC_M68K_REG_D0)
         for r, v in zip(regs, saved):
             uc.reg_write(r, v)

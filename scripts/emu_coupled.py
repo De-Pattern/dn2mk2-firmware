@@ -34,6 +34,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "src"))
+from emulib import bounded                                      # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 CF_FRAME = 0x80005E60                   # the frame as the ColdFire builds it (16-bit BE)
@@ -170,14 +171,9 @@ class Coupled:
         m.write(SENTINEL, bytes.fromhex("4e714e71"))
         uc.reg_write(K.UC_M68K_REG_A7, sp)
         stepper = getattr(m.m, "_fast_stepper_obj", None)
+        blocks = bounded.run(uc, m.m, fn, until if until is not None else SENTINEL, limit)
         if stepper is not None:
-            stepper.left = 1 << 40
-        try:
-            uc.emu_start(fn, until if until is not None else SENTINEL, count=limit)
-        finally:
-            if stepper is not None:
-                self.last_call_units = ((1 << 40) - stepper.left) * stepper.per_block
-                stepper.left = 0
+            self.last_call_units = blocks * stepper.per_block
         d0 = uc.reg_read(K.UC_M68K_REG_D0)
         pc = uc.reg_read(K.UC_M68K_REG_PC)
         for r, v in zip(self.regs, saved):
@@ -363,14 +359,7 @@ class Coupled:
             m.write(sp, struct.pack(">HHI", 0x4000 | (SEQ_VECTOR << 2), 0x2000, SENTINEL))
             m.write(SENTINEL, bytes.fromhex("4e714e71"))
             uc.reg_write(K.UC_M68K_REG_A7, sp)
-            stepper = getattr(m.m, "_fast_stepper_obj", None)
-            if stepper is not None:
-                stepper.left = 1 << 40
-            try:
-                uc.emu_start(SEQ_ISR, SENTINEL, count=3_000_000)
-            finally:
-                if stepper is not None:
-                    stepper.left = 0
+            bounded.run(uc, m.m, SEQ_ISR, SENTINEL, 3_000_000)
             for r, v in zip(self.regs, saved):
                 uc.reg_write(r, v)
             uc.reg_write(K.UC_M68K_REG_PC, pc0)

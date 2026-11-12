@@ -58,6 +58,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from emulib.image import differences                    # noqa: E402
+from emulib import bounded                                      # noqa: E402
 from emulib.machine import Machine                      # noqa: E402
 from emulib.panel import NO, YES, Panel                 # noqa: E402
 
@@ -182,14 +183,9 @@ def main() -> int:
         m.write(sp, struct.pack(">HHI", 0x4000 | (SEQ_VECTOR << 2), 0x2000, SENTINEL))
         m.write(SENTINEL, bytes.fromhex("4e714e71"))
         uc.reg_write(K.UC_M68K_REG_A7, sp)
-        st = getattr(m.m, "_fast_stepper_obj", None)
-        if st is not None:
-            st.left = 1 << 40
         try:
-            uc.emu_start(SEQ_ISR, SENTINEL, count=3_000_000)
+            bounded.run(uc, m.m, SEQ_ISR, SENTINEL, 3_000_000)
         finally:
-            if st is not None:
-                st.left = 0
             for r, v in zip(regs, saved):
                 uc.reg_write(r, v)
             uc.reg_write(K.UC_M68K_REG_PC, pc)
@@ -201,14 +197,9 @@ def main() -> int:
         m.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x) for x in args))
         m.write(SENTINEL, bytes.fromhex("4e714e71"))
         uc.reg_write(K.UC_M68K_REG_A7, sp)
-        st = getattr(m.m, "_fast_stepper_obj", None)
-        if st is not None:
-            st.left = 1 << 40
         try:
-            uc.emu_start(fn, SENTINEL, count=5_000_000)
+            bounded.run(uc, m.m, fn, SENTINEL, 5_000_000)
         finally:
-            if st is not None:
-                st.left = 0
             for r, v in zip(regs, saved):
                 uc.reg_write(r, v)
             uc.reg_write(K.UC_M68K_REG_PC, pc)

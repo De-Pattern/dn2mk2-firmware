@@ -33,6 +33,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from emulib.image import differences                           # noqa: E402
+from emulib import bounded                                      # noqa: E402
 from emulib.machine import Machine                             # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
@@ -269,14 +270,7 @@ def main() -> int:
         uc.reg_write(K.UC_M68K_REG_A7, sp)
         for r, v in (set_regs or {}).items():
             uc.reg_write(getattr(K, f"UC_M68K_REG_{r}"), v & 0xFFFFFFFF)
-        stepper = getattr(machine.m, "_fast_stepper_obj", None)
-        if stepper is not None:
-            stepper.left = 1 << 40
-        try:
-            uc.emu_start(fn, until if until is not None else SENTINEL, count=limit)
-        finally:
-            if stepper is not None:
-                stepper.left = 0
+        bounded.run(uc, machine.m, fn, until if until is not None else SENTINEL, limit)
         out = {r: uc.reg_read(getattr(K, f"UC_M68K_REG_{r}")) for r in
                ("D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "A0", "A1", "A2", "A3", "A4", "A5", "A6")}
         pc = uc.reg_read(K.UC_M68K_REG_PC)
