@@ -1910,6 +1910,11 @@ def step_smp(init, sound, machines, blocks) -> dict:
     t0 = time.perf_counter()
     runs["kick"] = rb(init, frames(ONE, smp_words()), blocks)
     runs["kick_up"] = rb(init, frames(ONE, smp_words({SM.TUNE_REC: 72})), blocks)
+    # v0.51 (impbox: TUNE played whole semitones, -0.01 a semitone down, 0.5 as 0): TUNE's word with
+    # a fraction, +0.50 (0x4080) and -0.01 (0x3ffd): the rate is 2^(word's semitones / 12)
+    tslot = SM.RECORDS[SM.TUNE_REC][0]
+    runs["kick_half"] = rb(init, frames(ONE, {**smp_words(), tslot: 0x4080}), blocks)
+    runs["kick_hair"] = rb(init, frames(ONE, {**smp_words(), tslot: 0x3FFD}), blocks)
     # four sample voices, PERC and a machine with no renderer side by side: track 0 the
     # snare reversed, 1 GRID slicing BEAT, 2 PERC TRX-SD, 3 WERP (silent), 4 the hat
     # looping forward, 5 FM Tone
@@ -2011,6 +2016,31 @@ def step_smp(init, sound, machines, blocks) -> dict:
                                    for k, r in runs.items() if r["ok"]},
          "instructions_per_block_mixed": round(mx.get("instructions", 0) / max(blocks, 1)),
          "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}
+    def rate_of(run, ref):
+        """the rate a render plays its sample at, against the same sample at rate 1 (ref): the r
+        whose resampling of ref best matches it, 0.9..1.1 in steps of 1/20000"""
+        a, b = smp_series(run, 0), smp_series(ref, 0)
+        n = min(len(a), len(b)) * 9 // 10
+        if n < 512:
+            return None
+        best = (None, float("inf"))
+        for k in range(-2000, 2001):
+            r = 1.0 + k / 20000.0
+            e = 0.0
+            for i in range(64, n, 7):
+                x = i * r
+                m = int(x)
+                if m + 1 >= len(b):
+                    e = float("inf")
+                    break
+                d = a[i] - (b[m] + (b[m + 1] - b[m]) * (x - m))
+                e += d * d
+            if e < best[1]:
+                best = (r, e)
+        return best[0]
+    fine_rates = [(rate_of(runs["kick_half"], runs["kick"]), 2 ** (0.5 / 12)),
+                  (rate_of(runs["kick_hair"], runs["kick"]), 2 ** (-3 / 256 / 12))] \
+        if runs["kick"]["ok"] and runs["kick_half"]["ok"] and runs["kick_hair"]["ok"] else [(None, 1.0)]
     checks = {
         "every run returns every block": ok_runs,
         "the sample machines are entered from PERC's tail, once a block": runs["kick"].get("smp_entries") == blocks,
@@ -2019,6 +2049,9 @@ def step_smp(init, sound, machines, blocks) -> dict:
             ok_runs and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for v in exact.values()),
         "v0.18: ONESHOT plays KICK from the pool as the DT2's reader does (max error < 2^-13)": kick_err < 2.0 ** -13,
         "TUNE +12 is higher (more zero crossings)": zero_crossings(up) > zero_crossings(kick) > 0,
+        "v0.51: TUNE's fraction reaches the rate: +0.50 plays at 2^(0.5/12), -0.01 at 2^(-3/256/12) "
+        "(each within 0.1 %; v0.50 played 1 and 2^(-1/12))":
+            all(r is not None and abs(r - w) < 0.001 * w for r, w in fine_rates),
         "in the mixed run, GRID's slice and the looping hat sound (peak > 0.05); the reversed "
         "snare, which starts at its quiet end, sounds (> 0.01) and grows":
             bool(n["peaks_mixed"]) and n["peaks_mixed"][1] > 0.05 and n["peaks_mixed"][4] > 0.05

@@ -209,10 +209,19 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
     # the controls this block
     p.ld(9, C["t"])
     PP.t146(p, 10, 9)
-    ctl(p, 4, SM.TUNE_REC, 10)
-    p.iconst(12, -60)
-    p.iop(4, 12, "+", 4)                     # semitones, -60..+60
-    tofloat(p, 5, 4, 1.0 / 12.0)
+    # v0.51 (impbox: "sample tune is truncated to int though shows decimal places .. -0.01 plays one
+    # semitone lower, 0.5 plays the same as 0.0"; a 0.01-deep TUNE LFO stepped a semitone at a time):
+    # the whole word, its low byte the semitone's fraction in 1/256 (what the screen shows and the
+    # LFO moves), not the word >> 8 that floored it. 0x4000 is 0 (record 238: value 64 - lo 4 = 60)
+    slot = SM.RECORDS[SM.TUNE_REC][0]
+    PP.half(p, 4, PM.frame_offset(slot), 10)
+    p.iconst(12, 4 << 8)
+    p.iop(4, 4, "MAX", 12)
+    p.iconst(12, 124 << 8)
+    p.iop(4, 4, "MIN", 12)
+    p.iconst(12, -(64 << 8))
+    p.iop(4, 12, "+", 4)                     # semitones x 256, -60.00..+60.00
+    tofloat(p, 5, 4, 1.0 / (12.0 * 256.0))
     p.st(C["tune"], 5)
     ctl(p, 4, SM.LEV_REC, 10)
     tofloat(p, 5, 4, 1.0 / SM.LEV_UNITY)
