@@ -184,7 +184,21 @@ static u32 rec_length(void)
     u32 bpm120 = CTL_FRAME[TEMPO_WORD];
     if (bpm120 < 1200)
         bpm120 = 14400;
-    u32 f = (u32)rec_rlen * (86400000u / bpm120);
+    /* v0.52 (impbox: "R.LEN 64 with R.STRT on PLAY: the take does not stop after 64 steps"): the
+     * steps at the pattern's scale, as the sequencer plays them (slide.c ticks_a_step: 6 ticks a
+     * step at 1x; 2x 3, 1/2x 12 ...). v0.15..v0.51 counted 1x sixteenths: at 2x, 64 steps took
+     * twice the pattern's 64 */
+    u32 ticks = 6;
+    const u8 *pat = (const u8 *)*(volatile u32 *)0x42C5A9A0u;   /* the pattern playing */
+    if (pat) {
+        signed char i = (signed char)pat[122202];
+        if (i >= 0 && i <= 6) {
+            u32 n = ((const u8 *)0x401F6B08u)[4 * i + 3];
+            if (n >= 3 && n <= 48)
+                ticks = n;
+        }
+    }
+    u32 f = (u32)rec_rlen * ticks * (86400000u / bpm120) / 6u;
     return f > full ? full : f;
 }
 
