@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.50** | 2026-11-12 | FLEX takes of a track at the track's level (v0.49's were very quiet); GAIN on REC SETUP (G, -24..+38 dB) with a level meter on H; BUF fixed (the take was read 14 slots off) and C BUF on REC SETUP; impbox's fixes: TUNE rounds, SMP readable with TRK held, page-2 locks shown, E/F pushed clear SLD/SLEN; gate: SHARC step flexlevel, the link steps ~20x faster | `builds/v0.50-LEVEL/` | yes |
+| **v0.51** | 2026-11-12 | lighter Monomachine and Machinedrum machines, not bit for bit (SID -64 %, DDRW -43 %, DENS -40 %, VO-6 -9 %, TRX-CY -33 %, TRX-MA -26 %), so more voices before the guard drops one; FLEX REC's settings per track, saved with the kit; CLEAR BUF (FUNC + NO); REC SETUP's state in the left column; sample TUNE plays its fine values and is drawn as WaveTone's ruler | `builds/v0.51-LIGHTER/` | yes |
+| v0.50 | 2026-11-12 | FLEX takes of a track at the track's level (v0.49's were very quiet); GAIN on REC SETUP (G, -24..+38 dB) with a level meter on H; BUF fixed (the take was read 14 slots off) and C BUF on REC SETUP; impbox's fixes: TUNE rounds, SMP readable with TRK held, page-2 locks shown, E/F pushed clear SLD/SLEN; gate: SHARC step flexlevel, the link steps ~20x faster | `builds/v0.50-LEVEL/` | yes |
 | v0.49 | 2026-11-11 | FLEX, the live-buffer machine that replaces BOUNCE: recorder trigs on steps ([TRIG] a one-shot, FUNC + [TRIG] every pass) record a track, IN or MAIN into one of 8 buffers for R.LEN steps, and the FLEX track plays the take with its own notes (ONESHOT's page, BUF 01..08); FLEX REC's two pages (REC TRIGS, REC SETUP); Q.REC; old BOUNCE tracks open as FLEX; the DSP guard gives sample voices their time first and stops a dropped one cleanly; STRT/LEN/LOOP turned mid-note no longer move the playhead | `builds/v0.49-FLEX/` | yes |
 | v0.48 | 2026-11-10 | STRT/LEN/LOOP as the DT2's fine controls (0.00..120.00, the stock fine knob, push + turn whole steps; the DSP plays from that exact place); THRES fixed (the meter's scale, live while armed); KEYBOARD kept through grid recording; turned values shown on the sample pages; SLICE's keys as the DT2's; the RECORDER's text inside its boxes; BOUNCE's code out (old projects load, the track silent); gate: the first step on both processors together (THRES), fineswap, fineknob | `builds/v0.48-FINE/` | yes |
 | v0.47 | 2026-11-09 | the Monomachine's TUNE reads -64..+63 (0 in tune), FUNC + turn a semitone at a time; the TRIM preview 6 dB quieter (back at v0.37..v0.39's level); the RECORDER's INTO box smaller; BOUNCE out of MACHINE SEL (old BOUNCE tracks still load); gate: its reuse cache refuses passes from another worktree | `builds/v0.47-TUNED/` | yes |
@@ -88,6 +89,104 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.51 — LIGHTER (lighter Monomachine and Machinedrum machines, FLEX per track, CLEAR, fine TUNE)
+
+`DN2mod_v0.51_LIGHTER_OS1.11.syx`
+sha256 `c48ad00ff2fc5f873903789dad9aaa58eadcbc1782f0107525e4af726bd3c0ff`
+Gate: CLEARED TO FLASH, 2026-11-12 (51 gates; 47 reused; run step by step under the two-hour job limit, each reused pass one of this same build whose every input is byte-identical). Source: commit `55b4aee` (branch `v051`). Docs: `docs/mnm-trim.md`.
+
+Everything in v0.50, plus (each with the commit that adds it, so it can be taken out alone):
+
+**Lighter machines** (owner, ROADMAP: "we can make them sound good without being exact replicas").
+They are no longer bit for bit the originals. Each is held to the original's level and octave-band
+shape in the tests, with a negative control. Each change is one constant (`docs/mnm-trim.md`), so it
+can be reverted on its own.
+
+| machine | change | DSP |
+|---|---|---|
+| SID 6581 | 4x instead of 12x | -64 % |
+| DPRO-DDRW | read at 1x from the 2x mip level, no 2:1 decimator | -43 % |
+| DPRO-DENS | the same | -40 % |
+| VO-6 | series formants in float | -9 % |
+| TRX-CY, MA, CH, OH, CB, S2 | hp1/res2 filters in float | CY -33 %, MA -26 % |
+
+- **Unchanged:** DPRO-WAVE (2x measured and refused) and TRX-CP (kept exact).
+- **More voices:** the DSP guard decides the voice count, so lighter machines play more voices before
+  one drops.
+
+Commits `fde9259`, `8f3a51d`.
+
+**FLEX REC's settings per track** (impbox):
+- SRC, CHAN, R.LEN, GAIN, Q.REC and ARM live in the FLEX track's sound, as BUF does. They are saved
+  with the kit and follow the pattern.
+- A take already recording keeps the settings it started with.
+- An older FLEX track shows v0.50's defaults until a setting is changed.
+
+Commit `8e0aa46`.
+
+**CLEAR** (Error Kit):
+- FUNC + NO on REC SETUP asks "CLEAR BUF n?" for the track's buffer. YES empties it; NO, or any other
+  key, leaves it.
+- A take saved as a sample stays.
+- CLEAR is refused while the buffer records: BUSY.
+
+Commit `2ef4617`.
+
+**REC SETUP's layout** (owner):
+- The buffer's state goes in the screen's left column, in the 3x5 glyphs: EMPTY, READY, REC with a dot,
+  WAIT, BUSY. The take's length (up to 66.0S) sits under it.
+- The page arrow is in the bottom-left corner; LEVEL's label had covered it.
+- The column stays inside x 0..18 in every state (gate: `rectext`).
+
+Commits `668a9b8`, `326cb4a`, `58752be`, `d923480`.
+
+**Sample TUNE plays its fine values** (impbox):
+- The DSP read TUNE in whole semitones, so -0.01 played a semitone down, 0.5 played as 0, and a TUNE
+  LFO stepped.
+- It now reads the full value, on all sample machines.
+
+Commit `cd76330`.
+
+**TUNE drawn as WaveTone's Osc1 Tune** (impbox; the same record, 238): a ruler under a fixed centre
+tick, with octave numbers every 12 and dots every 3. The knob is stock's: a detent is 0.01 and FUNC +
+turn is 12.00. Commit `a10d38b`.
+
+**Gate:**
+- **c48ad00ff2fc5f873903789dad9aaa58eadcbc1782f0107525e4af726bd3c0ffRC runner `smp`:** plays TUNE +0.50 and -0.01 and measures the rate (1.02875 and 0.9993).
+- **`rectext`:** checks REC SETUP's state column in every state at 66.0 s, and the TUNE ruler at six
+  values.
+- **The coupled FLEX test:** CLEAR (NO keeps the take, YES empties the buffer and the track goes
+  silent), with a negative control; a take keeps its settings when they change mid-take.
+- **The engine step:** FLEX REC's settings through SAVE and LOAD.
+- **`test_mnm` and `test_md`:** a trimmed machine is held by its level and octave bands.
+- **The coupled harness:** calls every DSP block with the same I7. The "return target 0x1" halt at
+  block 459 was the harness's frame walking into our scratch, not the firmware.
+
+**Tests**
+1. Chords on SID, DENS and DDRW: they sound as before, more notes play before one drops, and the load
+   (FUNC held on the page) is lower than v0.50.
+2. VO-6 and the TRX hats, cymbal and maracas: they sound as before.
+3. Two FLEX tracks with different SRC and R.LEN: each keeps its own. SAVE, power cycle, reload: kept.
+4. Change patterns while a take records: the take ends as it started.
+5. FUNC + NO on REC SETUP: CLEAR BUF n?. NO keeps the take; YES empties it and the column reads EMPTY.
+6. REC SETUP's column: REC (dot), READY with the length, EMPTY, WAIT (Q.REC set, YES while playing),
+   nothing cut off.
+7. A sample at TUNE -0.01 against 0.00: almost the same pitch. At 0.50: half a semitone up. An LFO on
+   TUNE: smooth.
+8. The TUNE box: the ruler. A detent is 0.01; FUNC + turn is 12.00.
+9. Everything from v0.50, including the FLEX level report: record a track at GAIN 0 and check it
+   matches the track.
+
+**Not verified on hardware:**
+- the trimmed machines' sound on the unit, and the voice counts at the unit's real load;
+- FLEX's TRK level (v0.50's calibration request stands).
+
+**Known issues**
+- FLEX REC's PAGE LED doesn't follow the page (NiKo): open. The emulator's page LEDs never refresh, so
+  a photo is needed.
+- R.LEN 64 with a 64-step pattern (impbox): open. R.STRT not stopping: not reproduced.
+- STRETCH: an old project that stopped all sound, and clicks on short loops: open.
 
 ## v0.50 — LEVEL (FLEX GAIN and level, BUF fixed, impbox's fixes)
 
