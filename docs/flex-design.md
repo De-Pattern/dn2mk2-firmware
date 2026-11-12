@@ -164,7 +164,7 @@ free). v0.47 with BOUNCE was 2,080,802; FASCIA added about 15 KB (not in v0.49 u
   s = 86..88) and routing; `ms_frame` runs stock's copy, then scales those words.
 - **Screen.** H's box reads ON / OFF ("--" when SRC is IN or MAIN); the meter that was in H's place is
   in the left column, its top level with the bottom row's boxes, CLIP over it at full scale.
-- **Gate.** `mute` (coupled, `scripts/emu_coupled_mute.py`, negative control `--break nomute`);
+- **Gate.** `mute` (coupled, `scripts/emu_coupled_mute.py`; its negative control `--break nomute`, measured 2026-11-12, fails at links 1, 2 and 3 and passes 4..6);
   `rectext` (the column with the meter and CLIP, MUTE ON); `engine --fx-roundtrip` (slot 33 through
   SAVE/LOAD).
 - **Hardware only.** The mix and the sends going silent as heard, and no click at ON / OFF.
