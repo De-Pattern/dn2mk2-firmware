@@ -4,6 +4,19 @@ What the owner has asked for and is not built yet, in the words he asked for it,
 enough of a plan that it can be picked up cold. Upstream's own parked ideas are in
 `docs/ideas-backlog.md`.
 
+## After v0.51 (owner, 2026-11-12)
+
+- **v0.51 LIGHTER, released:** the lighter Monomachine and Machinedrum machines (`docs/mnm-trim.md`),
+  FLEX settings per track, CLEAR, the REC SETUP state column, fine TUNE and its WaveTone ruler.
+- **Next, in order:**
+  1. The second firmware's handoff (FASCIA only, no MD/MNM), into the Project.
+  2. FLEX source mute. The owner wants the real stock mute (its LED, unmuted by hand). Stock mute never
+     generates the muted track's notes, so the take would be silence. Proposed: engage the stock mute
+     on SRC's track when a take finishes, and hold back every-pass recorder trigs while their source
+     is muted (REC SETUP shows MUTED). Awaiting the owner's choice. Knob H becomes MUTE; the level
+     meter moves to a small bar in the left column.
+  3. The stereo sampling assessment (below), then stereo if the owner chooses it.
+
 ## The order after v0.48 (owner, 2026-11-10)
 
 - **v0.49: FLEX** (docs/flex-design.md) and the guard fixes (sample voices first; a dropped
