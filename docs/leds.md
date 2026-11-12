@@ -77,3 +77,12 @@ So they follow at once, and go back to stock's the moment the panel closes.
 - closed, all 16 equal stock's from before the panel opened, and nothing more is claimed.
 
 Not verified on hardware: the colours as seen. The LED INTENSITY sets scale them.
+
+## The PAGE LEDs (2026-11-12, for NiKo's report)
+
+Measured in the emulator: logical ids **42..49** are the eight page LEDs. With a 16-step pattern, 42
+is (2, 10) and 43..49 (2, 2); at 64 steps, 42..45 are (2, 10). How stock shows the page being edited
+and the playing page could not be read: PAGE presses change nothing in the emulator's LedManager.
+FLEX REC's PAGE key turns its own page (`bn_page`) and is not passed to stock, so stock's page LEDs
+do not follow it. To fix: claim 42..49 in `bn_led_walk` the way stock lights them, once a photo or
+video shows stock's scheme (edited page, playing page).

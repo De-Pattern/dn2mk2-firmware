@@ -565,6 +565,7 @@ extern int fx_get(u32 t, int k);
 extern void fx_set(u32 t, int k, int v);
 extern int fx_valid(u32 t);
 extern int rt_qrec, rt_arm;
+int bn_mute __attribute__((section(".data"))) = 0;     /* v0.52: H MUTE SRC (FX_MUTE) as the panel shows it */
 static void fx_load(void)
 {
     u32 t = UI_TRACK_B;
@@ -574,11 +575,12 @@ static void fx_load(void)
     rec_gain = fx_get(t, FX_GAIN);
     rt_qrec = fx_get(t, FX_QREC);
     rt_arm = fx_get(t, FX_ARM);
+    bn_mute = fx_get(t, FX_MUTE);
 }
 static void fx_save(void)
 {
     u32 t = UI_TRACK_B;
-    int v[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm};
+    int v[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm, bn_mute};
     for (int k = 0; k < FX_N; k++)
         if (!fx_valid(t) || fx_get(t, k) != v[k])
             fx_set(t, k, v[k]);
@@ -605,9 +607,9 @@ void rec_poll(void)
     extern void rt_poll(void);
     extern int rt_manual, rt_q_waiting(void);
     if (bn_active()) {                          /* v0.51: FLEX REC shows the track's own settings */
-        int was[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm};
+        int was[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm, bn_mute};
         fx_load();
-        int now[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm};
+        int now[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm, bn_mute};
         for (int k = 0; k < FX_N; k++)
             if (was[k] != now[k]) {
                 smp_overlay_dirty = 1;
@@ -747,7 +749,7 @@ __attribute__((optimize("no-jump-tables"))) static void knob(int index, int delt
     extern void rt_knob(int index, int delta);
     if (index == 8 && sl_rec_knob(delta))
         return;
-    if (bn_active()) {                          /* v0.49 FLEX REC (both pages): A SRC, B CHAN, D R.LEN, E ARM, F Q.REC */
+    if (bn_active()) {                          /* v0.49 FLEX REC (both pages): A SRC, B CHAN, D R.LEN, E ARM, F Q.REC; v0.52 H MUTE SRC */
         fx_load();                              /* v0.51: the track's own, then kept in its sound */
         if (index == 1)
             rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1);
@@ -765,6 +767,9 @@ __attribute__((optimize("no-jump-tables"))) static void knob(int index, int delt
         else if (index == 7) {
             rec_gain = clamp(rec_gain + delta, -24, 38);   /* v0.50: G GAIN, a dB a detent */
             mon_known = 0;                      /* the meter's MONITOR again, with it */
+        } else if (index == 8) {
+            extern int rt_mute_knob(int delta);
+            bn_mute = rt_mute_knob(delta);      /* v0.52: H MUTE SRC, OFF / ON, four detents a choice */
         }
         fx_save();
         return;

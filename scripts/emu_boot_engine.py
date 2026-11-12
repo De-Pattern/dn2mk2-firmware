@@ -172,7 +172,7 @@ def main() -> int:
                         "(sound+0xDF, stored+245); repeatable")
     p.add_argument("--fx-roundtrip", action="store_true",
                    help="v0.51: SAVE and LOAD a FLEX sound with FLEX REC's settings in its words "
-                        "(rectrig.c fx_set: slots 38, 46, 40, 32, 37, 27, SRC's low byte the mark 0xF1); "
+                        "(rectrig.c fx_set: slots 38, 46, 40, 32, 37, 27, v0.52 33 MUTE SRC; SRC's low byte the mark 0xF1); "
                         "every word must come back as it went")
     p.add_argument("--filter-max", type=int, default=5,
                    help="the highest filter type the build's LOAD keeps (5 stock; 6 with PING, v0.27..v0.44)")
@@ -378,7 +378,7 @@ def main() -> int:
         real = bytes(after.uc.mem_read(base + 52, SOUND_BYTES)) if base else bytes(SOUND_BYTES)
         s = bytearray(real)
         s[MACHINE_TYPE] = 17
-        want = {38: 0x05F1, 46: 0x0200, 40: 0x4000, 32: 0x1F00, 37: 0x0300, 27: 0x0000}
+        want = {38: 0x05F1, 46: 0x0200, 40: 0x4000, 32: 0x1F00, 37: 0x0300, 27: 0x0000, 33: 0x0100}   # v0.52: 33 MUTE SRC ON
         for slot, w in want.items():
             s[20 + 2 * slot:22 + 2 * slot] = struct.pack(">H", w)
         live = after.alloc(SOUND_BYTES + 16)

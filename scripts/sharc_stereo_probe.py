@@ -25,6 +25,8 @@ import sharc_waverider_m4 as m4          # noqa: E402
 
 STEREO = 0x257EE8
 WATCH = (0x257EE8, 0x258F68, 0x259F68)     # per-track stereo; routing A (post-chain); B (raw panned)
+SENDS = (0x25AF68, 0x25B268, 0x25B568)     # the FX sends 0x1c1738 writes (docs/link-research.md)
+CHAIN = 0x1C8EF1
 
 
 class StereoTracer(m4.ChainTracer):
@@ -51,6 +53,9 @@ class StereoTracer(m4.ChainTracer):
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--blocks", type=int, default=4)
+    p.add_argument("--level", type=lambda x: int(x, 0), default=None, help="frame header LEVEL for track 0")
+    p.add_argument("--slot", action="append", default=[], help="IDX=VALUE on track 0's slots (e.g. 86=0x7f00)")
+    p.add_argument("--zero-level", action="store_true", help="record +0x22c = 0 at the chain's entry (MUTE SRC's idea)")
     a = p.parse_args()
     dk = m4.m1.Digikit(pathlib.Path(m4.os.environ.get("DNFW_DIGIKIT_SHARC",
                                                       m4.ROOT.parent / "digikit-wt-sharcemu")))
@@ -68,8 +73,20 @@ def main() -> int:
         positions = m4.render.sweep(len(m4.testtable.table()), max(a.blocks, 2))
         prep = m4.voice_prep(a.freq if hasattr(a, "freq") else 375.0, positions)
         tr = StereoTracer()
-        on = m4.run_blocks(init, a.blocks, lambda b: m4.make_frame(m4.SOUND, 5, trig=(b == 1)), type5=prep,
-                           tracer=tr, trace_block=a.blocks - 1)
+        ov = {int(k): int(v, 0) for k, v in (x.split("=") for x in a.slot)}
+
+        def frame(b):
+            f = bytearray(m4.make_frame(m4.SOUND, 5, trig=(b == 1), overrides=ov))
+            if a.level is not None:
+                off = m4.FR.header_offset(m4.FR.LEVEL, 0)
+                f[off:off + 2] = a.level.to_bytes(2, "little")
+            return bytes(f)
+        if a.zero_level:
+            zero = lambda r: m4.m2.poke(r.state, m4.V.track_record(0) + 0x22C, 0)   # noqa: E731
+            tr.hooks[CHAIN] = zero
+            base_fix = m4.fixups
+            m4.fixups = lambda hooks=None: base_fix({**(hooks or {}), CHAIN: zero})
+        on = m4.run_blocks(init, a.blocks, frame, type5=prep, tracer=tr, trace_block=a.blocks - 1)
         print("ok", on["ok"], on.get("halt"))
         print("calls out of 0x1c8ef1 that touch track 0's mono buffer:")
         for i, c in enumerate(tr.calls):
@@ -78,6 +95,11 @@ def main() -> int:
         for (pc, which), (n, ci, tgt) in tr.writes.items():
             print(f"  {pc:#x} buf {[hex(WATCH[w]) for w in sorted(set(which))]}: {n}  after #{ci}  in {tgt}")
         st = on["state"].state
+        def peak(base, n=64):
+            return max(abs(m4.V.bits_f32(m4.m2.word(st, base + 4 * k) or 0) or 0) for k in range(n))
+        print("  record +0x22c:", hex(m4.m2.word(st, m4.V.track_record(0) + 0x22C) or 0))
+        for base in WATCH + SENDS:
+            print(f"  peak {base:#x}: {peak(base):.5f}")
         for base in WATCH:
             print(f"  {base:#x} L {[round(m4.V.bits_f32(m4.m2.word(st, base + 4*k) or 0), 4) for k in range(0, 32, 8)]}"
                   f" R {[round(m4.V.bits_f32(m4.m2.word(st, base + 0x80 + 4*k) or 0), 4) for k in range(0, 32, 8)]}")

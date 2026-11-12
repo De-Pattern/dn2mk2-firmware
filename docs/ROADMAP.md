@@ -450,3 +450,16 @@ the +DRIVE preview retrigger (M3); B10; the Monomachine tables to L2.
 3. Also asked: **capicola** (heavylight's keyframe stretch, AGPL, github.com/heavylight-
    industries/keyframer-lab) as a CAPI switch on STRETCH, as the DT2 mod's; after the
    stability work (its SHARC glue, run.asm and dt2.c, not public yet).
+
+## kittito's reports, 2026-11-12 (logged; not in v0.52)
+
+1. The +Drive browser: selecting several samples does not load them all; SELECT ALL + load to project
+   does nothing. A bug: trace first.
+2. No sample preview in the browser (the DT2 has one).
+3. The slice screen: the waveform does not rescale with zoom; no easing on position/zoom changes;
+   transient detection looks wrong (or does not follow the zoom).
+4. One bank only (the pool's SAMP 1..123): the DT2 has eight banks (A..H). More banks cost ColdFire
+   memory and screens, not DSP. (impbox: "there's probably not much cost to more sample slots".)
+5. A trig held and SAMP turned: no list with full names (the DT2's preset pool / preset locks). Owner:
+   presets for sample machines later, if not risky or costly in CPU.
+6. A browser like the DT2's, with RAM use shown; assigning samples to banks.
