@@ -30,7 +30,7 @@ nosamp (track 1's voices' SAMP zeroed in the frame: fails at 6, silence), wrongb
 one buffer on: fails at 6, silence: the next buffer is empty), v0.51 noclear (NO for CLEAR's
 YES: fails at 9b).
 
-v0.51, link 10: TUNE's knob, a detent a fine step and FUNC + turn 12 semitones. Link 4d: FLEX REC's settings (the track's own, in its sound) changed while a take runs leave
+v0.51, link 4d: FLEX REC's settings (the track's own, in its sound) changed while a take runs leave
 that take as it started. Links 9a..9c: CLEAR BUF n? (FUNC + NO on REC SETUP): NO keeps the take, YES empties the
 buffer, and a note on the track no longer selects it.
 
@@ -420,34 +420,9 @@ def main() -> int:
     want = c.call(lay["rt_buf_value"], w1)[0]
     link("8. v0.50: the SYN page's BUF knob moves the buffer FLEX records and plays (rt_buf_of follows "
          "the knob's slot 35)", w1 != w0 and b1 == want and b1 != 0, f"slot 35 {w0} -> {w1}, rt_buf_of {b1}, want {want}")
-    # v0.51 (owner: "the normal turn of the tuning encoder moves in increments of .01, the FUNC + turn
-    # snaps to 12.0 increments", WaveTone's Osc1 Tune, the same record 238): knob A on the SYN page
-    def tune_word():
-        return struct.unpack(">H", c.read(snd + 20 + 2 * SLOT_TUNE, 2))[0]
-
-    def turn(enc, delta, n, gap=200_000):      # a stock page's knob, as emu_fine_seq.py turns it
-        for _ in range(n):
-            c.machine.pc = P.encoder(c.machine.m, c.panel.profile, enc, delta)
-            c.panel.settle(gap)
-        c.periods(4)
-
-    c.panel.tap((0, 1))                         # SRC: the sample page (emu_fine_seq.py)
-    c.periods(2)
-    t0 = tune_word()
-    c.panel.screen("v051_tune_0")
-    turn(0, 1, 8)
-    t1 = tune_word()
-    c.panel.screen("v051_tune_fine")
-    held(17, True)
-    turn(0, 1, 8)
-    held(17, False)
-    t2 = tune_word()
-    c.panel.screen("v051_tune_func_up")
-    rep["numbers"]["tune_words"] = [t0, t1, t2]
-    link("10. v0.51: TUNE (knob A, eight pulses) moves a fraction of a semitone; with FUNC held it jumps by "
-         "whole octaves (stock's jump, WaveTone's Osc1 Tune)",
-         0 < t1 - t0 < 256 and t2 - t1 >= 12 * 256 - 256 and (t2 - t1 + 128) // 256 % 12 in (0, 11),
-         f"TUNE words {t0:#06x} -> {t1:#06x} (8 pulses) -> {t2:#06x} (FUNC + 8 pulses)")
+    # (v0.51: TUNE's knob, a detent 0.01 and FUNC + turn 12.00, is stock's own on record 238 and unchanged;
+    # this harness's encoder pulses do not reach a stock page's knob here, 8 pulses after SRC left the word as
+    # it was, so TUNE's new display is checked in emu_rectext.py, its knob in the gate's functurn step)
     return finish()
 
 

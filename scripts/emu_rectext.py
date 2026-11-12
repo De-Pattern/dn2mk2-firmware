@@ -246,6 +246,28 @@ def main() -> int:
           "dark columns before the SRC box), clear of the title and the arrow, the rest of the screen unchanged",
           bool(shots) and not bad, bad)
 
+    # v0.51 (impbox, the owner: TUNE drawn as WaveTone's Osc1 Tune): the sample page's TUNE box (knob A,
+    # smp_page.c w_bipolar) as a ruler under a fixed centre tick, octave numbers every 12. At 0, +0.50,
+    # -0.01, +12, +60 and -60: every lit pixel in TUNE's column (x 21..45, the box's rows) is the box,
+    # its two ticks or inside it; the ruler moves with a fraction (0 and +0.50 differ inside the box)
+    machine.write(kit + 52 + SOUND_STRIDE * T + 0xDE, bytes([8]))       # ONESHOT
+    tune_at = kit + 52 + SOUND_STRIDE * T + 20 + 2 * 25
+    tshots = {}
+    for name, w in (("0", 0x4000), ("p050", 0x4080), ("m001", 0x3FFD), ("p12", 0x4C00), ("p60", 0x7C00),
+                    ("m60", 0x0400)):
+        put16(tune_at, w)
+        tshots[name] = show("tune_" + name, False)
+    put16(tune_at, 0x4000)
+    tcol = {k: {p for p in v if 19 <= p[0] <= 47 and 10 <= p[1] <= 30} for k, v in tshots.items()}
+    xs = [p[0] for v in tcol.values() for p in v]
+    ys = [p[1] for v in tcol.values() for p in v]
+    box = (min(xs), max(xs), min(ys), max(ys)) if xs else None
+    inner = {k: {p for p in v if box and box[0] < p[0] < box[1] and box[2] < p[1] < box[3]} for k, v in tcol.items()}
+    moved = bool(box) and inner["0"] != inner["p050"] and inner["0"] != inner["p12"]
+    within = bool(box) and box[1] - box[0] <= 22 and all(inner[k] for k in inner)
+    check("TUNE's ruler (0, +0.50, -0.01, +12, +60, -60) inside its 21-pixel box, drawn in every case, moving "
+          "with a fraction", within and moved, f"box {box}, inner pixels {{k: len(v) for k, v in inner.items()}}")
+
     faults = getattr(machine.m, "faults", [])[faults0:]
     check("no memory faults", not faults, faults[:3])
     ok = all(c["ok"] for c in report["checks"].values())
