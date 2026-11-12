@@ -59,6 +59,8 @@ record, is normalised; every PNG, snapshot and dump byte-identical). 51 steps, n
 | engine | 8 | 8 |
 | machines (power-on + MACHINE SEL) | ~30 | 29 |
 | +DRIVE (browser, nested, keys) | ~26 | 26 |
+| jump (rapid presses 13 of it) | 13 | 18 (alone on the cores) |
+| slides | 16 | 16.5 |
 
 (Two batches ran side by side on the 2 cores, so the unchanged steps' times include sharing.)
 
