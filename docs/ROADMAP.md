@@ -451,7 +451,7 @@ the +DRIVE preview retrigger (M3); B10; the Monomachine tables to L2.
    industries/keyframer-lab) as a CAPI switch on STRETCH, as the DT2 mod's; after the
    stability work (its SHARC glue, run.asm and dt2.c, not public yet).
 
-## kittito's reports, 2026-11-12 (logged; not in v0.52)
+## kittito's reports, 2026-11-12 (logged; not in v0.52; owner: "worth looking into ... no real issue if we dont fix them")
 
 1. The +Drive browser: selecting several samples does not load them all; SELECT ALL + load to project
    does nothing. A bug: trace first.
