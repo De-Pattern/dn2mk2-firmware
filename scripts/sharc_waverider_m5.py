@@ -511,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -656,6 +656,12 @@ def main(argv=None):
             results["3d_rec"] = step_rec(init, sound, machines, a.blocks)
             gc.collect()
             show(results["3d_rec"])
+
+        if "flexlevel" in steps:
+            print("\nstep 3f: a FLEX take's level (v0.50)")
+            results["3f_flexlevel"] = step_flexlevel(init, sound, machines)
+            gc.collect()
+            show(results["3f_flexlevel"])
 
         if "mainrec" in steps:
             print("\nstep 3m: MAIN recorded, previewed and played, in the instrument's order (v0.38)")
@@ -2452,6 +2458,74 @@ def step_rec(init, sound, machines, blocks) -> dict:
                         "probe": (seenp.get("after0"), seenp.get("after1"), [h[4] for h in statp],
                                   [h[4] for h in statq], pphp),
                         "halt": (rec.get("halt"), rec2.get("halt"))}}
+
+
+# -- step 3f: a FLEX take's level (v0.50) ----------------------------------------------------------
+
+def step_flexlevel(init, sound, machines) -> dict:
+    """v0.50 (impbox, Error Kit, AnnKorr on v0.49: a FLEX take of a track "very quiet .. max
+    everything to hear it"). Track 0 ONESHOT on SAMP 3 looping (PLAY 80, LOOP 20) at its
+    defaults; RECORD NOW from TRK1 (the engine's own bucket, 0x1c244d's: the runner's all-zero
+    routing sums every track there, and only track 0 sounds) into a slot, with the channel word's
+    GAIN index as FLEX sends it (25: 0 dB); STOP; then track 0 plays the take, same defaults. The
+    take's playback at the amp's output against the source's there, RMS over the same stretch (the
+    take a block late: the bucket is the last block's): within 0.5 dB. Negative control: the same
+    with index 0 (the RECORDER's command): about 22 dB under (the sample chain's loss twice), and
+    must fail the 0.5 dB test; and GAIN +6 (index 31) plays 6 dB over, within 0.5 dB."""
+    import math as _m
+    ONE = SM.TYPE_OF["ONESHOT"]
+    cmd_at = dsp.SMP_POOL_DDR + SM.CMD_OFFSET
+    n, gap, w = 24, 3, 12                           # recording blocks; then STOP, the playback's trigger; the window
+    loop = {SM.SAMP_REC: 3, SM.PLAY_REC: 80, SM.LOOP_REC: 20}
+
+    def command(r, seq, cmd, src=0, chan=0, dest=0, frames=SM.REC_FRAMES, place=0, thres=0):
+        for k, word in enumerate((seq, cmd, src, chan | place << 8, thres, (SM.REC_FIRST + dest) << 24 | frames)):
+            m2.poke(r.state, cmd_at + 4 * k, word)
+
+    def rms(x):
+        return _m.sqrt(sum(v * v for v in x) / max(1, len(x)))
+
+    def run(gidx):
+        state = {"b": 0}
+
+        def at_dispatch(r):
+            b = state["b"]
+            if b == 0:
+                command(r, 1, SM.CMD_NOW, src=2, chan=gidx << 24, dest=0)
+            if b == n:
+                command(r, 2, SM.CMD_STOP)
+            state["b"] += 1
+
+        def fb(b):
+            if b < n + gap:
+                return base_frame(sound, machines, t0=ONE, trigger=b == 1, overrides=smp_words(loop)).to_bytes()
+            take = {**loop, SM.SAMP_REC: SM.REC_FIRST + 1}
+            return base_frame(sound, machines, t0=ONE, trigger=b == n + gap, overrides=smp_words(take)).to_bytes()
+        r = run_blocks(init, fb, n + gap + w + 2, extra_hooks={m3.DISPATCH: at_dispatch})
+        if not r["ok"]:
+            return None
+        ao = r["amp_out"]
+        blocks = [b if isinstance(b, list) else [b] for b in ao]
+        flat = [x for b in blocks for x in b]
+        per = len(flat) // len(blocks) if blocks else BLOCK
+        src = flat[per * 2: per * (2 + w)]                       # the source, from its second block
+        back = flat[per * (n + gap + 2): per * (n + gap + 2 + w)]  # the take, a block on (its leading block)
+        r.pop("state", None)
+        a, b_ = rms(src), rms(back)
+        return {"src_rms": a, "take_rms": b_, "db": 20 * _m.log10((b_ or 1e-30) / (a or 1e-30))}
+    unity, recorder, plus6 = run(SM.GAIN_ZERO), run(0), run(SM.GAIN_ZERO + 6)
+    checks = {
+        "v0.50: a FLEX take of a track (GAIN 0) plays back at its source's level on the same machine "
+        "at its defaults, within 0.5 dB (RMS at the amp's output)":
+            unity is not None and abs(unity["db"]) <= 0.5,
+        "v0.50 negative control: the RECORDER's command (no GAIN) plays the same take about 22 dB under "
+        "(the sample chain's loss twice), outside 0.5 dB":
+            recorder is not None and recorder["db"] < -15.0,
+        "v0.50: GAIN +6 plays the take 6 dB over its source, within 0.5 dB":
+            plus6 is not None and abs(plus6["db"] - 6.0) <= 0.5,
+    }
+    return {"ok": all(checks.values()), "checks": checks,
+            "numbers": {"unity": unity, "recorder": recorder, "plus6": plus6}}
 
 
 # -- step 3e: the fast link (v0.16, docs/sampler.md) -------------------------------------------------

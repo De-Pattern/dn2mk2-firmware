@@ -36,6 +36,7 @@ def default_steps() -> list[str]:
 # the order changes nothing a part checks.
 GROUPS = (("wipe",), ("stock",), ("garbage",), ("stress",), ("chords",), ("smp",),
           ("mnm", "frame"), ("decode", "map", "voice", "guard"), ("link", "rec", "mainrec", "pvmix", "tdm"),
+          ("flexlevel",),         # v0.50: a FLEX take's level, unity and GAIN
           ("recwhole",))          # v0.39: whole takes with the link at work (about 70 min)
 
 
