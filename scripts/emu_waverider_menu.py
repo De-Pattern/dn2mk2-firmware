@@ -1992,10 +1992,15 @@ def main() -> int:
 
     returned = {"d0": 0}
 
-    def guest_call(fn, *args, limit=5_000_000):
+    def guest_call(fn, *args, limit=5_000_000, want_count=False):
         """Call FN in the paused machine and put every register back, as digikit's
         machinepatch.call_dispatch does. SR is never read: the patched Unicorn
-        clobbers the condition codes on that read. -> instructions run."""
+        clobbers the condition codes on that read. -> instructions run when WANT_COUNT, else 0.
+
+        The count is a Python callback on every instruction, and while any code hook covers
+        every address, Unicorn walks all its code hooks (the ~300 ISA patches') at every
+        instruction: three quarters of link16's time (profiled 2026-11-11). Only the callers
+        that report the count ask for it."""
         regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
         saved = [uc.reg_read(r) for r in regs]
         saved_pc = uc.reg_read(K.UC_M68K_REG_PC)
@@ -2004,7 +2009,7 @@ def main() -> int:
         machine.write(SENTINEL, bytes.fromhex("4e714e71"))
         uc.reg_write(K.UC_M68K_REG_A7, sp)
         counted["n"] = 0
-        h = uc.hook_add(UC_HOOK_CODE, count)
+        h = uc.hook_add(UC_HOOK_CODE, count) if want_count else None
         # `panel.settle` runs digikit's fast stepper, whose permanent block hook
         # stops the machine once its step budget is spent (longrun._FastStepper).
         # Left at zero, it stops a call at its first block with nothing run --
@@ -2017,7 +2022,8 @@ def main() -> int:
         finally:
             if stepper is not None:
                 stepper.left = 0
-            uc.hook_del(h)
+            if h is not None:
+                uc.hook_del(h)
             returned["d0"] = uc.reg_read(K.UC_M68K_REG_D0)
             for r, v in zip(regs, saved):
                 uc.reg_write(r, v)
@@ -2165,7 +2171,7 @@ def main() -> int:
                     args.append((entry_args[int(va, 0)][int(n) - 1] - int(off or "0", 0)) & 0xFFFFFFFF)
                 else:
                     args.append(int(x, 0) & 0xFFFFFFFF)
-            ran = guest_call(int(parts[1], 0), *args)
+            ran = guest_call(int(parts[1], 0), *args, want_count=True)
             d0 = returned["d0"]
             calls_made.append({"fn": parts[1], "args": [f"{v:#x}" for v in args], "ran": ran,
                                "d0": d0 - (1 << 32) if d0 & 0x80000000 else d0})
@@ -2202,7 +2208,7 @@ def main() -> int:
             total = 0
             for msg in msgs:
                 machine.write(buf, msg)
-                total += guest_call(SYSEX_ROUTER, buf, len(msg), 2)
+                total += guest_call(SYSEX_ROUTER, buf, len(msg), 2, want_count=True)
             uc.hook_del(hs)
             (path.parent / (path.name + ".replies.json")).write_text(json.dumps(sent))
             print(f"  sysex: {len(msgs)} message(s), {len(sent)} repl(ies), {total:,} instructions")
@@ -2307,7 +2313,7 @@ def main() -> int:
             # triggered track's sound has changed (0x40026bbc / 0x40026bfe).
             track = int(step[5:])
             sound = machine.long(KIT_POINTER) + 52 + SOUND_STRIDE * track
-            ran = guest_call(TRACK_SYNC, sound, track)
+            ran = guest_call(TRACK_SYNC, sound, track, want_count=True)
             print(f"  track sync {TRACK_SYNC:#010x}({sound:#010x}, {track}): {ran:,} instructions")
         elif step == "sync":
             # The mirror the frame builder reads (`0x80003af0 + 153t`, a copy of
@@ -2317,12 +2323,12 @@ def main() -> int:
             # plays in this emulator, so the kit-load sync is entered -- the
             # firmware's own copy, not a poke.
             kit = machine.long(KIT_POINTER)
-            ran = guest_call(KIT_SYNC, kit)
+            ran = guest_call(KIT_SYNC, kit, want_count=True)
             print(f"  kit sync {KIT_SYNC:#010x}({kit:#010x}): {ran:,} instructions")
         elif step.startswith("frame:"):
             name = step[6:]
             before = built["n"]
-            ran = guest_call(ISR)
+            ran = guest_call(ISR, want_count=True)
             frame = machine.read(FRAME, FRAME_BYTES)
             png_dir.mkdir(parents=True, exist_ok=True)
             out = png_dir / f"{name}.frame_be.bin"
