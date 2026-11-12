@@ -2360,7 +2360,10 @@ static void bn_view_draw(void *c, int heard)
             else
                 LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%s", "EMPTY");
         }
-        LABEL(c, 116, 2, "%s", "<");
+        /* v0.51 (owner: LEVEL's label sat on it since v0.50's meter took H): LEFT's arrow in the
+         * bottom row's left corner, clear of ARM's cell (22..44), as REC TRIGS's '>' sits in the
+         * right corner */
+        LABEL_TEXT(c, LABEL_FONT, 2, 0, 0, 0, 0, "%s", "<");
         return;
     }
     /* REC TRIGS */
