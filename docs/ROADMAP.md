@@ -58,7 +58,10 @@ Owner, 2026-11-11: proceed with v0.49 (the playhead fix in it); 2..6 to the fix 
    note) are still emulated wrong: fix the EMAC itself (or model each), then put every coupled test on
    it. emu_coupled_recplay (not a gate step) fails at 6a on v0.48 and v0.49 alike: out of date.
 
-## v0.49 FLEX reports, 2026-11-11 (impbox, AnnKorr; not yet triaged with the owner)
+## v0.49 FLEX reports, 2026-11-11 (impbox, AnnKorr; triaged)
+
+Owner, 2026-11-11: 1 (BUF) and 2 (a record GAIN on REC SETUP) into the fix release with impbox's 2..6,
+before v0.50, after the gate speed-up lands; 3 and 4 not in it.
 
 1. **BUF can't be set on REC SETUP** (its box only shows the track's BUF: the panel's knobs are A SRC,
    B CHAN, D R.LEN, E ARM, F Q.REC; no knob turns C). **The SYN page's BUF seems to have no effect**
