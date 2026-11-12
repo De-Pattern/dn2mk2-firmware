@@ -39,6 +39,40 @@ Profiled with py-spy (`--native`):
 | C. PyPy (a faster Python, no code change) for the SHARC runner | JIT for the SHARC interpreter | wipe 124 → 58 s; chords 1306 → **302 s** | identical but timing fields |
 | D. PyPy for the coupled tests (FLEX, THRES) | same, with the same patched libunicorn | FLEX's take 2422 → **735 s** (whole test ~60 → ~17 min) | emulation identical; two correlations differ in the 16th digit (numpy after the run) |
 
+## B across the gate: verified on v0.49's build (2026-11-12)
+
+`emulib/bounded.py` (the block budget) in every harness that stopped a call with `count=`. Every
+ColdFire step re-run in speed-wt on `out/v049.syx` and each step's report files compared with
+the v0.49 gate's: **all identical** (JSON reports equal once the work folder's path, which they
+record, is normalised; every PNG, snapshot and dump byte-identical). 51 steps, no failures.
+
+| step | v0.49 (min) | with B (min) |
+|---|---|---|
+| link16 | 54 | **2.7** |
+| link16-dead | 40 | **2.1** |
+| pools | 36 | **2.1** |
+| flexcore, rectext, kbrec, fineswap | | 1.4-2.4 each |
+| UI fuzz | 29 | 29 |
+| boot | 17 | 17.5 |
+| fineknob | 15 | 15.5 |
+| erase | 11 | 11.7 |
+| engine | 8 | 8 |
+| machines (power-on + MACHINE SEL) | ~30 | 29 |
+| +DRIVE (browser, nested, keys) | ~26 | 26 |
+
+(Two batches ran side by side on the 2 cores, so the unchanged steps' times include sharing.)
+
+B cuts about **2 h 10 min** of ColdFire work. The steps it did not speed up spend their time
+elsewhere. Profiled: **boot from reset is 97% `helper_uc_tracecode`** too, but from digikit's
+`emu/dspboot.run`, which puts a Python code hook on every instruction on purpose: it counts
+instructions (the boot's frame timing and its 450M-instruction budget are counted in
+instructions), records coverage and detects stalls. That count *is* what the step measures, so
+a block budget would change where the boot stops, and the reports would not be identical. Not
+proposed as a quick change; the steps built on that boot (engine, erase, fuzz, machines, +DRIVE,
+fineknob) are likely the same, to be profiled one by one. A possible later route, if wanted: an
+exact instruction count kept in C (a counting hook in our patched libunicorn), not in Python.
+digikit is m-dwyer's toolkit, so a change there is a change to a dependency, not to our gate.
+
 ## Proposed plan
 
 1. **B everywhere** (low risk, large): the same `emu_start(count=)` guard is copied into
