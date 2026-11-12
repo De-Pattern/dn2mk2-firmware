@@ -2015,11 +2015,21 @@ def main() -> int:
         # Left at zero, it stops a call at its first block with nothing run --
         # which is how three earlier calls here "returned" having done nothing.
         stepper = getattr(machine.m, "_fast_stepper_obj", None)
+        # The runaway guard: Unicorn's emu_start(count=) is a hidden code hook on every
+        # address, so with the ISA patches' ~300 code hooks every instruction walks them all
+        # (89% of link16, profiled 2026-11-11). Uncounted calls use the fast stepper's block
+        # budget instead: LIMIT blocks, each at least one instruction, so a call stops no
+        # sooner than before, and running out is an error here (count= truncated silently).
+        budget = stepper is not None and not want_count
         if stepper is not None:
-            stepper.left = 1 << 40
+            stepper.left = limit if budget else 1 << 40
         try:
-            uc.emu_start(fn, SENTINEL, count=limit)
+            if budget:
+                uc.emu_start(fn, SENTINEL)
+            else:
+                uc.emu_start(fn, SENTINEL, count=limit)
         finally:
+            spent = budget and stepper.left <= 0
             if stepper is not None:
                 stepper.left = 0
             if h is not None:
@@ -2028,6 +2038,8 @@ def main() -> int:
             for r, v in zip(regs, saved):
                 uc.reg_write(r, v)
             uc.reg_write(K.UC_M68K_REG_PC, saved_pc)
+        if spent:
+            raise RuntimeError(f"guest call {fn:#010x} ran past {limit:,} blocks without returning")
         return counted["n"]
 
     guest_call.returned = returned
