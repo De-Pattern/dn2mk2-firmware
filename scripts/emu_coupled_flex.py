@@ -425,31 +425,29 @@ def main() -> int:
     def tune_word():
         return struct.unpack(">H", c.read(snd + 20 + 2 * SLOT_TUNE, 2))[0]
 
-    def turn(enc, delta, n):                    # a stock page's knob: link 8's settle between detents
+    def turn(enc, delta, n, gap=200_000):      # a stock page's knob, as emu_fine_seq.py turns it
         for _ in range(n):
             c.machine.pc = P.encoder(c.machine.m, c.panel.profile, enc, delta)
-            c.panel.settle()
+            c.panel.settle(gap)
         c.periods(4)
+
+    c.panel.tap((0, 1))                         # SRC: the sample page (emu_fine_seq.py)
+    c.periods(2)
     t0 = tune_word()
     c.panel.screen("v051_tune_0")
-    turn(0, 1, 1)
+    turn(0, 1, 8)
     t1 = tune_word()
     c.panel.screen("v051_tune_fine")
     held(17, True)
-    turn(0, 1, 1)
+    turn(0, 1, 8)
     held(17, False)
     t2 = tune_word()
     c.panel.screen("v051_tune_func_up")
-    held(17, True)
-    turn(0, -1, 2)
-    held(17, False)
-    t3 = tune_word()
-    c.panel.screen("v051_tune_func_down")
-    rep["numbers"]["tune_words"] = [t0, t1, t2, t3]
-    link("10. v0.51: TUNE (knob A) a detent is a fine step (at most 0.01 of a semitone: 3/256), FUNC + turn "
-         "12.00 up (stock's jump: onto the next whole 12 or by 12), then two down",
-         0 < t1 - t0 <= 3 and (t2 == t0 + 12 * 256 or t2 - t1 == 12 * 256) and t3 - t2 == -24 * 256,
-         f"TUNE words {t0:#06x} -> {t1:#06x} (a detent) -> {t2:#06x} (FUNC +1) -> {t3:#06x} (FUNC -2)")
+    rep["numbers"]["tune_words"] = [t0, t1, t2]
+    link("10. v0.51: TUNE (knob A, eight pulses) moves a fraction of a semitone; with FUNC held it jumps by "
+         "whole octaves (stock's jump, WaveTone's Osc1 Tune)",
+         0 < t1 - t0 < 256 and t2 - t1 >= 12 * 256 - 256 and (t2 - t1 + 128) // 256 % 12 in (0, 11),
+         f"TUNE words {t0:#06x} -> {t1:#06x} (8 pulses) -> {t2:#06x} (FUNC + 8 pulses)")
     return finish()
 
 

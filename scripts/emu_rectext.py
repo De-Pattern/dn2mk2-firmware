@@ -3,7 +3,7 @@ size): the RECORDER drawn in every state its centre box has, and R.LEN through M
 counts, on the real screen (the emulator's untorn frame). Every lit pixel between the SRC column
 and the THRES column is the box's dotted border (the same in every state) or inside the box; the
 gutters either side stay dark; R.LEN's values share one line (the same top and bottom row) inside
-their 32-pixel column."""
+their 32-pixel column. v0.51: FLEX REC SETUP's state column inside its 21 pixels in every state.""" 
 
 from __future__ import annotations
 
@@ -181,6 +181,70 @@ def main() -> int:
           f"rows {rows}, cols {cols}")
     put32(lay["rec_rlen"], 0)
     put32(lay["rec_overlay"], 0)
+
+    # v0.51 (owner: "the EMPTY/RECORDING/READY text here on the top left NEEDS to fit ... account for
+    # the longest possible version ... with the max amount of time listed after it"): FLEX REC SETUP's
+    # state column (smp_page.c, the screen's left 21 pixels) in every state, the take's length at the
+    # DSP's longest (66.0 s). Its pixels stay in x 0..18 (three dark columns before the SRC box at 22),
+    # below the title and clear of the '<' arrow; nothing else on the screen changes between states
+    machine.write(kit + 52 + SOUND_STRIDE * T + 0xDE, bytes([BOUNCE]))   # a FLEX track
+    put32(lay["rt_on"], 1)
+    put32(lay["bn_sub"], 1)
+    put32(lay["rec_overlay"], 1)
+    put32(lay["rec_phase"], 0)
+    b = call(lay["rt_buf_of"], T)[0] & 7
+    longest = 660 * 9600                                   # 66.0 s (rt_state: tenths = bytes / 9600)
+
+    def flex_state(rbytes=0, rec=False, wait=False, busy=False):
+        for k in range(16):
+            put32(lay["rt_rbytes"] + 4 * k, rbytes if k == 2 * b else 0)
+        put32(lay["rt_cur"], b if rec else 0xFFFFFFFF)
+        put32(lay["rt_cur_end"], machine.long(FRAMES) + 10_000_000 if rec else 0)
+        put32(SEQ_PLAYING, 1 if wait else 0)
+        put32(lay["rt_req"], T + 1 if wait else 0)
+        call(lay["fx_set"], T, 4, 4 if wait else 0)       # Q.REC 8 (FX_QREC) for a waiting take, else OFF
+        put32(lay["bn_cleared"], 2 if busy else 0)
+        put32(lay["bn_cleared_at"], machine.long(FRAMES) if busy else 0)
+        put32(lay["bn_clear_ask"], 0)
+
+    fstates = [("empty", {}), ("ready_66s", dict(rbytes=longest)), ("rec_66s", dict(rbytes=longest, rec=True)),
+               ("ready_short", dict(rbytes=9600)), ("wait", dict(wait=True)), ("busy", dict(rbytes=longest, busy=True))]
+    shots = {}
+    for name, v in fstates:
+        flex_state(**v)
+        shots[name] = show("flex_setup_" + name, True)
+    flex_state()
+    put32(SEQ_PLAYING, 0)
+    put32(lay["rec_overlay"], 0)
+    put32(lay["bn_sub"], 0)
+    common = set.intersection(*shots.values()) if shots else set()
+    arrow = {p for p in common if p[0] <= 20 and p[1] >= 52}
+    bad = {}
+    rest0 = {p for p in shots["empty"] if p[0] >= 20}
+    for name, px in shots.items():
+        col = {p for p in px if p[0] <= 21 and 11 <= p[1] <= 51}       # between the title and the arrow
+        why = []
+        if any(p[0] > 18 for p in col):
+            why.append(f"column past x 18: {sorted(p for p in col if p[0] > 18)[:4]}")
+        if {p for p in px if p[0] <= 21 and p[1] <= 10} - common:          # the title's rows: as in every state
+            why.append("into the title")
+        if {p for p in px if p[0] <= 21 and p[1] >= 52} - common:          # the arrow's rows: only the arrow
+            why.append("into the arrow's rows")
+        if any(abs(p[0] - q[0]) <= 1 and abs(p[1] - q[1]) <= 1 for p in col for q in arrow):
+            why.append("touching the arrow")
+        if {p for p in px if p[0] >= 20} != rest0:
+            why.append("the rest of the screen changed")
+        if not col:
+            why.append("nothing drawn")
+        if why:
+            bad[name] = why
+    qrec_box = {p for p in shots["wait"] ^ shots["empty"] if p[0] >= 20}
+    for name in ("wait",):                                 # (its Q.REC box reads 8: the setting that makes it wait)
+        if bad.get(name) == ["the rest of the screen changed"] and all(45 <= p[0] <= 75 for p in qrec_box):
+            del bad[name]
+    check("FLEX REC SETUP's state column (EMPTY, READY and REC at 66.0 s, WAIT, BUSY) inside x 0..18 (three "
+          "dark columns before the SRC box), clear of the title and the arrow, the rest of the screen unchanged",
+          bool(shots) and not bad, bad)
 
     faults = getattr(machine.m, "faults", [])[faults0:]
     check("no memory faults", not faults, faults[:3])

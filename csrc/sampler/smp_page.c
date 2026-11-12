@@ -2402,9 +2402,9 @@ static void bn_view_draw(void *c, int heard)
                 word = "BUSY";
             else if (rt_req_waiting())
                 word = "WAIT";
-            glyphs_at(c, 11, TOP_Y + 7, word);
+            glyphs_at(c, 9, TOP_Y + 7, word);
             if (st == 1 && word[0] == 'R')                       /* recording: a dot over the word */
-                fill(c, 10, TOP_Y + 14, 12, TOP_Y + 16);
+                fill(c, 8, TOP_Y + 14, 10, TOP_Y + 16);
             if (st) {
                 char len[8];
                 int k = 0, s10 = tenths / 10;
@@ -2414,7 +2414,7 @@ static void bn_view_draw(void *c, int heard)
                 len[k++] = (char)('0' + tenths % 10);
                 len[k++] = 'S';
                 len[k] = 0;
-                glyphs_at(c, 11, TOP_Y - 6, len);
+                glyphs_at(c, 9, TOP_Y - 6, len);
             }
         }
         LABEL_TEXT(c, LABEL_FONT, 2, 0, 0, 0, 0, "%s", "<");
