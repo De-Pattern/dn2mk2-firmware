@@ -186,6 +186,29 @@ def main() -> int:
     link("1b. [TRIG 1] put a one-shot recorder trig on step 1 (the lock store: 2)", tv == 2, f"rt_trig_get {tv}")
     bufv = c.call(lay["rt_buf_of"], T)[0]
     link("1c. a fresh FLEX track is on BUF 01", bufv == 0, f"rt_buf_of {bufv}")
+
+    # v0.50 (impbox: "BUF can't be set"): knob C turns BUF, four detents a buffer, through the knob's
+    # own path (the sound's slot 35 at sound + 20 + 2 x 35, where rt_buf_of reads it); back to 01
+    # for the take. Knob G is GAIN, a dB a detent; back to 0
+    def turn(enc, delta, n):
+        for _ in range(n):
+            c.machine.pc = P.encoder(c.machine.m, c.panel.profile, enc, delta)
+            c.periods(2)
+
+    def bufword():
+        return struct.unpack(">H", c.read(snd + 20 + 2 * 35, 2))[0] >> 8
+    turn(2, 1, 4)
+    b_up, w_up = c.call(lay["rt_buf_of"], T)[0], bufword()
+    turn(2, -1, 4)
+    b_back = c.call(lay["rt_buf_of"], T)[0]
+    link("1e. v0.50: knob C turns BUF (01 -> 02 in four detents, the sound's slot 35 with it; back to 01)",
+         b_up == 1 and w_up != 0 and b_back == 0, f"rt_buf_of {b_up} (slot 35 {w_up}), back {b_back}")
+    turn(6, 1, 3)
+    g_up = c.long(lay["rec_gain"])
+    turn(6, -1, 3)
+    g_back = c.long(lay["rec_gain"])
+    link("1f. v0.50: knob G is GAIN (+3 after three detents, back to 0)", g_up == 3 and g_back == 0,
+         f"rec_gain {g_up}, back {g_back}")
     tap(12)                                                      # NO: the panel closed
     link("1d. NO closes FLEX REC", c.long(lay["rec_overlay"]) == 0, f"rec_overlay {c.long(lay['rec_overlay'])}")
     fired0 = c.long(lay["rt_fired"])
@@ -339,6 +362,16 @@ def main() -> int:
         link("7. the render is the take at the note's pitch, from its start", rate is not None and corr > 0.95
              and lag is not None and lag <= 8, f"note {note}, TUNE {tune:+d}: rate {rate}; corr {corr:.4f} with the "
              f"head {lag} frames in")
+    # v0.50: the SYN page's BUF (knob D, record 244) pushed and turned: what the stock knob path writes
+    # is what rt_buf_of reads (v0.44..v0.49 read slot 49 instead)
+    w0 = struct.unpack(">H", c.read(snd + 20 + 2 * 35, 2))[0] >> 8
+    c.panel.push_and_turn(3, 1, times=30)
+    c.periods(3)
+    w1 = struct.unpack(">H", c.read(snd + 20 + 2 * 35, 2))[0] >> 8
+    b1 = c.call(lay["rt_buf_of"], T)[0]
+    want = c.call(lay["rt_buf_value"], w1)[0]
+    link("8. v0.50: the SYN page's BUF knob moves the buffer FLEX records and plays (rt_buf_of follows "
+         "the knob's slot 35)", w1 != w0 and b1 == want and b1 != 0, f"slot 35 {w0} -> {w1}, rt_buf_of {b1}, want {want}")
     return finish()
 
 

@@ -332,60 +332,16 @@ def main() -> int:
         led_up = leds_whole()
         check(".. and the trig LEDs show its recorder trigs (not stock's)", led_up != led_stock,
               f"{led_up[:4]} vs {led_stock[:4]}")
-        # ---- v0.50 (impbox: "BUF can't be set .. no effect"): knob C on FLEX REC turns BUF, a buffer
-        # per four detents, through the knob's own path (the sound's slot 35 at sound + 20 + 2 x 35,
-        # where rt_buf_of reads it); then on to BUF 08 and held there
-        snd_t = kit + 52 + SOUND_STRIDE * T
-
-        def buf_word():
-            return struct.unpack(">H", machine.read(snd_t + 20 + 2 * 35, 2))[0] >> 8
-
-        b0 = call(lay["rt_buf_of"], T)[0]
-        machine.pc = panel.panelin.encoder(machine.m, panel.profile, 2, 4)      # C, four detents
-        panel.settle(10_000_000)
-        b1, w1 = call(lay["rt_buf_of"], T)[0], buf_word()
-        bufs = []
-        for _ in range(8):
-            machine.pc = panel.panelin.encoder(machine.m, panel.profile, 2, 4)
-            panel.settle(10_000_000)
-            bufs.append(call(lay["rt_buf_of"], T)[0])
-        panel.screen("flex_rec_buf")
-        check("v0.50: knob C on FLEX REC turns BUF (01 -> 02 in four detents, the sound's slot 35 "
-              "moved with it), on to 08 and held there",
-              b0 == 0 and b1 == 1 and w1 != 0 and bufs[-1] == 7 and bufs == sorted(bufs) and max(bufs) == 7,
-              f"BUF {b0 + 1} -> {b1 + 1} (slot 35 {w1}), then {[b + 1 for b in bufs]}")
-        # ---- v0.50: knob G is GAIN, a dB a detent, -24..+38 (0 at first)
-        g0 = L("rec_gain")
-        machine.pc = panel.panelin.encoder(machine.m, panel.profile, 6, 3)
-        panel.settle(10_000_000)
-        g1 = L("rec_gain")
-        machine.pc = panel.panelin.encoder(machine.m, panel.profile, 6, -40)
-        panel.settle(10_000_000)
-        g2 = L("rec_gain") - (1 << 32) if L("rec_gain") >= 1 << 31 else L("rec_gain")
-        panel.screen("flex_rec_gain")
-        put32(lay["rec_gain"], 0)
-        check("v0.50: knob G on FLEX REC is GAIN (0, +3 after three detents, held at -24)",
-              g0 == 0 and g1 == 3 and g2 == -24, f"{g0} -> {g1} -> {g2}")
         # (NO through the keys is emu_coupled_flex.py's check, on the firmware's own sequencer: here
         # the sequencer's interrupt was driven by hand above, and stock then takes this NO as its own)
         call(lay["rec_combo"])                              # FUNC + VOICE again: closes
         panel.settle(10_000_000)
         check("FUNC + VOICE again closes it", L("rec_overlay") == 0)
-        # ---- v0.50: the SYN page's BUF (knob D, record 244) pushed and turned down: what the stock
-        # knob path writes is what FLEX's rt_buf_of reads (v0.44..v0.49 read slot 49 instead)
-        panel.tap(key(2))
-        panel.settle(10_000_000)
-        before = (call(lay["rt_buf_of"], T)[0], buf_word())
-        panel.push_and_turn(3, -1, times=60)
-        panel.settle(10_000_000)
-        after = (call(lay["rt_buf_of"], T)[0], buf_word())
-        want_b = call(lay["rt_buf_value"], after[1])[0]
-        panel.screen("flex_syn_buf")
-        check("v0.50: the SYN page's BUF knob moves the buffer FLEX records and plays (rt_buf_of follows "
-              "the knob's slot 35)",
-              after[1] != before[1] and after[0] == want_b and after[0] != before[0],
-              f"BUF {before[0] + 1} (slot 35 {before[1]}) -> {after[0] + 1} (slot 35 {after[1]}), "
-              f"rt_buf_value of the word {want_b + 1}")
+        # (v0.50: FLEX REC's knobs C and G, and the SYN page's BUF, are emu_coupled_flex.py's links 1e,
+        # 1f, 8: here a knob turned on a FLEX track sent the UI task through this harness's SENTINEL
+        # -- stock's event loop jumped to 0x46a20400, the crash dump -- on v0.49's build as on v0.50's,
+        # with the panel opened by a call or by writes; the coupled test drives the firmware's own
+        # interrupts and keys)
 
         # ---- v0.44 F1: the plain RECORDER (an ONESHOT track): CHAN as its own L/R icon over
         # SRC (the same place on the BOUNCE panel); knob B turns it L+R -> L -> R
