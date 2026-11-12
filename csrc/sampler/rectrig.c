@@ -285,7 +285,8 @@ int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
     rt_w[0] = seq;
     rt_w[1] = CMD_NOW;
     rt_w[2] = src > 17 ? 0 : src;
-    rt_w[3] = (chan > 2 ? 2 : chan) | (place / 512u) << 8;
+    extern u32 rec_gain_bits(void);
+    rt_w[3] = (chan > 2 ? 2 : chan) | (place / 512u) << 8 | rec_gain_bits();   /* v0.50: GAIN (rec.c) */
     rt_w[4] = THR_FLOOR | (steps & 0x7FFFu) << 16;   /* the take's steps: the DSP keeps them */
     rt_w[5] = (u32)slot << 24 | frames;
     rt_gen++;

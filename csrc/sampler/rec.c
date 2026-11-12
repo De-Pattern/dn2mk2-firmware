@@ -130,6 +130,15 @@ int trim_zoom __attribute__((section(".data"))) = 0;      /* v0.33: TRIM's zoom,
 u32 trim_pos __attribute__((section(".data"))) = 0;       /* v0.33: its window's first frame */
 int rec_rlen __attribute__((section(".data"))) = 0;         /* 0 MAX, else steps */
 int rec_rstrt __attribute__((section(".data"))) = 0;        /* 0 THRES, 1 PLAY */
+/* v0.50 FLEX REC's G: a buffer take's GAIN in dB, -24..+38 (0: unity at the FLEX track's defaults).
+ * Sent as the record command's channel word bits 24..29, GAIN + 25 (1..63); 0 there, the RECORDER's
+ * own commands, keeps the DSP's v0.49 scaling exactly (dnfw.sampler.program settings()) */
+int rec_gain __attribute__((section(".data"))) = 0;
+u32 rec_gain_bits(void)
+{
+    int g = rec_gain < -24 ? -24 : rec_gain > 38 ? 38 : rec_gain;
+    return (u32)(g + 25) << 24;
+}
 u32 rec_room __attribute__((section(".data"))) = 0;         /* bytes free for the next recording */
 
 /* what the DSP last said */
@@ -263,9 +272,13 @@ static void send(int cmd)
         sent_seq = smp_command_words(w, (u32)cmd, src, chan | (place / 512u) << 8, thr,
                                      (u32)rec_dest << 24 | len);
         rt_q_set(w);
-    } else
-        sent_seq = smp_command((u32)cmd, src, chan | (place / 512u) << 8, thr,
+    } else {
+        /* v0.50: FLEX REC's monitoring carries GAIN, so H's meter is the take's level */
+        extern int bn_active(void);
+        u32 g = cmd == CMD_MONITOR && bn_active() ? rec_gain_bits() : 0u;
+        sent_seq = smp_command((u32)cmd, src, chan | (place / 512u) << 8 | g, thr,
                                (u32)rec_dest << 24 | len);
+    }
     sent_at = FRAMES;
     mon_thres = rec_thres;
     if (rec_link < 0)
@@ -679,7 +692,9 @@ static int rec_choice_step(int index, int delta)    /* -> the choices to move */
 /* a knob on the recorder's screen: INDEX 1..8 (A..H), DELTA detents */
 static void buf_turn(int delta);               /* v0.50: FLEX REC's C, BUF (below) */
 
-static void knob(int index, int delta)
+/* v0.50: no jump tables here (data in .text: cbuild's ColdFire check reads a table's words as
+ * instructions, and one read as a scaled-8 mode once FLEX REC's knobs filled indexes 1..7) */
+__attribute__((optimize("no-jump-tables"))) static void knob(int index, int delta)
 {
     /* v0.41 (docs/rectrig.md): a step held, H is its REC trig's lock (slide.c), on either
      * view; on the REC TRIGS view E and F are QREC and QPLAY (rectrig.c) */
@@ -696,22 +711,30 @@ static void knob(int index, int delta)
             rec_rlen = clamp(rec_rlen + delta, 0, 128);
         else if (index == 3)
             buf_turn(delta);                    /* v0.50: C BUF, the SYN page's (record 244) */
+        else if (index == 7) {
+            rec_gain = clamp(rec_gain + delta, -24, 38);   /* v0.50: G GAIN, a dB a detent */
+            mon_known = 0;                      /* the meter's MONITOR again, with it */
+        }
         else if (index == 1 || index == 2)
             goto as_recorder;
         return;
     }
     /* (v0.44: the REC TRIGS view is gone; REC trigs, Q.REC and Q.PLAY are the BOUNCE REC panel's) */
 as_recorder:
-    switch (index) {
-    case 1: rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1); break;
-    case 2: rec_chan = clamp(rec_chan + rec_choice_step(2, delta), 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
-    case 4: rec_thres = clamp(rec_thres + delta, 0, 120); break;
+    if (index == 1)
+        rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1);
+    else if (index == 2) {
+        rec_chan = clamp(rec_chan + rec_choice_step(2, delta), 0, 2);   /* v0.33: CHAN */
+        mon_known = 0;
+    } else if (index == 4)
+        rec_thres = clamp(rec_thres + delta, 0, 120);
     /* E: v0.33, no DEST (send() takes the first empty slot) */
-    case 6: rec_rlen = clamp(rec_rlen + delta, 0, 128); break;
-    case 7: rec_rstrt = delta > 0 ? 1 : 0; break;
-    case 8: rec_arm_turn(delta); break;
-    default: break;
-    }
+    else if (index == 6)
+        rec_rlen = clamp(rec_rlen + delta, 0, 128);
+    else if (index == 7)
+        rec_rstrt = delta > 0 ? 1 : 0;
+    else if (index == 8)
+        rec_arm_turn(delta);
 }
 
 static int closes(u32 code)

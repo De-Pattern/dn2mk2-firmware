@@ -2284,7 +2284,7 @@ static void step_cell(void *c, int x, int y, u32 v, int head)
 
 static void bn_view_draw(void *c, int heard)
 {
-    extern int rt_on, rt_qrec, rt_arm, rec_rlen, bn_page, bn_sub, rec_src, rec_chan;
+    extern int rt_on, rt_qrec, rt_arm, rec_rlen, bn_page, bn_sub, rec_src, rec_chan, rec_gain;
     extern u32 rt_why, rt_why_at, rt_why_trk, rt_fired_at, rt_fired_trk, bn_said_at, bn_nothing_at;
     extern int bn_said_n;
     extern int rt_state(int b, int *tenths, int *steps);
@@ -2321,21 +2321,44 @@ static void bn_view_draw(void *c, int heard)
         choice(c, 3, TOP_Y, rl, "RLEN", 0);
         choice(c, 0, BOT_Y, rt_arm ? "ON" : "OFF", "ARM", rt_arm);
         choice(c, 1, BOT_Y, rt_qname(rt_qrec), "QREC", 0);
-        /* v0.49 (owner): the buffer's state in G and H's place, no box: a dot and REC while it
-         * records, WAIT while a take waits for Q.REC, else READY and its length, or EMPTY */
+        /* v0.50 (impbox: takes far quieter than their source): G GAIN, the take's level in dB (0:
+         * at the FLEX track's defaults a take plays as loud as its source), set before recording
+         * with H's meter: the source as the take will hold it, GAIN applied, full scale at its
+         * right end */
+        {
+            char gb[5];
+            int g = rec_gain < -24 ? -24 : rec_gain > 38 ? 38 : rec_gain, k = 0, m = g < 0 ? -g : g;
+            gb[k++] = g < 0 ? '-' : g > 0 ? '+' : ' ';
+            if (m >= 10) gb[k++] = (char)('0' + m / 10);
+            gb[k++] = (char)('0' + m % 10);
+            gb[k] = 0;
+            choice(c, 2, BOT_Y, g ? gb : "0", "GAIN", 0);
+            int mx0 = CELL_X(3) + 1, mx1 = CELL_X(3) + 24, my0 = BOT_Y + 5, my1 = BOT_Y + 11, w = mx1 - mx0 - 2;
+            box(c, mx0, my0, mx1, my1, 0);
+            int lv = heard ? meter_x(rec_peak, w) : 0;
+            if (lv > 0)
+                fill(c, mx0 + 1, my0 + 1, mx0 + lv, my1 - 1);
+            if (heard && rec_peak >= 32700)     /* at full scale: the take clips */
+                LABEL(c, CELL_X(3) + 12, BOT_Y - 7, "%s", "CLIP");
+            else
+                LABEL(c, CELL_X(3) + 12, BOT_Y - 7, "%s", "LEVEL");
+        }
+        /* v0.49 (owner): the buffer's state, no box: a dot and REC while it records, WAIT while a
+         * take waits for Q.REC, else READY and its length, or EMPTY. v0.50: in the title line's
+         * right end (G and H are GAIN and the meter) */
         {
             int tenths, steps, st = rt_state((int)b, &tenths, &steps);
-            int x = CELL_X(2) + 12, y = BOT_Y + 6;
+            int x = 125, y = 57;
             (void)steps;
             if (rt_req_waiting())
-                LABEL(c, x + 13, y, "%s", "WAIT QREC");
+                LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%s", "WAIT");
             else if (st == 1) {
-                fill(c, x - 6, y + 1, x - 4, y + 3);
-                LABEL(c, x + 13, y, "REC %d.%dS", tenths / 10, tenths % 10);
+                fill(c, 94, y + 1, 96, y + 3);
+                LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%d.%dS", tenths / 10, tenths % 10);
             } else if (st)
-                LABEL(c, x + 13, y, "READY %d.%dS", tenths / 10, tenths % 10);
+                LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%d.%dS", tenths / 10, tenths % 10);
             else
-                LABEL(c, x + 13, y, "%s", "EMPTY");
+                LABEL_TEXT(c, LABEL_FONT, x, y, 2, 0, 0, "%s", "EMPTY");
         }
         LABEL(c, 116, 2, "%s", "<");
         return;

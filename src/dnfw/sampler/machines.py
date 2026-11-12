@@ -166,6 +166,13 @@ TRK_STRIDE = 0x100                         # + 0x100 k, R at + 0x80 (Overbridge'
 TRK_ROUTE = 0x257898                       # k = the s16 at TRK_ROUTE + 2t (the ColdFire's slot map)
 TRK_GAIN = 11.627                          # 0x1c244d's gain into that buffer, between triggers
 REC_STAGE = 0x2DF800                       # 32 floats of the block being recorded (dnfw.waverider.dsp)
+REC_GAIN = 0x2E0080                        # v0.50: a FLEX take's GAIN index (0 none) and factor (dnfw.waverider.dsp)
+# v0.50 (impbox: FLEX takes far quieter than their source): TRKn is a track's block after its amp,
+# and a sample voice at its defaults reaches there at -21.9 dB of its render (the SHARC runner,
+# 2026-11-12: ONESHOT, LEV 100, render rms 0.61623, amp out 0.049529). A FLEX take of a track is
+# scaled up by that, so at the FLEX track's defaults it plays back as loud as its source
+TRK_UNITY = 0.61623 / 0.049529             # 12.442: x the 1 / TRK_GAIN the RECORDER keeps
+GAIN_ZERO = 25                             # the index of 0 dB: 1..63 is -24..+38 dB
 CMD_OFFSET = 0xF00                         # the command block in the pool's directory page:
 CMD_WORDS = 6                              #   seq, cmd, src, chan, thres (0..32767), dest << 24 | frames
 CMD_NONE, CMD_ARM, CMD_NOW, CMD_STOP, CMD_MONITOR, CMD_ARM_PLAY, CMD_SEND, CMD_VERIFY = 0, 1, 2, 3, 4, 5, 6, 7

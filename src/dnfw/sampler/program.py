@@ -1825,6 +1825,20 @@ def recorder(p: Prog, L: Layout) -> None:
         p.ld(4, cmd + 16)                     # the threshold, 0..32767 for a peak 0..1
         tofloat(p, 5, 4, 1.0 / 32767.0)
         p.st(C["rthr"], 5)
+        # v0.50: a FLEX take's GAIN, the channel word's bits 24..29: 0 none (the RECORDER: v0.49's
+        # scaling, exactly), 1..63 GAIN_ZERO - 24 .. + 38 dB, its factor made here once:
+        # 10^((g - GAIN_ZERO) / 20) as a product over g's bits
+        p.ld(4, cmd + 12)
+        p.lsh(4, 4, -24)
+        p.iconst(12, 0x3F)
+        p.iop(4, 4, "AND", 12)
+        p.st(SM.REC_GAIN, 4)
+        p.fconst(5, 10.0 ** (-SM.GAIN_ZERO / 20.0))
+        for bit in range(6):
+            p.iconst(12, 1 << bit)
+            p.iop(6, 4, "AND", 12)
+            p.ifz(6, "NE", lambda bit=bit: (p.fconst(12, 10.0 ** ((1 << bit) / 20.0)), p.fop(5, 5, "*", 12)))
+        p.st(SM.REC_GAIN + 4, 5)
 
     def new_command():
         p.ld(0, cmd)
@@ -2162,6 +2176,15 @@ def recorder(p: Prog, L: Layout) -> None:
         p.iconst(12, 2)
         p.if_(8, "GE", 12, lambda: (p.fconst(12, 1.0 / SM.TRK_GAIN), p.fop(3, 3, "*", 12)),
               kind="i")                       # a track's slot carries it x TRK_GAIN
+
+        def gained():                         # v0.50: a FLEX take's GAIN (settings()), and a track's
+            p.ld(12, SM.REC_GAIN + 4)         # unity: x TRK_UNITY, the sample voice's -21.9 dB
+            p.fop(3, 3, "*", 12)              # at its defaults made up
+            p.ld(8, C["rsrc"])
+            p.iconst(12, 2)
+            p.if_(8, "GE", 12, lambda: (p.fconst(12, SM.TRK_UNITY), p.fop(3, 3, "*", 12)), kind="i")
+        p.ld(8, SM.REC_GAIN)
+        p.ifz(8, "NE", gained)
         p.fconst(12, 0.999969)
         p.fop(3, 3, "MIN", 12)
         p.fconst(12, -1.0)

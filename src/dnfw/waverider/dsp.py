@@ -123,6 +123,9 @@ SMP_DEC_DM = SMP_LINK_DM + 0x500                        # 16 x 48 bytes, to 0x2e
 # W2's random table (dnfw.waverider.live.rnd_table): Waverider is gone (v0.11), but
 # RESONATOR, CZ and GRAN read it here
 W2_RND_DM = 0x2E0100                                         # 256 float32 in [0, 1)
+# v0.50: the recorder's GAIN (dnfw.sampler.machines.REC_GAIN): a buffer take's dB index (0: none,
+# the RECORDER's v0.49 scaling) and its factor, in the gap the decimators leave before W2_RND_DM
+REC_GAIN_DM = SMP_DEC_DM + 16 * 48                         # 0x2e0080, 2 words
 # PING (docs/ping.md): its code (entered from machine5_live's tail), 16 x 128 bytes
 # of state, a few words of scratch, then its tables (dnfw.ping.live.tables_bytes).
 # v0.45: PING removed. Only its code address stays in use (ping.asm, now the shared tail);
@@ -288,6 +291,7 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("the recorder's staging block: 32 floats (zeros)", SMP_STAGE_DM, bytes(0x80)),
         ("the fast link's scratch and packet buffer (zeros; v0.16)", SMP_LINK_DM, bytes(0x500)),
         ("sample machines' decimators: 16 voices x 48 bytes (zeros; v0.18)", SMP_DEC_DM, bytes(16 * 48)),
+        ("the recorder's GAIN: index, factor (zeros; v0.50)", REC_GAIN_DM, bytes(8)),
         # v0.45: PING removed: ping.asm is the shared tail alone (still at PING_SW; every
         # machine of ours returns through it). PING's state span went with it; the stub pads
         # with zeros to REGION's end, so those bytes still load as zeros.
