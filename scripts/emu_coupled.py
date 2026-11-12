@@ -210,6 +210,7 @@ class Coupled:
         self._tmp = tempfile.TemporaryDirectory(dir=M.OUT)
         snap, m2mach = M.snapshot_path(dk, self.stock7, pathlib.Path(self._tmp.name))
         self.dsp_state = M.init_on(snap, m2mach, img, warm=True)
+        self.dsp_i7 = M.m2.word_reg(self.dsp_state, "I7")    # v0.51: every block called with it (m4.unpack_call)
         self.dsp_instructions = 0
 
     def dsp_word(self, a) -> int:
@@ -309,7 +310,7 @@ class Coupled:
             hooks[k] = (lambda f0, f1: lambda r: (f0(r), f1(r, self)))(hooks[k], fn) if k in hooks \
                 else (lambda f1: lambda r: f1(r, self))(fn)
         f = M.fixups(hooks)
-        r = M.m4.unpack_call(self.dsp_state, frame)
+        r = M.m4.unpack_call(self.dsp_state, frame, i7=self.dsp_i7)
         res = M.fx.run(r, 8_000_000, f)
         if not (res[0] == "halt" and res[1].pc_sw == M.m4.UNPACK_RETURN):
             self.halt = (f"the DSP's block {self.blocks}: {res[1].reason} at {res[1].pc_sw:#x}"

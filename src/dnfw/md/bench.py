@@ -126,3 +126,35 @@ def compare(ours: list[float], theirs: list[float]) -> dict:
     rms = math.sqrt(sum(e * e for e in err) / max(1, len(err)))
     snr = 200.0 if rms == 0 else (20 * math.log10(sig / rms) if sig > 0 else -200.0)
     return {"peak_err": pe, "rms_err": rms, "signal_rms": sig, "snr_db": snr}
+
+
+# v0.51: TRX's hp1/res2 in float (trx2.EXACT False; TRX-CP kept exact). A noise-driven machine (hats,
+# maracas) decorrelates sample for sample through its resonant filters, so it is held to the
+# Machinedrum by level and octave-band shape instead (test_md.py, test_perc_live.py).
+LIKE_LEVEL_DB, LIKE_BAND_DB = 1.0, 3.0
+
+
+def float_filters(name: str) -> bool:
+    """a TRX machine whose filters run in float"""
+    from . import trx2
+    return not trx2.EXACT and name.startswith("TRX-") and name != "TRX-CP"
+
+
+def likeness(ours, theirs, rate: float = 44100.0) -> dict:
+    """level within LIKE_LEVEL_DB and every octave band within 20 dB of the reference's loudest within
+    LIKE_BAND_DB (Hann window over the whole case)"""
+    import math
+    import numpy as np
+
+    def bands(x):
+        a = np.asarray(x, dtype=float)
+        X = np.abs(np.fft.rfft(a * np.hanning(len(a)))) ** 2
+        f = np.fft.rfftfreq(len(a), 1 / rate)
+        e = (0, 250, 500, 1000, 2000, 4000, 8000, 16000, rate / 2 + 1)
+        return [10 * math.log10(X[(f >= lo) & (f < hi)].sum() + 1e-20) for lo, hi in zip(e, e[1:])]
+    lo = sum(v * v for v in ours) / max(1, len(ours))
+    lt = sum(v * v for v in theirs) / max(1, len(theirs))
+    level = 10 * math.log10((lo + 1e-30) / (lt + 1e-30))
+    bo, bt = bands(ours), bands(theirs)
+    dev = max(abs(a - b) for a, b in zip(bo, bt) if b > max(bt) - 20.0)
+    return {"ok": abs(level) <= LIKE_LEVEL_DB and dev <= LIKE_BAND_DB, "level_db": level, "band_dev_db": dev}

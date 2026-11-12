@@ -364,6 +364,81 @@ def _res2_body(p: Prog) -> None:
     p.ipass(4, 9)
 
 
+# v0.51 (owner, the lighter Machinedrum machines, "if they gain from it"): hp1 and res2 in float,
+# not the 56300's exact split products: y = floor((c y[-2] + g y[-1]) / 2^22) + ..., the product
+# sum in float32 (24-bit words: an error of an LSB or so), the rest as before. EXACT = True is the
+# Machinedrum's, bit for bit
+EXACT = False
+
+
+def _coef(p: Prog, d: int, h: int, l: int) -> None:
+    """Fd = the coefficient whose 12-bit pieces (floats) are at I1 + h, l. Clobbers F12, F13."""
+    p.ldi(d, h, 1)
+    p.fconst(12, 4096.0)
+    p.fop(d, d, "*", 12)
+    p.ldi(13, l, 1)
+    p.fop(d, d, "+", 13)
+
+
+def _word_f(p: Prog, d: int, r: int) -> None:
+    """Fd = float(Rr). Clobbers R12."""
+    p.iconst(12, 0)
+    p.float_(d, r, 12)
+
+
+def _hp1f_body(p: Prog) -> None:
+    # I1: [cbh, cbl, gh, gl, y2, y1, u2, u1]; R4 the input -> R4 the output
+    p.ipass(3, 4)
+    _coef(p, 5, 0, 1)
+    p.ldi(4, 4, 1)
+    _word_f(p, 6, 4)
+    p.fop(5, 5, "*", 6)                      # cb y[-2]
+    _coef(p, 7, 2, 3)
+    p.ldi(4, 5, 1)
+    p.sti(4, 1, 4)
+    _word_f(p, 6, 4)
+    p.fop(7, 7, "*", 6)                      # g y[-1]
+    p.fop(5, 5, "+", 7)
+    p.fconst(12, 2.0 ** -22)
+    p.fop(5, 5, "*", 12)
+    p.trunc(9, 5)
+    p.ldi(5, 6, 1)
+    p.iop(9, 9, "+", 5)                      # + u[-2]
+    p.ldi(5, 7, 1)
+    p.iop(9, 9, "-", 5)
+    p.iop(9, 9, "-", 5)                      # - 2 u[-1]
+    p.iop(9, 9, "+", 3)                      # + u
+    p.sti(6, 1, 5)
+    p.sti(7, 1, 3)
+    _clamp(p, 9)
+    p.sti(5, 1, 9)
+    p.ipass(4, 9)
+
+
+def _res2f_body(p: Prog) -> None:
+    # I1: [c1h, c1l, gh, gl, c0h, c0l, y2, y1]; R4 the input -> R4 the output
+    _word_f(p, 8, 4)                         # x
+    _coef(p, 5, 0, 1)
+    p.ldi(4, 6, 1)
+    _word_f(p, 6, 4)
+    p.fop(5, 5, "*", 6)                      # c1 y[-2]
+    _coef(p, 7, 2, 3)
+    p.ldi(4, 7, 1)
+    p.sti(6, 1, 4)
+    _word_f(p, 6, 4)
+    p.fop(7, 7, "*", 6)                      # g y[-1]
+    p.fop(5, 5, "+", 7)
+    _coef(p, 7, 4, 5)
+    p.fop(7, 7, "*", 8)                      # c0 x
+    p.fop(5, 5, "+", 7)
+    p.fconst(12, 2.0 ** -22)
+    p.fop(5, 5, "*", 12)
+    p.trunc(9, 5)
+    _clamp(p, 9)
+    p.sti(7, 1, 9)
+    p.ipass(4, 9)
+
+
 HP1_N, RES2_N = 8, 8
 HPC_N, RES4_N = 2 * HP1_N + 2, 2 * RES2_N
 
@@ -382,15 +457,22 @@ def at(p: Prog, off: int) -> None:
     p.seti(1, 13)
 
 
-def hp1(p: Prog, off: int) -> None:
-    """R4 = one word through the hp1 at state words OFF.. (R11 the state base)."""
+def hp1(p: Prog, off: int, exact: bool = False) -> None:
+    """R4 = one word through the hp1 at state words OFF.. (R11 the state base). EXACT: the
+    56300's arithmetic whatever the module's EXACT says (v0.51: TRX-CP's)."""
     at(p, off)
-    p.call("trx_hp1", lambda: _hp1_body(p))
+    if EXACT or exact:
+        p.call("trx_hp1", lambda: _hp1_body(p))
+    else:
+        p.call("trx_hp1f", lambda: _hp1f_body(p))
 
 
-def res2(p: Prog, off: int) -> None:
+def res2(p: Prog, off: int, exact: bool = False) -> None:
     at(p, off)
-    p.call("trx_res2", lambda: _res2_body(p))
+    if EXACT or exact:
+        p.call("trx_res2", lambda: _res2_body(p))
+    else:
+        p.call("trx_res2f", lambda: _res2f_body(p))
 
 
 def delay2(p: Prog, off: int) -> None:
@@ -402,18 +484,18 @@ def delay2(p: Prog, off: int) -> None:
     p.ipass(4, 5)
 
 
-def hpc(p: Prog, off: int) -> None:
+def hpc(p: Prog, off: int, exact: bool = False) -> None:
     """The high-pass cascade (md_models.hp_cascade) at state words OFF..: hp1, hp1, then
     the two-sample delay. R4 in, R4 out."""
-    hp1(p, off)
-    hp1(p, off + HP1_N)
+    hp1(p, off, exact)
+    hp1(p, off + HP1_N, exact)
     delay2(p, off + 2 * HP1_N)
 
 
-def res4(p: Prog, off: int) -> None:
+def res4(p: Prog, off: int, exact: bool = False) -> None:
     """Two res2 (md_models.resonator4) at state words OFF.."""
-    res2(p, off)
-    res2(p, off + RES2_N)
+    res2(p, off, exact)
+    res2(p, off + RES2_N, exact)
 
 
 def clear(p: Prog, offs) -> None:
@@ -744,7 +826,7 @@ class TRXCP:
 
         def room():
             fibw(p, 6, 7, 4)
-            res4(p, TRXCP.RR)
+            res4(p, TRXCP.RR, exact=True)    # v0.51: the clap stays exact (its RATE 0 burst, a band 8 dB off in float)
             p.ipass(6, 4)
             p.ld(5, C["a"])
             wmul(p)                                   # (stored as a word, read back below)
@@ -793,8 +875,8 @@ class TRXCP:
             wmul(p)
             ss(p, 0, 4)                               # e = sat(mpy(dec, e))
             p.ld(4, C["c"])
-            hpc(p, TRXCP.HP)
-            res4(p, TRXCP.RC)
+            hpc(p, TRXCP.HP, exact=True)
+            res4(p, TRXCP.RC, exact=True)
             p.ldi(5, 0, 5)                            # the room's word
             iadd(p, 4, 4, 5)
             p.ash(4, 4, -2)

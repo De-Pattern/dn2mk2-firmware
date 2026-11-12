@@ -190,12 +190,18 @@ def fixups(hooks=None) -> fx.Fixups:
     return f
 
 
-def unpack_call(state_runner, frame: bytes):
+def unpack_call(state_runner, frame: bytes, i7: int | None = None):
     """A fresh call of sw 0x1c2712 the way sw 0x1c9e76 makes it (0x1c9fbc), with FRAME
-    in the frame source it copies from."""
+    in the frame source it copies from. I7: the stack pointer to call with (v0.51: the coupled
+    harness gives every block the same one; by default the state's, which a run stopped at the
+    return leaves 0x120 words lower each block: 460 blocks walk it from L1 block 2's top into
+    our scratch in block 1, where the stores of a full TX packet hit the frame -- the
+    'return target 0x1' halt at block 459 of emu_coupled_flex, v0.49 to v0.51; on the unit
+    the engine task's caller restores its stack every call)"""
     s = state_runner.state
     idx = m2.word(s, RX_INDEX) or 0
-    i7 = m2.word_reg(state_runner, "I7")
+    if i7 is None:
+        i7 = m2.word_reg(state_runner, "I7")
     rx = RX_BASE + (idx << 8)
     r = state_runner.fresh_call(UNPACK, regs={"R4": 0x268438, "R8": UNPACK_LOCAL, "R12": rx,
                                               "I6": i7, "I7": i7 - 16},

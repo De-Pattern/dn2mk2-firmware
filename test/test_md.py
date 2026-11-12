@@ -34,8 +34,32 @@ def test_machine_matches_the_machinedrum(name):
         ours, theirs = B.run_case(M, case)
         r = B.compare(ours, theirs)
         if r["snr_db"] < LOWER.get(name, MIN_SNR_DB) and r["rms_err"] > QUIET_RMS:
+            if _float_filters(name):
+                # v0.51: TRX's hp1/res2 in float (trx2.EXACT): a noise-driven machine (hats,
+                # maracas) decorrelates sample for sample through its resonant filters, so it is
+                # held to the Machinedrum by level and octave-band shape instead (dnfw.mnm.bench's
+                # likeness at 44.1 kHz; measured 0.0 dB on every case)
+                lk = _likeness(ours, theirs)
+                if lk["ok"]:
+                    continue
+                bad.append((case["name"], "likeness", round(lk["level_db"], 2), round(lk["band_dev_db"], 1)))
+                continue
             bad.append((case["name"], round(r["snr_db"], 1), r["rms_err"]))
     assert not bad, f"{name}: {bad}"
+
+
+_float_filters = B.float_filters
+_likeness = B.likeness
+
+
+def test_float_filter_likeness_has_teeth():
+    """the negative control: the likeness bound refuses a hat 2 dB down"""
+    if not B.golden_available():
+        pytest.fail("no reference: see test_the_reference_is_there")
+    case = B.golden("TRX-CH")["cases"][0]
+    ours, theirs = B.run_case(MM.BY_NAME["TRX-CH"], case)
+    assert _likeness(ours, theirs)["ok"]
+    assert not _likeness([v * 0.79 for v in ours], theirs)["ok"]
 
 
 def _catmull(a, b, c, d, f):

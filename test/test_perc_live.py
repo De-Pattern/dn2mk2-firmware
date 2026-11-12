@@ -96,6 +96,11 @@ def test_the_voice_plays_the_machinedrums_default_hit_at_48k(name):
         return
     want = _resampled(MDB.unpack(case["out"])[32 * start:], len(ours))
     r = MDB.compare(ours, want)
+    if MDB.float_filters(name) and not (r["snr_db"] > 60 or r["rms_err"] < 2 ** -20):
+        # v0.51: TRX's filters in float (dnfw.md.bench.likeness): held by level and spectrum
+        lk = MDB.likeness(ours, want, 48000.0)
+        assert lk["ok"], (r, lk)
+        return
     assert r["snr_db"] > 60 or r["rms_err"] < 2 ** -20, r
 
 

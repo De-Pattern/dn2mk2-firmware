@@ -30,7 +30,7 @@ nosamp (track 1's voices' SAMP zeroed in the frame: fails at 6, silence), wrongb
 one buffer on: fails at 6, silence: the next buffer is empty), v0.51 noclear (NO for CLEAR's
 YES: fails at 9b).
 
-v0.51, link 4d: FLEX REC's settings (the track's own, in its sound) changed while a take runs leave
+v0.51, link 10: TUNE's knob, a detent a fine step and FUNC + turn 12 semitones. Link 4d: FLEX REC's settings (the track's own, in its sound) changed while a take runs leave
 that take as it started. Links 9a..9c: CLEAR BUF n? (FUNC + NO on REC SETUP): NO keeps the take, YES empties the
 buffer, and a note on the track no longer selects it.
 
@@ -420,6 +420,30 @@ def main() -> int:
     want = c.call(lay["rt_buf_value"], w1)[0]
     link("8. v0.50: the SYN page's BUF knob moves the buffer FLEX records and plays (rt_buf_of follows "
          "the knob's slot 35)", w1 != w0 and b1 == want and b1 != 0, f"slot 35 {w0} -> {w1}, rt_buf_of {b1}, want {want}")
+    # v0.51 (owner: "the normal turn of the tuning encoder moves in increments of .01, the FUNC + turn
+    # snaps to 12.0 increments", WaveTone's Osc1 Tune, the same record 238): knob A on the SYN page
+    def tune_word():
+        return struct.unpack(">H", c.read(snd + 20 + 2 * SLOT_TUNE, 2))[0]
+    t0 = tune_word()
+    c.panel.screen("v051_tune_0")
+    turn(0, 1, 1)
+    t1 = tune_word()
+    c.panel.screen("v051_tune_fine")
+    held(17, True)
+    turn(0, 1, 1)
+    held(17, False)
+    t2 = tune_word()
+    c.panel.screen("v051_tune_func_up")
+    held(17, True)
+    turn(0, -1, 2)
+    held(17, False)
+    t3 = tune_word()
+    c.panel.screen("v051_tune_func_down")
+    rep["numbers"]["tune_words"] = [t0, t1, t2, t3]
+    link("10. v0.51: TUNE (knob A) a detent is a fine step (at most 0.01 of a semitone: 3/256), FUNC + turn "
+         "12.00 up (stock's jump: onto the next whole 12 or by 12), then two down",
+         0 < t1 - t0 <= 3 and (t2 == t0 + 12 * 256 or t2 - t1 == 12 * 256) and t3 - t2 == -24 * 256,
+         f"TUNE words {t0:#06x} -> {t1:#06x} (a detent) -> {t2:#06x} (FUNC +1) -> {t3:#06x} (FUNC -2)")
     return finish()
 
 
