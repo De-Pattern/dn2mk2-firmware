@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.49** | 2026-11-11 | FLEX, the live-buffer machine that replaces BOUNCE: recorder trigs on steps ([TRIG] a one-shot, FUNC + [TRIG] every pass) record a track, IN or MAIN into one of 8 buffers for R.LEN steps, and the FLEX track plays the take with its own notes (ONESHOT's page, BUF 01..08); FLEX REC's two pages (REC TRIGS, REC SETUP); Q.REC; old BOUNCE tracks open as FLEX; the DSP guard gives sample voices their time first and stops a dropped one cleanly; STRT/LEN/LOOP turned mid-note no longer move the playhead | `builds/v0.49-FLEX/` | yes |
+| **v0.50** | 2026-11-12 | FLEX takes of a track at the track's level (v0.49's were very quiet); GAIN on REC SETUP (G, -24..+38 dB) with a level meter on H; BUF fixed (the take was read 14 slots off) and C BUF on REC SETUP; impbox's fixes: TUNE rounds, SMP readable with TRK held, page-2 locks shown, E/F pushed clear SLD/SLEN; gate: SHARC step flexlevel, the link steps ~20x faster | `builds/v0.50-LEVEL/` | yes |
+| v0.49 | 2026-11-11 | FLEX, the live-buffer machine that replaces BOUNCE: recorder trigs on steps ([TRIG] a one-shot, FUNC + [TRIG] every pass) record a track, IN or MAIN into one of 8 buffers for R.LEN steps, and the FLEX track plays the take with its own notes (ONESHOT's page, BUF 01..08); FLEX REC's two pages (REC TRIGS, REC SETUP); Q.REC; old BOUNCE tracks open as FLEX; the DSP guard gives sample voices their time first and stops a dropped one cleanly; STRT/LEN/LOOP turned mid-note no longer move the playhead | `builds/v0.49-FLEX/` | yes |
 | v0.48 | 2026-11-10 | STRT/LEN/LOOP as the DT2's fine controls (0.00..120.00, the stock fine knob, push + turn whole steps; the DSP plays from that exact place); THRES fixed (the meter's scale, live while armed); KEYBOARD kept through grid recording; turned values shown on the sample pages; SLICE's keys as the DT2's; the RECORDER's text inside its boxes; BOUNCE's code out (old projects load, the track silent); gate: the first step on both processors together (THRES), fineswap, fineknob | `builds/v0.48-FINE/` | yes |
 | v0.47 | 2026-11-09 | the Monomachine's TUNE reads -64..+63 (0 in tune), FUNC + turn a semitone at a time; the TRIM preview 6 dB quieter (back at v0.37..v0.39's level); the RECORDER's INTO box smaller; BOUNCE out of MACHINE SEL (old BOUNCE tracks still load); gate: its reuse cache refuses passes from another worktree | `builds/v0.47-TUNED/` | yes |
 | v0.46 | 2026-11-09 | recordings (RECORD NOW, a BOUNCE take saved with FUNC + YES) also copied into +DRIVE > RECORDED under their own name; FILE NAME up to 35 characters, RENAME long names, a new folder up to 30; BOUNCE's BUF reads 1..8; gate: the copy with a power cut after every step, a full +Drive, a send mid-copy | `builds/v0.46-KEEPER/` | yes |
@@ -87,6 +88,64 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.50 — LEVEL (FLEX GAIN and level, BUF fixed, impbox's fixes)
+
+`DN2mod_v0.50_LEVEL_OS1.11.syx`
+sha256 `fabbcc911269bec9d8e9c12fd5118a6733bbbb08eed98af0d2f1ddeaa4b6127c`
+Gate: CLEARED TO FLASH, 2026-11-12 (51 gates; 47 reused; run step by step under the two-hour job limit, each reused pass one of this same build whose every input is byte-identical; the SHARC steps under PyPy). Source: commit `419bc03` (branch `v050`).
+
+Everything in v0.49, plus (each with the commit that adds it, so it can be taken out alone):
+
+**FLEX takes at the source's level** (Discord, 2026-11-11: FLEX takes very quiet). A take of a track
+is now scaled to the track's level as it sounds (in the fabbcc911269bec9d8e9c12fd5118a6733bbbb08eed98af0d2f1ddeaa4b6127cRC runner the take's playback is within
+0.01 dB of the source at GAIN 0; v0.49 was 7.4 dB low there, and quieter still on hardware). A take
+of IN keeps the input's level, as before. Commits `8dca826`, `240d693`.
+
+**GAIN on REC SETUP** (owner): knob G, -24..+38 dB, 0 the source's level. H shows a level meter of the
+source (CLIP at full scale). The RECORDER's takes are unchanged. Commit `8dca826`.
+
+**BUF fixed** (impbox): FLEX's BUF knob wrote one place and the take was read from another (v0.44..v0.49
+read a sound's control 14 slots too far), so a BUF other than 01 could play the wrong buffer. Now BUF on
+the SYN page and **C BUF on REC SETUP** (new) move the same buffer, the one recorded into and played.
+Commit `fd552c8`.
+
+**impbox's other fixes** (commit `fd552c8`):
+- TUNE's box rounds (it showed 0.99 for 1.00).
+- With TRK held, the SMP box's letters stay readable (stock fills the box).
+- A p-locked control on sample page 2's bottom row shows its lock (inverted).
+- Pushing E or F (SLD/SLEN) on held steps clears their slides.
+
+**Gate:** new fabbcc911269bec9d8e9c12fd5118a6733bbbb08eed98af0d2f1ddeaa4b6127cRC runner step `flexlevel` (a FLEX take of a track plays back at the source's level at
+GAIN 0, and 6 dB down at GAIN -6, unclipped; the RECORDER's command, 7.4 dB lower, as the negative
+control); the coupled FLEX test turns C BUF, G GAIN and the SYN page's BUF on the real knobs and checks
+the buffer FLEX records into and plays. Gate speed: the long sample-link steps about 20x faster
+(`docs/gate-speed.md`), every report identical.
+
+**Tests**
+1. FLEX, REC SETUP: SRC TRK n (a track playing), GAIN 0. Record. Close the panel, play the take: about
+   as loud as the track itself. **Please report:** if it is quieter, raise GAIN until the take matches
+   the track and tell us the GAIN number (it calibrates the unit's level, which the emulator can't).
+2. GAIN +6 / -6: the take 6 dB louder / quieter. H's meter moves with the source; CLIP when it clips.
+3. SRC IN: a take at the input's level, as in v0.49.
+4. REC SETUP's C: BUF 01..08; the SYN page's BUF follows it, and the other way round. Two FLEX tracks on
+   BUF 02 and BUF 05: each plays its own take.
+5. TUNE at 1.00 shows 1.00.
+6. Hold TRK on a sample machine's page: SMP readable.
+7. Lock a control on sample page 2's bottom row: it shows inverted on the locked step.
+8. Hold steps with slides, push E (or F): SLD/SLEN cleared on those steps.
+9. Everything from v0.49.
+
+**Not verified on hardware:** the TRK level (the emulator has no master path, so the unit's own scaling
+is calibrated from test 1); MAIN and IN takes are scaled as in v0.49.
+
+**Known issues**
+- R.LEN with R.STRT PLAY not stopping (impbox): not reproduced at R.LEN 1; waiting for a further report.
+- R.LEN 64 with pattern length 64 (impbox): open; a red trig on FLEX REC records every pass by design,
+  details asked.
+- NiKo: FLEX REC's PAGE LED doesn't follow the page: open, photo asked.
+- STRETCH: an old project that stopped all sound and clicks looping short segments: open.
+- Everything listed for v0.49 except impbox's reports fixed above.
 
 ## v0.49 — FLEX (the live-buffer machine, the guard, the playhead)
 
