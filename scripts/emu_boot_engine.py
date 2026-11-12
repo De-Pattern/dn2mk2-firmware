@@ -170,6 +170,10 @@ def main() -> int:
     p.add_argument("--filter-type", type=int, action="append", default=[],
                    help="after the engine, SAVE and LOAD a sound with this filter type "
                         "(sound+0xDF, stored+245); repeatable")
+    p.add_argument("--fx-roundtrip", action="store_true",
+                   help="v0.51: SAVE and LOAD a FLEX sound with FLEX REC's settings in its words "
+                        "(rectrig.c fx_set: slots 38, 46, 40, 32, 37, 27, SRC's low byte the mark 0xF1); "
+                        "every word must come back as it went")
     p.add_argument("--filter-max", type=int, default=5,
                    help="the highest filter type the build's LOAD keeps (5 stock; 6 with PING, v0.27..v0.44)")
     args = p.parse_args()
@@ -365,6 +369,31 @@ def main() -> int:
               f"(want {want}); value array {'kept' if values_same else 'changed'} by the round trip")
         if not ok:
             fails.append(f"machine type {v} did not round-trip as {want}")
+
+    # v0.51 (impbox: FLEX REC's settings saved with the project): they live in the FLEX sound's
+    # words (rectrig.c fx_set), so SAVE then LOAD must give every one back, its low byte too (SRC's
+    # carries the mark that says the words are FLEX REC's)
+    if args.fx_roundtrip:
+        base = after.long(0x800052A0)
+        real = bytes(after.uc.mem_read(base + 52, SOUND_BYTES)) if base else bytes(SOUND_BYTES)
+        s = bytearray(real)
+        s[MACHINE_TYPE] = 17
+        want = {38: 0x05F1, 46: 0x0200, 40: 0x4000, 32: 0x1F00, 37: 0x0300, 27: 0x0000}
+        for slot, w in want.items():
+            s[20 + 2 * slot:22 + 2 * slot] = struct.pack(">H", w)
+        live = after.alloc(SOUND_BYTES + 16)
+        after.write(live, bytes(s))
+        stored = after.alloc(STORED + 16)
+        after.call(SAVE, stored, live, 0)
+        back = after.alloc(SOUND_BYTES + 16)
+        after.call(LOAD, back, stored)
+        got = {slot: struct.unpack(">H", bytes(after.uc.mem_read(back + 20 + 2 * slot, 2)))[0] for slot in want}
+        typ = bytes(after.uc.mem_read(back + MACHINE_TYPE, 1))[0]
+        ok = got == want and typ == 17
+        print(f"  {'ok  ' if ok else 'FAIL'}  FLEX REC's settings through SAVE and LOAD: "
+              f"{ {k: hex(v) for k, v in got.items()} } (want { {k: hex(v) for k, v in want.items()} }), type {typ}")
+        if not ok:
+            fails.append("FLEX REC's settings did not round-trip")
 
     # The filter type, the same way: PING (v0.27..v0.44) widened the LOAD bound (0x400dd2bc)
     # so type 6 survived; stock (and v0.45, PING removed) loads anything above 5 as 0, Multi-Mode.

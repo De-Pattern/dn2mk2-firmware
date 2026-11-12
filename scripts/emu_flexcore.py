@@ -187,7 +187,7 @@ def main() -> int:
 
     # ---- the buffers on (a directory read), the allocator keeps clear of the buffer's plan ----
     put32(lay["smp_dir_ok"], 1)
-    put32(lay["rec_rlen"], 1)                          # FLEX REC's R.LEN: one step
+    call(lay["fx_set"], T, 2, 1)                       # FLEX REC's R.LEN: one step (v0.51: the track's, FX_RLEN)
     call(lay["rt_poll"])
     put32(FRAMES, machine.long(FRAMES) + 200)
     call(lay["rt_poll"])
@@ -232,11 +232,11 @@ def main() -> int:
           f"{[rec_lock(table, 4), rec_lock(table, 8)]}")
     check(".. and the FLEX voice hears buffer 1 (SAMP 129) once it has a take", heard and heard[0] in (0, 129)
           and heard[-1] == 129, f"{sorted(set(heard))}")
-    put32(lay["rt_arm"], 0)
+    call(lay["fx_set"], T, 5, 0)                       # v0.51: the track's ARM (FX_ARM) OFF
     fired1 = L("rt_fired")
     passes(1)
     check("ARM OFF: a pass fires nothing", L("rt_fired") == fired1, f"fired +{L('rt_fired') - fired1}")
-    put32(lay["rt_arm"], 1)
+    call(lay["fx_set"], T, 5, 1)
     put32(VOICE_SOUND + 4 * 0, 0)
     put32(FRAMES, frames0)                             # the clock back where the UI left it
 

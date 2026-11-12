@@ -185,6 +185,49 @@ static u32 ctl(u32 t, u32 slot)                 /* a track's control, as its sou
     return snd ? (u32)(*(const u16 *)(snd + SOUND_PARAMS + 2u * slot)) >> 8 : 0;
 }
 
+/* v0.51 (impbox: "the flex record settings also need to be saved with the project or pattern";
+ * owner: per track): FLEX REC's SRC, CHAN, R.LEN, GAIN, Q.REC and ARM live in the FLEX track's own
+ * sound, as BUF does, so they are saved with the kit, follow the pattern, and each FLEX track has
+ * its own. The words are the recorder's records' slots (dnfw.sampler.machines RECORDS: SRC 38,
+ * R.LEN 40, CHAN 46, ARM 27, Q.REC on DEST's 37, GAIN on THRES's 32), none of them FLEX's page's or
+ * read by the DSP for a FLEX voice; the value is the word's high byte (GAIN as GAIN + 25). A
+ * sound written so carries FX_MARK in SRC's low byte: an older FLEX track (v0.49, v0.50), whose
+ * words hold the shared records' defaults, reads the v0.50 defaults until it is first set. */
+#define FX_MARK 0xF1u
+static const u8 FX_SLOT[FX_N] = {38, 46, 40, 32, 37, 27};
+static const short FX_LO[FX_N] = {0, 0, 0, -24, 0, 0};
+static const short FX_TOP[FX_N] = {SMP_REC_SOURCES - 1, 2, 128, 38, 8, 1};
+static const short FX_DEF[FX_N] = {0, 0, 0, 0, 0, 1};       /* IN, L+R, MAX, 0 dB, OFF, ON */
+int fx_valid(u32 t)
+{
+    const u8 *snd = sound_of(t);
+    return snd && (*(const u16 *)(snd + SOUND_PARAMS + 2u * FX_SLOT[FX_SRC]) & 0xFFu) == FX_MARK;
+}
+int fx_get(u32 t, int k)                        /* the setting K (FX_*) of FLEX track T */
+{
+    if ((u32)k >= FX_N)
+        return 0;
+    if (!fx_valid(t))
+        return FX_DEF[k];
+    int v = (int)ctl(t, FX_SLOT[k]) + (k == FX_GAIN ? -25 : 0);
+    return v < FX_LO[k] ? FX_LO[k] : v > FX_TOP[k] ? FX_TOP[k] : v;
+}
+void fx_set(u32 t, int k, int v)                /* the UI's (rec.c): the word, the mark with it */
+{
+    const u8 *snd = sound_of(t);
+    if (!snd || (u32)k >= FX_N)
+        return;
+    volatile u16 *w = (volatile u16 *)(snd + SOUND_PARAMS);
+    if (!fx_valid(t)) {                          /* first set: every setting at its default, marked */
+        for (int j = 0; j < FX_N; j++)
+            w[FX_SLOT[j]] = (u16)((u32)(FX_DEF[j] + (j == FX_GAIN ? 25 : 0)) << 8);
+        w[FX_SLOT[FX_SRC]] = (u16)(w[FX_SLOT[FX_SRC]] | FX_MARK);
+    }
+    v = v < FX_LO[k] ? FX_LO[k] : v > FX_TOP[k] ? FX_TOP[k] : v;
+    u16 low = k == FX_SRC ? FX_MARK : 0;
+    w[FX_SLOT[k]] = (u16)((u32)(v + (k == FX_GAIN ? 25 : 0)) << 8 | low);
+}
+
 int rt_is_bounce(u32 t)                         /* v0.49: FLEX (type 17, BOUNCE's) on track t */
 {
     const u8 *snd = sound_of(t);
@@ -217,8 +260,8 @@ u32 rt_buf_of(u32 t)                            /* the buffer a FLEX track names
 extern int rec_rlen, rec_src, rec_chan;
 static u32 rlen_of(u32 t)                       /* R.LEN steps (0 MAX: the pattern's length) */
 {
-    (void)t;
-    u32 n = rec_rlen > 0 ? (u32)rec_rlen : 0u;
+    int r = fx_get(t, FX_RLEN);                 /* v0.51: the track's own (fx_get) */
+    u32 n = r > 0 ? (u32)r : 0u;
     return n > 0 && n <= 128 ? n : (u32)master_len();
 }
 
@@ -282,13 +325,13 @@ int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
         refuse(track, 3);
         return 0;
     }
-    u32 src = rec_src < 0 ? 0u : (u32)rec_src, chan = rec_chan < 0 ? 0u : (u32)rec_chan;
+    u32 src = (u32)fx_get(track, FX_SRC), chan = (u32)fx_get(track, FX_CHAN);   /* v0.51: the track's own */
     u32 seq = 0x80008000u | (++rt_n & 0x7FFFu);  /* low half's bit 15: a buffer take (rec.c) */
     rt_w[0] = seq;
     rt_w[1] = CMD_NOW;
     rt_w[2] = src > 17 ? 0 : src;
-    extern u32 rec_gain_bits(void);
-    rt_w[3] = (chan > 2 ? 2 : chan) | (place / 512u) << 8 | rec_gain_bits();   /* v0.50: GAIN (rec.c) */
+    u32 gain = (u32)(fx_get(track, FX_GAIN) + 25) << 24;   /* v0.50: GAIN (rec.c rec_gain_bits); v0.51 the track's */
+    rt_w[3] = (chan > 2 ? 2 : chan) | (place / 512u) << 8 | gain;
     rt_w[4] = THR_FLOOR | (steps & 0x7FFFu) << 16;   /* the take's steps: the DSP keeps them */
     rt_w[5] = (u32)slot << 24 | frames;
     rt_gen++;
@@ -353,9 +396,13 @@ void rt_flex_req(u32 t)
 {
     rt_req = t < 16 ? t + 1u : 0u;
 }
+static int req_q(void)                         /* v0.51: Q.REC of the track a FLEX take is asked for */
+{
+    return rt_req ? fx_get(rt_req - 1u, FX_QREC) : 0;
+}
 int rt_req_waiting(void)
 {
-    return rt_req != 0 && QSTEPS[rt_qrec] != 0 && SEQ_PLAYING;
+    return rt_req != 0 && QSTEPS[req_q()] != 0 && SEQ_PLAYING;
 }
 static void req_fire(void)
 {
@@ -377,7 +424,7 @@ static u8 *pat_table(void)
  * on this step's boundary */
 void rt_frame(void)
 {
-    if (rt_req && SEQ_PLAYING && QSTEPS[rt_qrec] == 0)   /* v0.49: Q.REC OFF: at once */
+    if (rt_req && SEQ_PLAYING && QSTEPS[req_q()] == 0)   /* v0.49: Q.REC OFF: at once */
         req_fire();
     if (!SEQ_PLAYING) {
         rt_pos = -1;
@@ -398,7 +445,7 @@ void rt_frame(void)
         if (cur == rt_last_step[t])
             continue;
         rt_last_step[t] = cur;
-        if (!table || cur > 127 || !rt_arm || !rt_is_bounce(t))
+        if (!table || cur > 127 || !rt_is_bounce(t) || !fx_get(t, FX_ARM))   /* v0.51: the track's ARM */
             continue;
         u32 v = sl_lock_get(table, t, cur, 2);
         if (v == RT_TRIG || v == RT_ONESHOT) {
@@ -419,7 +466,7 @@ void rt_frame(void)
         q_fire = q_gen;
         rt_qfired++;
     }
-    if (rt_req && on_boundary(rt_qrec, p))      /* v0.49: a FLEX take at its Q.REC boundary */
+    if (rt_req && on_boundary(req_q(), p))      /* v0.49: a FLEX take at its Q.REC boundary */
         req_fire();
 }
 

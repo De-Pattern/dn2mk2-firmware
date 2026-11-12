@@ -557,6 +557,33 @@ static void rec_wave_add(u32 frames, int peak)
 static void rpt_poll(void);
 
 static void fb_pv_poll(void);
+/* v0.51 (impbox; owner: per track): FLEX REC's settings are the FLEX track's, kept in its sound
+ * (rectrig.c fx_get / fx_set): with the panel up on a FLEX track the panel's values are loaded from
+ * it (rec_poll, every pass: a pattern change shows the new pattern's), and a knob turned there
+ * writes them back. The RECORDER's own (another machine) stay the instrument's, unsaved */
+extern int fx_get(u32 t, int k);
+extern void fx_set(u32 t, int k, int v);
+extern int fx_valid(u32 t);
+extern int rt_qrec, rt_arm;
+static void fx_load(void)
+{
+    u32 t = UI_TRACK_B;
+    rec_src = fx_get(t, FX_SRC);
+    rec_chan = fx_get(t, FX_CHAN);
+    rec_rlen = fx_get(t, FX_RLEN);
+    rec_gain = fx_get(t, FX_GAIN);
+    rt_qrec = fx_get(t, FX_QREC);
+    rt_arm = fx_get(t, FX_ARM);
+}
+static void fx_save(void)
+{
+    u32 t = UI_TRACK_B;
+    int v[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm};
+    for (int k = 0; k < FX_N; k++)
+        if (!fx_valid(t) || fx_get(t, k) != v[k])
+            fx_set(t, k, v[k]);
+}
+
 void rec_poll(void)
 {
     /* v0.48: a turned control's value shows for a second (smp_page.c shows()); then its
@@ -577,6 +604,16 @@ void rec_poll(void)
     fb_pv_poll();
     extern void rt_poll(void);
     extern int rt_manual, rt_q_waiting(void);
+    if (bn_active()) {                          /* v0.51: FLEX REC shows the track's own settings */
+        int was[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm};
+        fx_load();
+        int now[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm};
+        for (int k = 0; k < FX_N; k++)
+            if (was[k] != now[k]) {
+                smp_overlay_dirty = 1;
+                mon_known = 0;                  /* the meter's MONITOR for the new SRC, CHAN, GAIN */
+            }
+    }
     rt_poll();                                  /* v0.41: the REC buffers (rectrig.c) */
     if (bn_yes_at && FRAMES - bn_yes_at >= 600u) {   /* v0.44: a single YES on a BOUNCE track */
         bn_yes_at = 0;
@@ -699,6 +736,7 @@ static int rec_choice_step(int index, int delta)    /* -> the choices to move */
 /* a knob on the recorder's screen: INDEX 1..8 (A..H), DELTA detents */
 static void buf_turn(int delta);               /* v0.50: FLEX REC's C, BUF (below) */
 
+
 /* v0.50: no jump tables here (data in .text: cbuild's ColdFire check reads a table's words as
  * instructions, and one read as a scaled-8 mode once FLEX REC's knobs filled indexes 1..7) */
 __attribute__((optimize("no-jump-tables"))) static void knob(int index, int delta)
@@ -710,7 +748,13 @@ __attribute__((optimize("no-jump-tables"))) static void knob(int index, int delt
     if (index == 8 && sl_rec_knob(delta))
         return;
     if (bn_active()) {                          /* v0.49 FLEX REC (both pages): A SRC, B CHAN, D R.LEN, E ARM, F Q.REC */
-        if (index == 6)
+        fx_load();                              /* v0.51: the track's own, then kept in its sound */
+        if (index == 1)
+            rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1);
+        else if (index == 2) {
+            rec_chan = clamp(rec_chan + rec_choice_step(2, delta), 0, 2);
+            mon_known = 0;
+        } else if (index == 6)
             rt_knob(5, delta);                  /* Q.REC: four detents a choice */
         else if (index == 5)
             rt_knob(7, delta);                  /* ARM: four detents a choice */
@@ -722,12 +766,10 @@ __attribute__((optimize("no-jump-tables"))) static void knob(int index, int delt
             rec_gain = clamp(rec_gain + delta, -24, 38);   /* v0.50: G GAIN, a dB a detent */
             mon_known = 0;                      /* the meter's MONITOR again, with it */
         }
-        else if (index == 1 || index == 2)
-            goto as_recorder;
+        fx_save();
         return;
     }
     /* (v0.44: the REC TRIGS view is gone; REC trigs, Q.REC and Q.PLAY are the BOUNCE REC panel's) */
-as_recorder:
     if (index == 1)
         rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1);
     else if (index == 2) {
@@ -876,6 +918,10 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
          * 2 x slot 35; v0.49 wrote + 48, slot 49, and BUF stayed at its shared default) */
         volatile unsigned short *buf = (volatile unsigned short *)(KIT + 52u + 1163u * track + 20u + 2u * 35u);
         *buf = 0;
+        /* v0.51: and FLEX REC's settings at their defaults (rectrig.c fx_get: unmarked, whatever
+         * the words held) */
+        volatile unsigned short *src = (volatile unsigned short *)(KIT + 52u + 1163u * track + 20u + 2u * 38u);
+        *src = (unsigned short)(*src & 0xFF00u);
     }
     /* v0.33: a Monomachine machine starts as its own (dnfw.mnm DEFAULTS: SID on a square
      * wave), not at the shared records' defaults (the owner: SID silent at first, on MIX) */

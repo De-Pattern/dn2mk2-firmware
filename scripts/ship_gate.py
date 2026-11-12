@@ -659,6 +659,8 @@ def main() -> int:
         types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",
                                             "--filter-type", "8", "--filter-max", "5"]
                                            if dsp_changed else [])
+        if "fx_get" in W.SPEC.get("layout", {}):   # v0.51: FLEX REC's settings in the sound, through SAVE/LOAD
+            types += ["--fx-roundtrip"]
         eng_cmd = [a.venv, "-u", "scripts/emu_boot_engine.py", "--build", bdir, "--frames", "8", *types]
 
         def eng_body(tdir):

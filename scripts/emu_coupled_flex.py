@@ -30,7 +30,8 @@ nosamp (track 1's voices' SAMP zeroed in the frame: fails at 6, silence), wrongb
 one buffer on: fails at 6, silence: the next buffer is empty), v0.51 noclear (NO for CLEAR's
 YES: fails at 9b).
 
-v0.51, links 9a..9c: CLEAR BUF n? (FUNC + NO on REC SETUP): NO keeps the take, YES empties the
+v0.51, link 4d: FLEX REC's settings (the track's own, in its sound) changed while a take runs leave
+that take as it started. Links 9a..9c: CLEAR BUF n? (FUNC + NO on REC SETUP): NO keeps the take, YES empties the
 buffer, and a note on the track no longer selects it.
 
 Usage: emu_coupled_flex.py --build out/v049.syx [--break notrig|nosamp|wrongbuf|noclear]
@@ -167,9 +168,9 @@ def main() -> int:
                                  "periods_waited": 2 * n}
     pat = c.long(SEQ_PATTERN)
     c.poke(pat + PAT_LENGTH, struct.pack(">H", 4))
-    c.put32(lay["rec_src"], 0)
-    c.put32(lay["rec_rlen"], 1)
-    rep["setup"].append(("pattern 4 steps; the panel's SRC IN and R.LEN 1 step (rec_src, rec_rlen)", "direct: written"))
+    c.call(lay["fx_set"], T, 0, 0)                               # v0.51: the track's own (FX_SRC, FX_RLEN)
+    c.call(lay["fx_set"], T, 2, 1)
+    rep["setup"].append(("pattern 4 steps; the track's SRC IN and R.LEN 1 step (fx_set)", "direct: written"))
     c.input = chirp
     c.periods(4, label="settle")
     if not link("0. track 1 is FLEX", c.read(snd + 0xDE, 1)[0] == FLEX, f"type {c.read(snd + 0xDE, 1)[0]}"):
@@ -211,8 +212,9 @@ def main() -> int:
     g_up = c.long(lay["rec_gain"])
     turn(6, -1, 3)
     g_back = c.long(lay["rec_gain"])
-    link("1f. v0.50: knob G is GAIN (+3 after three detents, back to 0)", g_up == 3 and g_back == 0,
-         f"rec_gain {g_up}, back {g_back}")
+    fx_g = c.call(lay["fx_get"], T, 3)[0]
+    link("1f. v0.50: knob G is GAIN (+3 after three detents, back to 0; v0.51: kept in the track's sound)",
+         g_up == 3 and g_back == 0 and fx_g == 0, f"rec_gain {g_up}, back {g_back}; the sound's {fx_g}")
     tap(12)                                                      # NO: the panel closed
     link("1d. NO closes FLEX REC", c.long(lay["rec_overlay"]) == 0, f"rec_overlay {c.long(lay['rec_overlay'])}")
     fired0 = c.long(lay["rt_fired"])
@@ -229,6 +231,10 @@ def main() -> int:
         st = c.last_status[0]
         if rec_at is None and st & 0xFF00 == 0x5A00 and st & 3 == 2:
             rec_at = n
+            # v0.51: the settings changed while the take runs (as a pattern change to one whose FLEX
+            # track holds others would): R.LEN 3, SRC MAIN. The take keeps its own (4b, 4d)
+            c.call(lay["fx_set"], T, 2, 3)
+            c.call(lay["fx_set"], T, 0, 1)
         if rec_at is not None and end_at is None and not (st & 0xFF00 == 0x5A00 and st & 3 == 2):
             end_at = n
             break
@@ -273,6 +279,10 @@ def main() -> int:
     link("4b. the take is the input", corr > 0.99, f"{frames} frames, corr {corr:.4f} at input sample {lag}")
     tv = c.call(lay["rt_trig_get"], table, T, 0)[0] & 0xFFFF
     link("4c. the one-shot is spent (3)", tv == 3, f"rt_trig_get {tv}")
+    bpm120 = struct.unpack(">H", c.read(0x80005E60 + 2 * 108, 2))[0] or 14400
+    one = 86400000 // bpm120
+    link("4d. v0.51: settings changed mid-take (R.LEN 3, SRC MAIN): the take keeps its own R.LEN (one step) "
+         "and SRC (4b)", abs(frames - one) <= 64, f"{frames} frames, one step {one}")
 
     # the note: KEYBOARD on (a tap toggles it), [TRIG 9] held; the voice's buffer read right
     # after our voices render (ping.asm's entry), before the stock chain clears it

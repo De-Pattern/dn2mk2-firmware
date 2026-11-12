@@ -399,6 +399,8 @@ def smp_c_header() -> str:
             f"#define SMP_REC_SECONDS10 {_smp.REC_FRAMES * 10 // 48000}\n"
             f"#define SMP_REC_SOURCES {len(_smp.SRC_NAMES)}\n"
             f"#define SMP_REC_CHANS {len(_smp.CHAN_NAMES)}\n"
+            # v0.51: FLEX REC's settings kept per track in its sound (rectrig.c fx_get / fx_set)
+            "#define FX_SRC 0\n#define FX_CHAN 1\n#define FX_RLEN 2\n#define FX_GAIN 3\n#define FX_QREC 4\n#define FX_ARM 5\n#define FX_N 6\n"
             f"static const char smp_rec_chan[3][4] = {{{', '.join(q + m + q for m in ('L+R', 'L', 'R'))}}};\n"
             f"static const char smp_rec_src[{len(_smp.SRC_NAMES)}][8] = {{{', '.join(q + m + q for m in _smp.SRC_NAMES)}}};\n"
             f"static const char smp_bars[8][4] = {{{', '.join(q + b + q for b in ('1', '2', '4', '8', '8', '8', '8', '8'))}}};\n"
