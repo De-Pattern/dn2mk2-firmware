@@ -58,6 +58,25 @@ Owner, 2026-11-11: proceed with v0.49 (the playhead fix in it); 2..6 to the fix 
    note) are still emulated wrong: fix the EMAC itself (or model each), then put every coupled test on
    it. emu_coupled_recplay (not a gate step) fails at 6a on v0.48 and v0.49 alike: out of date.
 
+## v0.49 FLEX reports, 2026-11-11 (impbox, AnnKorr; not yet triaged with the owner)
+
+1. **BUF can't be set on REC SETUP** (its box only shows the track's BUF: the panel's knobs are A SRC,
+   B CHAN, D R.LEN, E ARM, F Q.REC; no knob turns C). **The SYN page's BUF seems to have no effect**
+   (impbox). Recording and playback both follow `rt_buf_of(t)` (sound slot 35 through
+   `rt_buf_value`, which scales by stock record 244's range words). The gate only checks a fresh
+   track's BUF 01 (flex link 1c): a step turning BUF through 01..08 and recording into each is missing.
+2. **A FLEX take is much quieter than the input** (impbox), with no way to bring it up. Takes are
+   never normalised (rectrig.c), unlike the RECORDER's (v0.40). Options: a record GAIN on REC SETUP,
+   or a louder LEV range for FLEX.
+3. (request) **Double buffering**: a REC trig every pass on step 1 should let step 1's note play the
+   previous pass's take, not the growing one. BOUNCE's two halves per buffer are still in rectrig.c
+   (`rt_play[b]`, forced to the recording half in v0.49): record into one half, play the other, flip
+   when the take completes.
+4. (request) **The buffers as samples in the other machines** (GRID, ONESHOT ...), as REC 1/REC 2 and
+   SAMP 124-127 were.
+5. AnnKorr: a good sample chop needs about 3 voices; voices are "a juggling act" with sampling and the
+   new machines (and she likes the sound of voices being eaten). A comment, not a bug report yet.
+
 ## After v0.40 (owner, 2026-11-02 / 11-03)
 
 In this order unless the owner changes it:
