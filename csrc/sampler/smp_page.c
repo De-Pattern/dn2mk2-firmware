@@ -187,6 +187,17 @@ static void glyph_in(void *c, int x, int y, char ch, int xa, int xb)   /* a glyp
         }
 }
 
+/* v0.51: a short word in the 3x5 glyphs, centred at CX, its bottom row at Y */
+static void glyphs_at(void *c, int cx, int y, const char *s)
+{
+    int n = 0;
+    while (s[n])
+        n++;
+    int x = cx - (4 * n - 1) / 2;
+    for (int k = 0; k < n; k++)
+        glyph(c, x + 4 * k, y, s[k], 1);
+}
+
 static void w_bipolar(void *c, int x, int y, int word, u32 id)
 {
     int cx = x + 12, x0 = cx - 10, x1 = cx + 10, y0 = y + 1, y1 = y + 15;
@@ -2382,19 +2393,29 @@ static void bn_view_draw(void *c, int heard)
          * the word level with the top row's values, the take's length under it, LEFT's arrow at
          * the bottom */
         {
+            /* in the 3x5 glyphs (4 pixels a character: READY and EMPTY fit the 21-pixel column;
+             * the label font's capitals did not) */
             int tenths, steps, st = rt_state((int)b, &tenths, &steps);
-            int x = 10, y = TOP_Y + 6;
             (void)steps;
             const char *word = st == 1 ? "REC" : st ? "READY" : "EMPTY";
             if (bn_cleared == 2 && FRAMES_NOW - bn_cleared_at < 3000u)   /* v0.51: CLEAR while it records */
                 word = "BUSY";
             else if (rt_req_waiting())
                 word = "WAIT";
-            LABEL(c, x, y, "%s", word);
+            glyphs_at(c, 11, TOP_Y + 7, word);
             if (st == 1 && word[0] == 'R')                       /* recording: a dot over the word */
-                fill(c, x - 1, y + 9, x + 1, y + 11);
-            if (st)
-                LABEL(c, x, TOP_Y - 7, "%d.%dS", tenths / 10, tenths % 10);
+                fill(c, 10, TOP_Y + 14, 12, TOP_Y + 16);
+            if (st) {
+                char len[8];
+                int k = 0, s10 = tenths / 10;
+                if (s10 >= 10) len[k++] = (char)('0' + s10 / 10 % 10);
+                len[k++] = (char)('0' + s10 % 10);
+                len[k++] = '.';
+                len[k++] = (char)('0' + tenths % 10);
+                len[k++] = 'S';
+                len[k] = 0;
+                glyphs_at(c, 11, TOP_Y - 6, len);
+            }
         }
         LABEL_TEXT(c, LABEL_FONT, 2, 0, 0, 0, 0, "%s", "<");
         return;

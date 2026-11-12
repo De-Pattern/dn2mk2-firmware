@@ -424,6 +424,12 @@ def main() -> int:
     # snaps to 12.0 increments", WaveTone's Osc1 Tune, the same record 238): knob A on the SYN page
     def tune_word():
         return struct.unpack(">H", c.read(snd + 20 + 2 * SLOT_TUNE, 2))[0]
+
+    def turn(enc, delta, n):                    # a stock page's knob: link 8's settle between detents
+        for _ in range(n):
+            c.machine.pc = P.encoder(c.machine.m, c.panel.profile, enc, delta)
+            c.panel.settle()
+        c.periods(4)
     t0 = tune_word()
     c.panel.screen("v051_tune_0")
     turn(0, 1, 1)
