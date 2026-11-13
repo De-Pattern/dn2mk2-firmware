@@ -432,6 +432,33 @@ def main() -> int:
     span = 101
     link("8b. v0.54: the SYN page's BUF knob sits on its buffer's own value (the knob drawn moves only "
          "with the buffer)", w1 == (b1 * span + 7) // 8, f"slot 35 {w1}, buffer {b1 + 1}, its value {(b1 * span + 7) // 8}")
+    # v0.54 (owner: BUF doesn't show its number when p-locked and highlighted): [TRIG 1] held, BUF
+    # locked by a turn; once the turn's second has passed (smp_knob_at set back 2 s) the highlighted
+    # cell still shows the number in the label's place, not the label BUF it shows unlocked.
+    # (last: the lock stays on step 1)
+    def lit():
+        f = c.panel.capture.frames
+        return set(c.panel.panel.lit(bytes(f[-1]))) if f else set()
+
+    def aged():
+        c.poke(lay["smp_knob_at"], struct.pack(">I", (c.long(0x4058E8D4) - 3000) & 0xFFFFFFFF))
+        c.periods(6)
+    held(25, True)
+    c.panel.push_and_turn(3, 1, times=8)
+    c.periods(3)
+    aged()
+    c.panel.screen("v054_buf_locked")
+    lit_l = lit()
+    held(25, False)
+    aged()
+    c.panel.screen("v054_buf_unlocked")
+    lit_u = lit()
+    region = {(x, y) for x in range(100, 123) for y in range(27, 34)}
+    shown_l = {q for q in region if q not in lit_l}             # the inverted cell: its text unlit
+    shown_u = {q for q in region if q in lit_u}
+    link("8c. v0.54: a p-locked BUF, highlighted, keeps its number in the label's place (not BUF)",
+         shown_l and shown_u and shown_l != shown_u, f"label pixels locked {len(shown_l)}, unlocked {len(shown_u)}, "
+         f"differing {len(shown_l ^ shown_u)}")
     # (v0.51: TUNE's knob, a detent 0.01 and FUNC + turn 12.00, is stock's own on record 238 and unchanged;
     # this harness's encoder pulses do not reach a stock page's knob here, 8 pulses after SRC left the word as
     # it was, so TUNE's new display is checked in emu_rectext.py, its knob in the gate's functurn step)

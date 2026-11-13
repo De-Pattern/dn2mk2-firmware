@@ -527,7 +527,11 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
         }
     }
     extern int smp_values_held(void);
-    if (labelled && id && shows(cell_i)) {     /* v0.35: SYN held (v0.48: or just turned): the value, as the record's */
+    /* v0.54 (owner: BUF doesn't show its number when p-locked and highlighted): its dial says
+     * nothing about which buffer, so a locked BUF keeps its number (01..08) in the label's
+     * place for as long as it is shown locked, not only the second after a turn */
+    int buf_lock = labelled && id == SMP_BUF_ID && kind == SMP_BOUNCE_KIND && locked(view, id);
+    if (labelled && id && (shows(cell_i) || buf_lock)) {     /* v0.35: SYN held (v0.48: or just turned): the value, as the record's */
         char vb[32];                            /* formatter writes it for the header (O14) */
         u8 flag;
         vb[0] = 0;
