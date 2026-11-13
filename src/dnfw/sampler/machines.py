@@ -146,7 +146,22 @@ TABLE_ROOM = 512 << 10
 TABLE_AREA = SLICE_AREA - TABLE_ROOM
 TABLE_READY = SLICE_AREA - 512
 TABLE_MAGIC = 0x4D4E5442                   # "BTNM" in memory
+# READY's second word, the
+# checksum of the bytes the ColdFire shipped (table_sum, link.c's checksum). The ready word is in the pool's DDR and
+# nothing clears it: a restart that keeps DDR (the restart after a flash: assumed, not verified) left the build
+# before's magic there, and the new DSP decoded the old build's tables at once, before the ColdFire sent its own,
+# then never again. With the sum the DSP decodes only this build's tables: another build's word never matches.
+TABLE_SUM_AT = 4                           # its offset from TABLE_READY
 TABLE_LOAD = 0x47000000                    # their bytes in the ColdFire's RAM (a CODE chunk): magic, length, data
+
+
+def table_sum(data: bytes) -> int:
+    """the shipped tables' checksum, as csrc/sampler/link.c's checksum() computes it over TABLE_LOAD's data"""
+    a, b = 1, 0
+    for x in data:
+        a = (a + x) & 0xFFFFFFFF
+        b = (b + a) & 0xFFFFFFFF
+    return ((b << 16) ^ a) & 0xFFFFFFFF
 REC_BYTES = TABLE_AREA - REC_OFFSET        # v0.23: the recordings' area ends at the slice area (v0.26: the tables)
 USER_HOLE = (REC_OFFSET, REC_END)           # yours: 0..96 MB, then 128..400 MB (dn2samples.py skips the hole)
 HOLE_BYTES = REC_END - REC_OFFSET              # what a send skips: the recordings and the slice area

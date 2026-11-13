@@ -107,6 +107,29 @@ writes `TABLE_MAGIC` at `TABLE_READY`. The DSP's `table_fill` (`dnfw.md.core`) w
 that word, then decodes zpack 2,048 words a block, as before. PERC's voices, the Machinedrum
 machines' too, stay silent until the fill is whole (about 40 blocks).
 
+**READY carries this build's checksum.** K_READY writes two words: `TABLE_MAGIC`, then at
+`TABLE_READY + TABLE_SUM_AT` the checksum of the bytes it shipped (link.c's `checksum`,
+computed once at boot from the CODE chunk; `dnfw.sampler.machines.table_sum`). `table_fill`
+decodes only when both match what this build ships (`dnfw.md.core.table_sum`, built into
+section 7 from the same bytes). Before, the magic alone opened the decode.
+
+Why: the ready word lives in the pool's DDR and nothing clears it; the decode position
+(`fill`, `cw`, `cs`, `cv`) is in L1 and starts at 0 every boot. If DDR keeps its contents
+through the restart after a flash (**not verified on a unit**), the new DSP finds the build
+before's magic at once, decodes the build before's table bytes before the ColdFire sends its
+own, reaches `Z_N` and never decodes again. Tables both builds share decode the same, so
+only what a release added or changed comes out wrong. A power-off loses DDR: the decode
+waits for this boot's READY, as designed. Seen once on a unit: an engine whose tables were
+new in that build was silent on the first boot after the flash and played after a power
+cycle.
+
+The wait is safe: every ColdFire boot (power-on, the restart after a flash, a restart from
+the menu) starts `smp_tables` at 0 and sends the tables, then READY, once the +Drive is up
+and the DSP's RAM check has answered (or four seconds passed): the path a power-on has
+always taken. A stale word from this same build matches and decodes at once, from bytes
+that are this build's. Runner step `tableready` (`scripts/sharc_table_ready.py`): the three
+cases, each decoded word against the model's.
+
 What ships: the Machinedrum's host pitch table and zpack, which now also carries the
 Monomachine's tables after the sine (`TABLE_LAYOUT["mnm"]`, starting a block). They are
 stored compactly, and the fill restores them exactly:

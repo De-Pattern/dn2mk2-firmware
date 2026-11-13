@@ -737,6 +737,7 @@ static int l_entry __attribute__((section(".data"))) = -1;       /* the entry du
  * power-on, the +Drive's image or not; READY's magic once every chunk checked out */
 #define TBL ((const u8 *)TABLE_LOAD)
 int smp_tables __attribute__((section(".data"))) = 0;   /* 0 not yet, 1 sending, 2 sent, -1 none */
+static u32 tbl_sum __attribute__((section(".data"))) = 0;   /* the shipped bytes' checksum, sent in READY */
 static u32 tbl_bytes(void)
 {
     if (le32(TBL) != TABLE_MAGIC)
@@ -1130,8 +1131,11 @@ void smp_load(void)                             /* load (again) whatever the ima
     smp_hi = header_read();
     dir_ok = smp_hi != 0;
     meta_read();
-    if (smp_tables == 0)                        /* v0.26: the tables, once, first */
+    if (smp_tables == 0) {                      /* v0.26: the tables, once, first */
         smp_tables = tbl_bytes() ? 1 : -1;
+        if (smp_tables == 1)                    /* 2026-11-12: READY's second word (dnfw.sampler.machines TABLE_SUM_AT) */
+            tbl_sum = checksum(TBL + 8, le32(TBL + 4));
+    }
     if (!dir_ok && smp_tables != 1) {
         smp_lstate = L_IDLE;
         return;
@@ -1202,6 +1206,7 @@ static void load_poll(void)
             for (u32 k = 0; k < n; k++)
                 STAGE(0)[k] = 0;
             put_le32(STAGE(0), TABLE_MAGIC);
+            put_le32(STAGE(0) + TABLE_SUM_AT, tbl_sum);     /* this build's tables, not another's (SM.table_sum) */
         } else if (l_kind == K_PREVIEW) {                   /* v0.33: +DRIVE's preview, from the library */
             extern int smp_lib_read(int k, u32 off, u32 bytes, void *buf);
             if (pv_k < 0 || smp_lib_read(pv_k, l_off - pv_off, n, STAGE(0)) != 0) {
