@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.51** | 2026-11-12 | lighter Monomachine and Machinedrum machines, not bit for bit (SID -64 %, DDRW -43 %, DENS -40 %, VO-6 -9 %, TRX-CY -33 %, TRX-MA -26 %), so more voices before the guard drops one; FLEX REC's settings per track, saved with the kit; CLEAR BUF (FUNC + NO); REC SETUP's state in the left column; sample TUNE plays its fine values and is drawn as WaveTone's ruler | `builds/v0.51-LIGHTER/` | yes |
+| **v0.52** | 2026-11-12 | FLEX MUTE SRC: REC SETUP's knob H takes the SRC track out of the mix (its level and FX sends) while FLEX still records it; the RECORDER's R.LEN counts steps at the pattern's scale (impbox) | `builds/v0.52-MUTE/` | yes |
+| v0.51 | 2026-11-12 | lighter Monomachine and Machinedrum machines, not bit for bit (SID -64 %, DDRW -43 %, DENS -40 %, VO-6 -9 %, TRX-CY -33 %, TRX-MA -26 %), so more voices before the guard drops one; FLEX REC's settings per track, saved with the kit; CLEAR BUF (FUNC + NO); REC SETUP's state in the left column; sample TUNE plays its fine values and is drawn as WaveTone's ruler | `builds/v0.51-LIGHTER/` | yes |
 | v0.50 | 2026-11-12 | FLEX takes of a track at the track's level (v0.49's were very quiet); GAIN on REC SETUP (G, -24..+38 dB) with a level meter on H; BUF fixed (the take was read 14 slots off) and C BUF on REC SETUP; impbox's fixes: TUNE rounds, SMP readable with TRK held, page-2 locks shown, E/F pushed clear SLD/SLEN; gate: SHARC step flexlevel, the link steps ~20x faster | `builds/v0.50-LEVEL/` | yes |
 | v0.49 | 2026-11-11 | FLEX, the live-buffer machine that replaces BOUNCE: recorder trigs on steps ([TRIG] a one-shot, FUNC + [TRIG] every pass) record a track, IN or MAIN into one of 8 buffers for R.LEN steps, and the FLEX track plays the take with its own notes (ONESHOT's page, BUF 01..08); FLEX REC's two pages (REC TRIGS, REC SETUP); Q.REC; old BOUNCE tracks open as FLEX; the DSP guard gives sample voices their time first and stops a dropped one cleanly; STRT/LEN/LOOP turned mid-note no longer move the playhead | `builds/v0.49-FLEX/` | yes |
 | v0.48 | 2026-11-10 | STRT/LEN/LOOP as the DT2's fine controls (0.00..120.00, the stock fine knob, push + turn whole steps; the DSP plays from that exact place); THRES fixed (the meter's scale, live while armed); KEYBOARD kept through grid recording; turned values shown on the sample pages; SLICE's keys as the DT2's; the RECORDER's text inside its boxes; BOUNCE's code out (old projects load, the track silent); gate: the first step on both processors together (THRES), fineswap, fineknob | `builds/v0.48-FINE/` | yes |
@@ -89,6 +90,52 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.52 — MUTE (FLEX MUTE SRC, R.LEN at the pattern's scale)
+
+`DN2mod_v0.52_MUTE_OS1.11.syx`
+sha256 `08dd58e75bd5958f21a8fb5866110b847fa92ddfacaad47f867562377ab27a13`
+Gate: CLEARED TO FLASH, 2026-11-12 (52 gates; 41 reused, each a pass of this same build whose every input is byte-identical; the run spanned three jobs under the two-hour limit). Source: commit `34bf713` (branch `v052`). Docs: `docs/flex-design.md` (MUTE SRC).
+
+Everything in v0.51, plus (each with the commit that adds it, so it can be taken out alone):
+
+**FLEX: MUTE SRC** (dreamsaremaps, Error Kit; owner: option B, on "the whole time"):
+- REC SETUP's knob H is MUTE (OFF / ON, four detents a choice). With SRC set to a track and MUTE ON,
+  that track's voices have their LEVEL and their three FX sends at 0 in the frame for as long as MUTE
+  is ON, with a short fade (32 frames) both ways.
+- The track still plays, so FLEX records it at full level (the TRK source is the block before LEVEL
+  and the sends).
+- Saved in the FLEX track's sound with the other REC SETUP settings.
+- Not stock mute: the track's LED and the mute screens don't change; stock mute/solo still work.
+  "--" shows when SRC is IN, MAIN or the FLEX track itself.
+- The level meter moved to the left column, under the buffer's state; CLIP shows above it.
+
+Commit `c98da10`.
+
+**RECORDER R.LEN at the pattern's scale** (impbox: R.LEN 64 not stopping): R.LEN now counts the
+pattern's steps at its scale (1/8x..2x). Before, it always counted 1x sixteenths, so at 2x a 64-step
+R.LEN lasted two passes of a 64-step pattern. Commit `afde0cd`.
+
+**Gate:**
+- **`mute` (coupled, both processors):** knob H turns MUTE ON; the mask names the SRC track; its
+  voices' LEVEL, sends and the DSP's unpacked LEVEL are 0 after the fade; other voices unchanged; the
+  TRK source as loud muted as unmuted (within 3 dB); OFF gives them back. Negative control
+  (`--break nomute`) fails at links 1 to 3.
+- **`rectext`:** REC SETUP with MUTE ON changes only SRC's and H's boxes; CLIP at 66 s.
+- **The engine step:** MUTE through SAVE and LOAD.
+
+**Tests**
+1. A FLEX track, SRC TRK n, MUTE ON: track n goes silent in the mix (sends too) and its LED doesn't
+   change. Record it: the take has the track at full level.
+2. MUTE OFF: track n comes back. Listen for any click at ON/OFF.
+3. SAVE, power cycle, reload: MUTE is kept on that FLEX track.
+4. The RECORDER at scale 2x, R.LEN 16, R.STRT PLAY: the take stops after 16 steps of the pattern.
+
+**Known issues**
+- FLEX REC's PAGE LED doesn't follow the page (NiKo): open; needs a photo or video of stock's page
+  LEDs with a 64-step pattern (page 2 open while page 1 plays).
+- R.LEN equal to the pattern length on a red (every pass) FLEX recorder trig records continuously, by
+  design. Use a one-shot (yellow) to record once.
 
 ## v0.51 — LIGHTER (lighter Monomachine and Machinedrum machines, FLEX per track, CLEAR, fine TUNE)
 
@@ -153,7 +200,7 @@ tick, with octave numbers every 12 and dots every 3. The knob is stock's: a dete
 turn is 12.00. Commit `a10d38b`.
 
 **Gate:**
-- **c48ad00ff2fc5f873903789dad9aaa58eadcbc1782f0107525e4af726bd3c0ffRC runner `smp`:** plays TUNE +0.50 and -0.01 and measures the rate (1.02875 and 0.9993).
+- **The SHARC runner `smp`:** plays TUNE +0.50 and -0.01 and measures the rate (1.02875 and 0.9993).
 - **`rectext`:** checks REC SETUP's state column in every state at 66.0 s, and the TUNE ruler at six
   values.
 - **The coupled FLEX test:** CLEAR (NO keeps the take, YES empties the buffer and the track goes
