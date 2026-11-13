@@ -175,6 +175,12 @@ def main() -> int:
     c.periods(4, label="settle")
     if not link("0. track 1 is FLEX", c.read(snd + 0xDE, 1)[0] == FLEX, f"type {c.read(snd + 0xDE, 1)[0]}"):
         return finish()
+    # v0.54 (owner): a switch to FLEX puts the track's trig LEN (TRIG page 1; the pattern's byte at
+    # +1153 + 1701 x track, stock's setter 0x4004eecc) at INF, 127; another track keeps stock's 1/16, 14
+    tl = c.read(pat + 1153 + 1701 * T, 1)[0]
+    tl0 = c.read(pat + 1153, 1)[0]
+    link("0b. v0.54: switching to FLEX sets the track's trig LEN to INF (127); track 0 (not switched) keeps its own",
+         tl == 127 and tl0 != 127, f"track {T} {tl}, track 0 {tl0}")
     held(16, True)
     tap(24 + T + 1)                                              # [TRK] + [TRIG 2]: track 1
     held(16, False)
@@ -215,6 +221,23 @@ def main() -> int:
     fx_g = c.call(lay["fx_get"], T, 3)[0]
     link("1f. v0.50: knob G is GAIN (+3 after three detents, back to 0; v0.51: kept in the track's sound)",
          g_up == 3 and g_back == 0 and fx_g == 0, f"rec_gain {g_up}, back {g_back}; the sound's {fx_g}")
+    # v0.53 (owner): FUNC + D moves R.LEN a bar (16 steps) a detent, onto the bars (20 -> 32 -> 16 -> 0
+    # MAX); without FUNC, a step a detent as before (0 -> 1). Put back as it was for the take
+    rl0 = c.call(lay["fx_get"], T, 2)[0]
+    c.call(lay["fx_set"], T, 2, 20)
+    held(17, True)
+    turn(3, 1, 1)
+    rl_up = c.call(lay["fx_get"], T, 2)[0]
+    turn(3, -1, 1)
+    rl_dn = c.call(lay["fx_get"], T, 2)[0]
+    turn(3, -1, 1)
+    rl_0 = c.call(lay["fx_get"], T, 2)[0]
+    held(17, False)
+    turn(3, 1, 1)
+    rl_1 = c.call(lay["fx_get"], T, 2)[0]
+    c.call(lay["fx_set"], T, 2, rl0)
+    link("1g. v0.53: FUNC + D moves R.LEN a bar a detent, onto the bars (20 -> 32 -> 16 -> MAX); D alone a step",
+         (rl_up, rl_dn, rl_0, rl_1) == (32, 16, 0, 1), f"20 -> {rl_up} -> {rl_dn} -> {rl_0}; alone {rl_1}")
     tap(12)                                                      # NO: the panel closed
     link("1d. NO closes FLEX REC", c.long(lay["rec_overlay"]) == 0, f"rec_overlay {c.long(lay['rec_overlay'])}")
     fired0 = c.long(lay["rt_fired"])
@@ -420,6 +443,65 @@ def main() -> int:
     want = c.call(lay["rt_buf_value"], w1)[0]
     link("8. v0.50: the SYN page's BUF knob moves the buffer FLEX records and plays (rt_buf_of follows "
          "the knob's slot 35)", w1 != w0 and b1 == want and b1 != 0, f"slot 35 {w0} -> {w1}, rt_buf_of {b1}, want {want}")
+    # v0.54 (owner: BUF's detents are right, but the knob should not show it moving through them): the
+    # word is always a buffer's own value, lo + ceil(b x span / 8) of record 244 (0..100), never one
+    # in between, so the knob drawn from it jumps buffer to buffer
+    span = 101
+    link("8b. v0.54: the SYN page's BUF knob sits on its buffer's own value (the knob drawn moves only "
+         "with the buffer)", w1 == (b1 * span + 7) // 8, f"slot 35 {w1}, buffer {b1 + 1}, its value {(b1 * span + 7) // 8}")
+    # v0.54 (owner: BUF doesn't show its number when p-locked and highlighted): [TRIG 1] held, BUF
+    # locked by a turn in GRID RECORD (outside it the turn moves the track's own BUF, no lock); once the turn's second has passed (smp_knob_at set back 2 s) the highlighted
+    # cell still shows the number in the label's place, not the label BUF it shows unlocked.
+    # (last: the lock stays on step 1)
+    def lit():
+        f = c.panel.capture.frames
+        return set(c.panel.panel.lit(bytes(f[-1]))) if f else set()
+
+    def aged():
+        c.poke(lay["smp_knob_at"], struct.pack(">I", (c.long(0x4058E8D4) - 3000) & 0xFFFFFFFF))
+        c.periods(6)
+    tap(19)                                                      # GRID RECORD: a held trig takes locks
+    held(25, True)
+    c.panel.push_and_turn(3, 1, times=8)
+    c.periods(3)
+    aged()
+    c.panel.screen("v054_buf_locked")
+    lit_l = lit()
+    held(25, False)
+    aged()
+    c.panel.screen("v054_buf_unlocked")
+    lit_u = lit()
+    tap(19)
+    cell = {(x, y) for x in range(99, 124) for y in range(31, 38)}   # BUF's label line (128 x 64)
+    inv = len(cell & lit_l) * 2 > len(cell)                          # highlighted: the cell's ground lit
+    shown_l = {q for q in cell if q not in lit_l}                    # the inverted cell: its text unlit
+    shown_u = {q for q in cell if q in lit_u}
+    link("8c. v0.54: a p-locked BUF, highlighted, keeps its number in the label's place (not BUF)",
+         inv and shown_l and shown_u and shown_l != shown_u, f"highlighted {inv}, label pixels locked "
+         f"{len(shown_l)}, unlocked {len(shown_u)}, differing {len(shown_l ^ shown_u)}")
+    # v0.53 (NiKo: a BUF lock on a playback trig was ignored, the voice played the track's BUF):
+    # every buffer given a take (their sizes poked: which buffer the voice is sent is what is
+    # tested), STOP and PLAY replay step 1, whose BUF 8c locked to another buffer than the
+    # track's: its voice is sent a buffer, and not the track's
+    bt = c.call(lay["rt_buf_of"], T)[0]
+    c.poke(lay["rt_rbytes"], struct.pack(">16I", *([4096] * 16)))
+    c.poke(lay["rt_play"], b"\x00" * 8)
+    c.poke(lay["rt_on"], struct.pack(">i", 1))
+    bufw = {(SM.BUF_SAMP0 + 2 * b) << 8: b for b in range(8)}
+    tap(21)                                                      # STOP
+    c.periods(4)
+    c.machine.pc = P.press(c.machine.m, c.panel.profile, *key(20))   # PLAY: step 1 again
+    fw3 = []
+    for n in range(40):
+        if n == 3:
+            c.machine.pc = P.release(c.machine.m, c.panel.profile, *key(20))
+        if not c.period():
+            break
+        vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
+        fw3 += [struct.unpack(">H", c.read(CF_FRAME + 168 + 2 * SLOT_SAMP + 146 * v, 2))[0] for v in range(16) if vt[v] == T]
+    got = sorted({bufw[w] + 1 for w in fw3 if w in bufw})
+    link("8d. v0.53: step 1's BUF lock is the buffer its voice plays (not the track's BUF)",
+         any(b != bt + 1 for b in got), f"track BUF {bt + 1}, buffers sent {got}")
     # (v0.51: TUNE's knob, a detent 0.01 and FUNC + turn 12.00, is stock's own on record 238 and unchanged;
     # this harness's encoder pulses do not reach a stock page's knob here, 8 pulses after SRC left the word as
     # it was, so TUNE's new display is checked in emu_rectext.py, its knob in the gate's functurn step)

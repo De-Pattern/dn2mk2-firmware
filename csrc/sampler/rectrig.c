@@ -474,12 +474,16 @@ void rt_frame(void)
 
 /* the SAMP a BOUNCE voice on track T hears (link.c smp_mod_apply): its buffer's playing half
  * (BUF_SLOT0 + 1 + ..), or 0 (OFF) with nothing recorded */
-u32 rt_bounce_samp(u32 t)
+u32 rt_buf_samp(u32 b)                          /* v0.53: the same for buffer B (a voice's own BUF) */
 {
-    u32 b = rt_buf_of(t);
-    if (!rt_on || !rt_rbytes[HALF_IX(b, rt_play[b])])
+    if (b >= BUF_N || !rt_on || !rt_rbytes[HALF_IX(b, rt_play[b])])
         return 0;
     return (u32)HALF_SLOT(b, rt_play[b]) + 1u;
+}
+
+u32 rt_bounce_samp(u32 t)
+{
+    return rt_buf_samp(rt_buf_of(t));
 }
 
 /* a region the allocator must keep clear (link.c smp_rec_place, for a take into DEST): the

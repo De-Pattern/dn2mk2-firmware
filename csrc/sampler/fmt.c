@@ -19,6 +19,8 @@ typedef unsigned char u8;
 
 #define SEG_DETENTS 3                           /* v0.25: WERP's SEG, detents a choice */
 #define CHOICE_DETENTS 4                        /* v0.26: PLAY, MODE, BARS, GRID */
+#define PLAY_DETENTS 2                          /* v0.53 (owner: PLAY's four took too much turning, above all
+                                                 * locking a trig): FWD .. RLOOP in 6 detents, not 12 */
 #define SOUND_TYPE 0xDE                         /* the sound's machine type byte */
 #define SOUND_VALUES 0x14                       /* its values, a 16-bit word a slot */
 #define MNM_TUNE_J 7                            /* TUNE: knob H on every Monomachine machine */
@@ -220,6 +222,39 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
         value = (oc0 + fq_click) << 8;
     } else
         fq_click = 0;
+    if (id == SMP_BUF_ID && (signed char)s[SOUND_TYPE] == SMP_BOUNCE_KIND + 4) {
+        /* v0.54 (owner: BUF's detents are right, but the knob should not be seen moving
+         * through them until the next buffer): FLEX's BUF holds one value a buffer, the one
+         * rec.c buf_turn writes (lo + ceil(b x span / 8)), and moves a buffer every
+         * CHOICE_DETENTS detents; in between the value, and the knob drawn from it, stay */
+        extern unsigned int rt_buf_value(unsigned int v);
+        static int b_acc __attribute__((section(".data"))) = 0;
+        static u32 b_at __attribute__((section(".data"))) = 0;
+        int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
+        int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
+        const int *rw = (const int *)(0x401F7F94u + 60u * SMP_BUF_ID);
+        int lo = rw[2] >> 8, span = (rw[3] >> 8) - lo + 1;
+        if (span < 8)
+            span = 8;
+        int b = (int)rt_buf_value((unsigned int)oc);
+        if (d == 0)
+            return old;                         /* a fine move: nothing to show */
+        if (d >= -8 && d <= 8) {
+            u32 now = *(volatile u32 *)0x4058E8D4u;
+            int dir = d > 0 ? 1 : -1;
+            if (now - b_at > 3000u || (b_acc > 0) != (dir > 0))     /* 2 s, or a turn back */
+                b_acc = 0;
+            b_at = now;
+            b_acc += dir;
+            if (b_acc > -CHOICE_DETENTS && b_acc < CHOICE_DETENTS)
+                return (lo + (b * span + 7) / 8) << 8;              /* not yet: on its own value */
+            b_acc = 0;
+            b += dir;
+        } else
+            b = (int)rt_buf_value((unsigned int)nc);                /* a jump: where it landed */
+        b = b < 0 ? 0 : b > 7 ? 7 : b;
+        return (lo + (b * span + 7) / 8) << 8;
+    }
     int mi = mnm_index((signed char)s[SOUND_TYPE] - 4);     /* v0.27: is_wr's kind */
     if (mi >= 0)
         return mnm_quant(mi, slot, *(volatile u16 *)(s + SOUND_VALUES + 2 * slot), value);
@@ -247,7 +282,8 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
             static int q_acc __attribute__((section(".data"))) = 0;
             static u32 q_at __attribute__((section(".data"))) = 0;
             static int q_slot __attribute__((section(".data"))) = -1;
-            int need = fq_click ? 1 : slot == SMP_SEG_SLOT ? SEG_DETENTS : CHOICE_DETENTS;
+            int need = fq_click ? 1 : slot == SMP_SEG_SLOT ? SEG_DETENTS
+                     : id == SMP_PLAY_REC ? PLAY_DETENTS : CHOICE_DETENTS;
             u32 now = *(volatile u32 *)0x4058E8D4u;
             int dir = d > 0 ? 1 : -1;
             if (now - q_at > 3000u || (q_acc > 0) != (dir > 0) || q_slot != slot)   /* 2 s */

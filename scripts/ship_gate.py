@@ -191,6 +191,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("aniz", "start-up animation, every frame"),
        ("recorder", "recorder screen (ColdFire)"),
        ("mnmpages", "Monomachine pages and detents (ColdFire)"),
+       ("playdet", "PLAY two detents a choice (ColdFire)"),
        ("question", "stock questions and held keys (ColdFire)"),
        ("mnmdefaults", "Monomachine start values (ColdFire)"),
        ("alloc", "GRID allocate slice locks (ColdFire)"),
@@ -1645,6 +1646,35 @@ def main() -> int:
                 return good, ("the five Monomachine pages drawn, each its own; a two-choice control "
                               "four detents a choice" if good else why)
             later("mnmpages", "Monomachine pages and detents (ColdFire)", "Monomachine pages and detents (ColdFire)", [mp_cmd, sorted(EMU_ENV.items())], mp_body)
+
+            # 6h2. v0.53 (owner: PLAY's four choices took too much turning): PLAY two detents a
+            # choice, through smp_quant as the stock setter calls it (sound, slot 41, the value, its
+            # record 254): an ONESHOT sound on FWD, one detent keeps FWD, the second gives FFWD loop
+            # (32); MODE, a four-choice control too, keeps four (two detents: nothing)
+            from dnfw.sampler import machines as SMq    # noqa: PLC0415
+            pslot = SMq.RECORDS[SMq.PLAY_REC][0]
+            mrec = SMq.MODE_REC
+            mslot = SMq.RECORDS[mrec][0]
+            pst = ["wait:2", f"poke:{snd0 + 0xDE:#x}:{SMq.TYPE_OF['ONESHOT']:02x}",
+                   f"poke:{snd0 + 0x14 + 2 * pslot:#x}:0000", "wait:4"]
+            pst += [f"call:{lay['smp_quant']:#x}:sound0:{pslot}:0x100:{SMq.PLAY_REC}"] * 2
+            pst += [f"poke:{snd0 + 0xDE:#x}:{SMq.TYPE_OF['WERP']:02x}",
+                    f"poke:{snd0 + 0x14 + 2 * mslot:#x}:0000", "wait:4"]
+            pst += [f"call:{lay['smp_quant']:#x}:sound0:{mslot}:0x100:{mrec}"] * 2
+            pjs = work / "playdet.json"
+            pd_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", ",".join(pst), "--png-dir", work / "playdet", "--json", pjs]
+
+            def pd_body(tdir):
+                rc, out = run("play detents", pd_cmd, logs, env=EMU_ENV, trace=tdir)
+                if rc != 0 or not pjs.exists():
+                    return False, out[-800:]
+                d0 = [c["d0"] for c in json.loads(pjs.read_text())["direct_calls"]]
+                good = d0 == [0, 32 << 8, 0, 0]
+                return good, ("PLAY: one detent keeps FWD, the second moves on (two a choice); MODE keeps four"
+                              if good else f"d0 {d0}, want [0, {32 << 8}, 0, 0]")
+            later("playdet", "PLAY two detents a choice (ColdFire)", "PLAY two detents a choice (ColdFire)",
+                  [pd_cmd, sorted(EMU_ENV.items())], pd_body)
 
         # 6j. v0.30: a stock question's keys are stock's (a user's report: on a sample track, the
         # OS update's "UPGRADE OS NOW?" answered by our page; v0.29's save question), and a YES

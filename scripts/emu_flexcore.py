@@ -332,6 +332,31 @@ def main() -> int:
         led_up = leds_whole()
         check(".. and the trig LEDs show its recorder trigs (not stock's)", led_up != led_stock,
               f"{led_up[:4]} vs {led_stock[:4]}")
+        # v0.53 (NiKo): the page LEDs (ids 42..49) follow FLEX REC's page, as stock's follow the edited
+        # page in grid recording (docs/leds.md): a 64-step pattern, PAGE twice -> page 3 green
+        def pg_leds():
+            lm = machine.long(LM_PTR)
+            got = [(machine.long(lm + 40 + 4 * i), machine.long(lm + 256 + 4 * i)) for i in range(42, 50)] if lm else []
+            for _ in range(20):
+                if got and all(v != (0, 0) for v in got):
+                    break
+                panel.settle(1_000_000)
+                got = [(machine.long(lm + 40 + 4 * i), machine.long(lm + 256 + 4 * i)) for i in range(42, 50)]
+            return got
+        put16(pat + PAT_LENGTH, 64)
+        panel.settle(10_000_000)
+        pg0 = pg_leds()
+        panel.tap(key(22))
+        panel.tap(key(22))
+        panel.settle(10_000_000)
+        pg2 = pg_leds()
+        want0 = [(2, 33)] + [(2, 10)] * 3 + [(2, 2)] * 4
+        want2 = [(2, 10)] * 2 + [(2, 33), (2, 10)] + [(2, 2)] * 4
+        check("v0.53: the page LEDs follow FLEX REC's page (64 steps: page 1 green, PAGE twice: page 3 "
+              "green; the other pages dim red, past the length near-off)",
+              L("bn_page") == 2 and pg0 == want0 and pg2 == want2, f"bn_page {L('bn_page')}, {pg0} then {pg2}")
+        put16(pat + PAT_LENGTH, 16)
+        panel.settle(5_000_000)
         # (NO through the keys is emu_coupled_flex.py's check, on the firmware's own sequencer: here
         # the sequencer's interrupt was driven by hand above, and stock then takes this NO as its own)
         call(lay["rec_combo"])                              # FUNC + VOICE again: closes
