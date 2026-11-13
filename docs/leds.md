@@ -78,11 +78,21 @@ So they follow at once, and go back to stock's the moment the panel closes.
 
 Not verified on hardware: the colours as seen. The LED INTENSITY sets scale them.
 
-## The PAGE LEDs (2026-11-12, for NiKo's report)
+## The PAGE LEDs (v0.53, NiKo)
 
-Measured in the emulator: logical ids **42..49** are the eight page LEDs. With a 16-step pattern, 42
-is (2, 10) and 43..49 (2, 2); at 64 steps, 42..45 are (2, 10). How stock shows the page being edited
-and the playing page could not be read: PAGE presses change nothing in the emulator's LedManager.
-FLEX REC's PAGE key turns its own page (`bn_page`) and is not passed to stock, so stock's page LEDs
-do not follow it. To fix: claim 42..49 in `bn_led_walk` the way stock lights them, once a photo or
-video shows stock's scheme (edited page, playing page).
+Logical ids **42..49** are the eight page LEDs (two rows of four under FX and MOD). Measured in the
+emulator on stock's code (2026-11-13), mode 2 throughout:
+
+| state | palette |
+|---|---|
+| the page being edited, in grid recording | 33 (bright green) |
+| the pattern's other pages | 10 (dim red) |
+| pages past the pattern's length | 2 (near-off) |
+
+Outside grid recording no page is green. Stock moves the green with PAGE.
+
+FLEX REC's PAGE key turns its own page (`bn_page`) and is not passed to stock, so before v0.53
+stock's green stayed on its own page (NiKo's photos: RECORD lit, the screen 1/4 then 2/4, the green
+on page 4 throughout). From v0.53 `bn_led_walk` claims 42..49 while FLEX REC is up, in the same
+scheme: `bn_page` green, the pattern's other pages dim red, the rest near-off. Closed, they are
+stock's again. Gate: `flexcore` (64 steps, PAGE twice: page 3 green).

@@ -383,6 +383,13 @@ u32 bn_pages(void)
 #define LED_ONE 65u
 #define LED_SPENT 54u
 #define LED_HEAD 113u
+/* v0.53 (NiKo: FLEX REC's PAGE LED stayed on stock's page): the eight page LEDs, logical ids
+ * 42..49, as stock lights them in grid recording (measured, docs/leds.md): the page edited bright
+ * green (2, 33), the pattern's other pages dim red (2, 10), the pages past its length (2, 2) */
+#define LED_PAGE0 42u
+#define LED_PG_EDIT 33u
+#define LED_PG_ON 10u
+#define LED_PG_OFF 2u
 u32 bn_led_claims __attribute__((section(".data"))) = 0;      /* refreshes claimed (for the gate) */
 static u32 bn_led_sig __attribute__((section(".data"))) = 0xFFFFFFFFu;
 
@@ -415,6 +422,9 @@ void bn_led_walk(void *screen)
                 u32 mode, val = bn_led_val(k, &mode);
                 LED_SET(lm, LED_TRIG0 + k, mode, val);
             }
+            for (u32 p = 0, n = bn_pages(); p < 8; p++)
+                LED_SET(lm, LED_PAGE0 + p, 2u,
+                        p == (u32)bn_page ? LED_PG_EDIT : p < n ? LED_PG_ON : LED_PG_OFF);
             bn_led_claims++;
         }
     }
@@ -430,7 +440,7 @@ void bn_led_poll(void)
     extern void *wr_screen_obj;
     u32 sig = 0x5EEDu;
     if (bn_active()) {
-        sig = 0x1000000u | (u32)bn_page << 16;
+        sig = 0x1000000u | (u32)bn_page << 16 | bn_pages() << 8;
         for (u32 k = 0; k < 16; k++) {
             u32 mode, val = bn_led_val(k, &mode);
             sig = sig * 31u + val * 4u + mode;
