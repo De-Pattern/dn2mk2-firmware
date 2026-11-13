@@ -127,3 +127,24 @@ test, and a check of what it changes in the gate's SHARC steps.
 ## Next
 
 Answer the four questions on the runner, then report to the owner with the cost before any code.
+
+## Measured (2026-11-13): who fills the stereo buffers, and what a second pass costs
+
+`scripts/sharc_stereo_probe.py` on the runner (M4's voice run, one note on track 0), with and
+without the `6b_shiftimm` fix (identical results: the fix changes nothing this probe sees).
+
+- **Who fills them.** After the chain, stock's mixer call `0x1c304d` writes the post-chain buffers
+  (`0x258f68`, routing A, at `0x1c1f4e..0x1c24a1`; `0x259f68`, raw panned, at `0x1c24bb..0x1c254b`).
+  `0x257ee8` stays zero on this voice. A mono voice's L and R are equal (centre pan).
+- **The chain's cost, per run:** 60,493 instructions a block (of the block's 154,175 with one
+  voice playing). The body's own 15,039; its calls 0xb80c39 10,512, 0xb82342 9,728, 0x1cdb56 8,384,
+  0xb80345 3,924, 0xb81368 3,264, 0xb82096 2,592, 0xb8265b 1,701, 0xb8251b 1,570, 0x180100 1,551,
+  the rest under 1,000. Nearly all of it is per-channel work (filters, amp, envelope, the body):
+  **a second pass for R costs about 55,000-60,000 instructions a block for each stereo voice.**
+- **Against the budget:** a frame is about 666,667 cycles; stock idles about 63-65 % of it
+  (docs/dsp-time.md). A stereo voice adds about 9 % of the frame in instructions, more in cycles
+  (DDR stalls, not modelled). With nothing else heavy running, roughly 6-7 stereo voices fit; with
+  Machinedrum/Monomachine/FASCIA voices playing, fewer. Sixteen stereo voices do not fit.
+- **What follows for the design:** stereo per voice, only when the voice's sample is stereo (a mono
+  sample costs nothing more), and a cap on simultaneous stereo voices (the guard's load figure, or a
+  fixed number) beyond which a stereo voice plays mono (L+R). Confirm on the unit with the load meter.
