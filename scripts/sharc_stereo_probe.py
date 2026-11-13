@@ -39,6 +39,8 @@ class StereoTracer(m4.ChainTracer):
     runs = None
     run_at = None
     pprev = None
+    c_at = None
+    ccost = []
 
     def pre(self, runner, insn):
         if self.active:
@@ -53,6 +55,14 @@ class StereoTracer(m4.ChainTracer):
             elif self.run_at is not None and 1 <= pc - self.run_at[1] <= 3:
                 self.runs.append(self.n_all - self.run_at[0])
                 self.run_at = None
+            if self.run_at is not None:            # the calls the chain's body makes, each timed
+                inb = 0x1C8EF1 <= pc < 0x1C9C5D
+                pin = self.pprev is not None and 0x1C8EF1 <= self.pprev < 0x1C9C5D
+                if pin and not inb and self.c_at is None:
+                    self.c_at = (self.n_all, pc)
+                elif inb and not pin and self.c_at is not None:
+                    self.ccost.append((hex(self.c_at[1]), self.n_all - self.c_at[0]))
+                    self.c_at = None
             self.pprev = pc
             st = runner.state
             now = [m4.m2.word(st, base + 4 * k) for base in WATCH for k in (0, 5, 32, 37)]
@@ -107,6 +117,11 @@ def main() -> int:
         print("ok", on["ok"], on.get("halt"))
         print(f"cost: traced block {tr.n_all:,} instructions; the chain's runs {tr.runs} "
               f"(open at the end: {tr.run_at is not None})")
+        tot = collections.Counter()
+        for t, n in tr.ccost:
+            tot[t] += n
+        body = (tr.runs[0] if tr.runs else 0) - sum(tot.values())
+        print(f"  the body's own {body:,}; its calls: " + ", ".join(f"{t} {n:,}" for t, n in tot.most_common()))
         print("calls out of 0x1c8ef1 that touch track 0's mono buffer:")
         for i, c in enumerate(tr.calls):
             print(f"  {i:2d} {c['from']} -> {c['target']}  R4 {c['R4']}  peak {c['peak_in']:.4f} -> {c['peak_out']:.4f}")
