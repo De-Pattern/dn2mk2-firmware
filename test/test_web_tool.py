@@ -64,6 +64,43 @@ def test_the_image_is_pool_bytes_byte_for_byte():
     assert got == want
 
 
+def _wav(ch, frames, rate=48000):
+    """int16 PCM, frames a list of CH-tuples"""
+    data = struct.pack(f"<{ch * len(frames)}h", *(v for f in frames for v in f))
+    fmt = struct.pack("<HHIIHH", 1, ch, rate, rate * 2 * ch, 2 * ch, 16)
+    body = b"WAVE" + b"fmt " + struct.pack("<I", 16) + fmt + b"data" + struct.pack("<I", len(data)) + data
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
+def test_stereo_a_two_channel_wav_keeps_both_and_the_image_is_format_2():
+    """stereo stage 1: a stereo WAV's L and R are read as they are (its mono mix too), and an
+    item with L and R goes into the image as format 2, int16 L R a frame, byte for byte
+    pool_bytes'; a mono item beside it unchanged (format 1). The negative: an item without
+    L R (the box unticked) is the mono mix, format 1, as before"""
+    fr = [((k * 37) % 2000 - 1000, -((k * 11) % 1600) + 800) for k in range(1001)]
+    wav = list(_wav(2, fr))
+    js = (f"const b=Uint8Array.from({json.dumps(wav)}).buffer;const w=DN2.readWav(b);"
+          "const mono=Float32Array.from([0.5,-0.25,0.125,0]);"
+          "const it=[{frames:w.frames,L:w.L,R:w.R,rate:48000,name:'ST',slices:[]},{frames:mono,rate:48000,name:'M',slices:[]}];"
+          "const m=[{frames:w.frames,rate:48000,name:'ST',slices:[]}];"
+          "console.log(JSON.stringify({L:Array.from(w.L),R:Array.from(w.R),M:Array.from(w.frames),"
+          "p:Array.from(DN2.poolBytes(it,null)),q:Array.from(DN2.poolBytes(m,null)),"
+          "lib:Array.from(DN2.libSample({frames:w.frames,L:w.L,R:w.R})),beg:DN2.libBegin(w.frames.length,1,48000,'ST',DN2.C.FMT_I16S)}))")
+    got = _node(js)
+    assert got["L"] == [l / 32768 for l, _ in fr] and got["R"] == [r / 32768 for _, r in fr]
+    pairs = [(l / 32768, r / 32768) for l, r in fr]
+    want = SL.pool_bytes([pairs, [0.5, -0.25, 0.125, 0.0]], dsp.SMP_POOL_DDR, [1.0, 1.0],
+                         [SM.FMT_I16S, SM.FMT_I16], ["ST", "M"])
+    assert bytes(got["p"]) == want
+    e0 = struct.unpack_from("<IIfI", want, 8)
+    assert e0[1] == len(fr) and e0[3] == SM.FMT_I16S
+    assert struct.unpack_from("<4h", want, SM.DATA_OFFSET) == (fr[0][0], fr[0][1], fr[1][0], fr[1][1])
+    assert bytes(got["lib"]) == want[SM.DATA_OFFSET:SM.DATA_OFFSET + 4 * len(fr)]
+    assert got["beg"][4] == SM.FMT_I16S
+    mono = SL.pool_bytes([got["M"]], dsp.SMP_POOL_DDR, [1.0], [SM.FMT_I16], ["ST"])
+    assert bytes(got["q"]) == mono and struct.unpack_from("<I", mono, 8 + 12)[0] == SM.FMT_I16
+
+
 def test_the_sysex_is_dn2samples():
     import dn2samples as D
     got = _node("console.log(JSON.stringify([Array.from(DN2.request(0x301,1)),"

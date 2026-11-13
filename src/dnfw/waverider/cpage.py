@@ -48,7 +48,8 @@ LINK_ENTRIES = ["smp_rx_hook", "kb_rec_hook", "smp_hi", "smp_walk", "smp_booted"
                  "slc_pop", "slc_poll", "slc_stock_asked", "slc_fails", "slc_linked", "smp_norm_state",
                  "smp_pl_quiesce", "smp_analysis_slot", "smp_slot_frames", "wr_draws", "smp_pos_in", "smp_playhead",
                  # v0.40: folders inside folders (lib.c, smp_page.c)
-                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"]
+                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete",
+                 "smp_slot_fmt"]          # stereo stage 1: a slot's format (the gate's stereo step)
 # parameter slides (csrc/slides, dnfw.slides): the hooks and the state the checks read
 SLIDE_ENTRIES = ["sl_ui_table", "sl_cell", "sl_knob", "sl_screen", "sl_page_up", "sl_page_seen", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
                  "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks"]
@@ -69,7 +70,7 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
                    "SMP_POOL_DDR": hex(dsp.SMP_POOL_DDR), "LINK_SEED": hex(SM.LINK_SEED),
                    "POOL_MAGIC": hex(SM.POOL_MAGIC) + "u", "NAMES_OFFSET": SM.NAMES_OFFSET,
                    "NAME_BYTES": SM.NAME_BYTES, "DATA_OFFSET": hex(SM.DATA_OFFSET),
-                   "POOL_SLOTS": SM.POOL_SLOTS}
+                   "POOL_SLOTS": SM.POOL_SLOTS, "STEREO": int(SM.STEREO)}
         for name in ("POOL_BYTES", "REC_OFFSET", "REC_END", "RAM_PROVEN", "SLICE_AREA", "TABLE_AREA", "TABLE_ROOM", "TABLE_READY", "TABLE_MAGIC", "TABLE_LOAD", "CMD_OFFSET", "STATUS_MAGIC", "TDM_TAG",
                      "RX_MAGIC", "TX_MAGIC", "POS_MAGIC", "POS_NONE", "POS_ONE", "META_PTR", "META_PTR_MAGIC", "META_MAGIC", "META_FOLDERS",
                      "META_FOLDER_BYTES", "META_SLOT_BYTES", "META_NAME_BYTES", "META_BYTES", "LIBID_OFFSET"):      # v0.16; v0.25 POS

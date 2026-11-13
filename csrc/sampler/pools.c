@@ -41,6 +41,14 @@ typedef unsigned char u8;
 #error "the sampler's constants are passed by the build (dnfw.waverider.cpage)"
 #endif
 
+/* the pool's formats (dnfw.sampler.machines): 0 float32, 1 int16 mono, 2 int16 stereo
+ * interleaved L R (STEREO builds; others refuse it: FMT_MAX) */
+#if !defined(STEREO)
+#error "STEREO is passed by the build (dnfw.waverider.cpage)"
+#endif
+#define FRAME_BYTES(f) ((u32)(f) == 1u ? 2u : 4u)
+#define FMT_MAX (STEREO ? 2u : 1u)
+
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)
 #define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
 #define BLK_READY (*(volatile u32 *)0x4461B68Cu)
@@ -435,7 +443,7 @@ static void res_build(void)
             u32 addr = le32(e), fr = le32(e + 4), fmt = e[12];
             if (addr < SMP_POOL_DDR + DATA_OFFSET || !fr)
                 continue;
-            u32 lo = addr - SMP_POOL_DDR, n = fr * (fmt ? 2u : 4u);
+            u32 lo = addr - SMP_POOL_DDR, n = fr * FRAME_BYTES(fmt);
             u32 ns = e[13] > 64 ? 64u : e[13];
             if (ns && !(e[14] & 1))
                 n = (((lo + n + 3u) & ~3u) - lo) + 12u * ns;
@@ -546,7 +554,7 @@ static u32 dir_extent_end(const u8 *d)
         u32 addr = le32(e), fr = le32(e + 4);
         if (addr < SMP_POOL_DDR + DATA_OFFSET || !fr)
             continue;
-        u32 end = addr - SMP_POOL_DDR + fr * (e[12] ? 2u : 4u) + 12u * 64u;
+        u32 end = addr - SMP_POOL_DDR + fr * FRAME_BYTES(e[12]) + 12u * 64u;
         if (end > top && end <= POOL_BYTES)
             top = end;
     }

@@ -70,6 +70,14 @@ typedef unsigned char u8;
 #if !defined(POOL_BYTES) || !defined(REC_OFFSET) || !defined(REC_END) || !defined(TX_WORDS) || !defined(SMP_MIRROR)
 #error "the sampler's constants are passed by the build (dnfw.waverider.cpage)"
 #endif
+
+/* the pool's formats (dnfw.sampler.machines): 0 float32, 1 int16 mono, 2 int16 stereo
+ * interleaved L R (STEREO builds; others refuse it: FMT_MAX) */
+#if !defined(STEREO)
+#error "STEREO is passed by the build (dnfw.waverider.cpage)"
+#endif
+#define FRAME_BYTES(f) ((u32)(f) == 1u ? 2u : 4u)
+#define FMT_MAX (STEREO ? 2u : 1u)
 /* v0.22: recordings go into [REC_OFFSET, REC_END) of the pool (96..128 MB), wherever there
  * is room, and into any slot (rec.c's DEST): a directory entry whose frames lie there is a
  * recording, kept on the +Drive and kept when the host tool sends a new image. Yours are
@@ -622,7 +630,7 @@ static u32 slice_table(const u8 *e, u32 *n)
     *n = e[13] > SLICE_MAX ? SLICE_MAX : e[13];
     if (e[14] & 1)                              /* v0.23: made on the instrument: the slice area's */
         return SLICE_AREA + SLICE_TB * (u32)((e - (DIR + 8)) / 16);
-    return ((addr - SMP_POOL_DDR) + fr * (fmt ? 2u : 4u) + 3u) & ~3u;
+    return ((addr - SMP_POOL_DDR) + fr * FRAME_BYTES(fmt) + 3u) & ~3u;
 }
 
 /* the slices' starts as overview columns, for the page; 0xFF where none */
@@ -670,17 +678,18 @@ static void overview_add(u32 off, u32 bytes, const u8 *buf)
     for (int k = 0; k < POOL_SLOTS; k++) {
         const u8 *e = DIR + 8 + 16 * k;
         u32 addr = le32(e), fr = le32(e + 4), fmt = e[12];
-        if (addr < SMP_POOL_DDR || fr < 2 || fmt != 1)
+        if (addr < SMP_POOL_DDR || fr < 2 || !(fmt == 1 || (STEREO && fmt == 2)))
             continue;
-        u32 lo = addr - SMP_POOL_DDR, hi = lo + fr * 2u;
+        u32 fb = FRAME_BYTES(fmt);                  /* stereo: L's peaks (every 8th frame) */
+        u32 lo = addr - SMP_POOL_DDR, hi = lo + fr * fb;
         if (hi <= off || lo >= off + bytes)
             continue;
         u8 *o = OVERVIEW + OVERVIEW_W * k;
         u32 a = lo > off ? lo : off, b = hi < off + bytes ? hi : off + bytes;
-        for (u32 x = a & ~1u; x + 1 < b; x += 32) {            /* every 16th frame will do */
+        for (u32 x = a & ~(fb - 1u); x + 1 < b; x += 32) {     /* every 16th frame will do */
             if (x < lo)
                 continue;
-            u32 i = (x - lo) / 2u;
+            u32 i = (x - lo) / fb;
             int s = (short)(buf[x - off] | buf[x - off + 1] << 8);
             if (s < 0) s = -s;
             u32 col = (i >> 6) * OVERVIEW_W / ((fr >> 6) + 1);     /* 32-bit: no libgcc */
@@ -891,7 +900,7 @@ static int slot_range(u32 k)
     u32 addr = le32(e), fr = le32(e + 4), fmt = e[12];
     if (addr < SMP_POOL_DDR + DATA_OFFSET || fr == 0)
         return 0;
-    u32 lo = addr - SMP_POOL_DDR, bytes = fr * (fmt ? 2u : 4u);
+    u32 lo = addr - SMP_POOL_DDR, bytes = fr * FRAME_BYTES(fmt);
     u32 ns, tbl = slice_table(e, &ns);                  /* v0.19: and its slices, if any */
     if (ns && !(e[14] & 1))
         bytes = tbl - lo + 12u * ns;
@@ -1142,7 +1151,7 @@ void smp_load(void)                             /* load (again) whatever the ima
         const u8 *e = DIR + 8 + 16 * k;
         u32 addr = le32(e), fr = le32(e + 4);
         if (addr >= SMP_POOL_DDR + DATA_OFFSET && fr)
-            smp_walk_total += fr * (e[12] ? 2u : 4u);
+            smp_walk_total += fr * FRAME_BYTES(e[12]);
     }
     l_order_ok = 0;
     fast_on = 1;
@@ -1659,6 +1668,14 @@ void smp_push_slot(int k)                       /* v0.44: a slot's entry to the 
     push_entry(k);
 }
 
+/* slot K's format (FRAME_BYTES): 0 if none */
+int smp_slot_fmt(int k)
+{
+    if (k < 0 || k >= POOL_SLOTS || smp_slot_empty(k))
+        return 0;
+    return ENTRY(k)[12];
+}
+
 /* slot K's frames: 0 if none */
 u32 smp_frames(int k)
 {
@@ -1676,7 +1693,7 @@ int smp_trim(int k, u32 s, u32 e)
     if (!n || e > n || s + 64u > e)
         return -1;
     u8 *en = ENTRY(k);
-    put_le32(en, le32(en) + 2u * s);
+    put_le32(en, le32(en) + FRAME_BYTES(en[12]) * s);   /* stereo: 4 bytes a frame */
     put_le32(en + 4, e - s);
     u8 *o = OVERVIEW + OVERVIEW_W * (u32)k, t[OVERVIEW_W];
     for (u32 j = 0; j < OVERVIEW_W; j++) {
@@ -2166,7 +2183,7 @@ static u32 pool_room(u32 bytes)
                 u32 addr = le32(e), fr = le32(e + 4);
                 if (addr < SMP_POOL_DDR + DATA_OFFSET || !fr)
                     continue;
-                u32 lo = addr - SMP_POOL_DDR, n = fr * (e[12] ? 2u : 4u), ns, tbl = slice_table(e, &ns);
+                u32 lo = addr - SMP_POOL_DDR, n = fr * FRAME_BYTES(e[12]), ns, tbl = slice_table(e, &ns);
                 if (ns && !(e[14] & 1))
                     n = tbl - lo + 12u * ns;
                 u32 hi = (lo + n + 511u) & ~511u;
@@ -2197,7 +2214,7 @@ int smp_lib_preview(int k)                       /* -> 0: asked; -1: not now */
 {
     extern int smp_lib_used(int k), smp_lib_fmt(int k);
     extern u32 smp_lib_frames(int k);
-    if (!smp_lib_used(k) || !smp_lib_fmt(k) || smp_tables == 1 || !dir_ok || smp_pl_busy())
+    if (!smp_lib_used(k) || smp_lib_fmt(k) != 1 || smp_tables == 1 || !dir_ok || smp_pl_busy())
         return -1;                              /* int16 only (the DSP's preview reads int16) */
     u32 b = smp_lib_frames(k) * 2u;
     if (b > PREVIEW_BYTES)
@@ -2267,8 +2284,8 @@ static void lp_poll(void)
         if (lp_head == lp_tail)
             return;
         int k = lp_q[lp_tail++ % LPQ];
-        if (!smp_lib_used(k) || smp_lib_slot_of(k) >= 0)
-            return;                                  /* gone, or already in the pool */
+        if (!smp_lib_used(k) || smp_lib_slot_of(k) >= 0 || (u32)smp_lib_fmt(k) > FMT_MAX)
+            return;                                  /* gone, already in the pool, or a format this build doesn't play */
         if (!dir_ok) {                               /* no pool yet: an empty directory */
             for (u32 b = 0; b < DIR_BYTES; b++)
                 DIR[b] = 0;
@@ -2279,7 +2296,7 @@ static void lp_poll(void)
         int s = 0;
         while (s < REC_FIRST && !smp_slot_empty(s))
             s++;
-        u32 bytes = (smp_lib_frames(k) * (smp_lib_fmt(k) ? 2u : 4u) + 511u) & ~511u;
+        u32 bytes = (smp_lib_frames(k) * FRAME_BYTES((u32)smp_lib_fmt(k)) + 511u) & ~511u;
         u32 off = s < REC_FIRST ? pool_room(bytes) : 0;
         if (!off) {
             smp_lp_full = 1;
@@ -2392,8 +2409,8 @@ static void rs_poll(void)
         }
         const u8 *e = ENTRY(k);
         u32 addr = le32(e), frames = le32(e + 4), fmt = le32(e + 12);
-        u32 bytes = frames * (fmt ? 2u : 4u);
-        if (addr < SMP_POOL_DDR || addr - SMP_POOL_DDR + bytes > POOL_BYTES || !frames || fmt > 1u) {
+        u32 bytes = frames * FRAME_BYTES(fmt);
+        if (addr < SMP_POOL_DDR || addr - SMP_POOL_DDR + bytes > POOL_BYTES || !frames || fmt > FMT_MAX) {
             rs_tail++;
             return;
         }

@@ -40,6 +40,14 @@ typedef unsigned char u8;
 #error "the sampler's constants are passed by the build (dnfw.waverider.cpage)"
 #endif
 
+/* the pool's formats (dnfw.sampler.machines): 0 float32, 1 int16 mono, 2 int16 stereo
+ * interleaved L R (STEREO builds; others refuse it: FMT_MAX) */
+#if !defined(STEREO)
+#error "STEREO is passed by the build (dnfw.waverider.cpage)"
+#endif
+#define FRAME_BYTES(f) ((u32)(f) == 1u ? 2u : 4u)
+#define FMT_MAX (STEREO ? 2u : 1u)
+
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
 #define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
 #define BLK_READY (*(volatile u32 *)0x4461B68Cu)
@@ -486,14 +494,14 @@ static int w_begin(u32 frames, u32 fmt, u32 folder, u32 rate, const u8 *name, u3
 {
     if (w_idx >= 0 && w_own != own)
         return 4;                               /* the other one is writing */
-    if (lib_format() != 0)
-        return 1;
-    u32 bytes = frames * (fmt ? 2u : 4u);
+    if (lib_format() != 0 || fmt > FMT_MAX)
+        return 1;                               /* (a format this build doesn't play: refused) */
+    u32 bytes = frames * FRAME_BYTES(fmt);
     int k = 0;
     while (k < LIB_CAP && smp_lib_used(k))
         k++;
     u32 sectors = (bytes + 511u) / 512u;
-    u32 at = frames && bytes / (fmt ? 2u : 4u) == frames && k < LIB_CAP && folder < LIB_FOLDERS
+    u32 at = frames && bytes / FRAME_BYTES(fmt) == frames && k < LIB_CAP && folder < LIB_FOLDERS
              ? lib_room(sectors) : 0;
     if (!at)
         return 2;                               /* no room, or nothing to keep */

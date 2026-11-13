@@ -26,8 +26,9 @@ def pool_bytes(samples, base: int, rates=None, fmts=None, names=None, slices=Non
     """the directory and the frames of SAMPLES (lists of floats), as the DSP's DDR holds
     them from BASE: magic, count, POOL_SLOTS entries (address, frames, rate, format),
     the names (dnfw.sampler.machines.NAME_BYTES each, for the ColdFire's pages; the DSP
-    ignores them), then each sample's frames -- float32 (format 0) or int16 (format 1)
-    -- on a 64-byte (cache line) boundary"""
+    ignores them), then each sample's frames -- float32 (format 0), int16 (format 1) or
+    int16 L R pairs (format 2, stereo: that sample a list of (l, r)) -- on a 64-byte (cache
+    line) boundary"""
     rates = rates or [1.0] * len(samples)
     fmts = fmts or [0] * len(samples)
     names = names or [""] * len(samples)
@@ -39,7 +40,9 @@ def pool_bytes(samples, base: int, rates=None, fmts=None, names=None, slices=Non
         # table -- start, end, loop in frames -- follows its frames on a word
         assert len(sl) <= SM.MAX_SLICES
         one = bytearray()
-        if f == 1:
+        if f == SM.FMT_I16S:                # stereo: S holds (l, r) pairs, int16 L R a frame
+            one += struct.pack(f"<{2 * len(s)}h", *(max(-32768, min(32767, round(x * 32768))) for lr in s for x in lr))
+        elif f == 1:
             one += struct.pack(f"<{len(s)}h", *(max(-32768, min(32767, round(x * 32768))) for x in s))
         else:
             one += struct.pack(f"<{len(s)}f", *s)

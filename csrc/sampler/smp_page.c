@@ -1030,6 +1030,11 @@ int smp_fb_last_store __attribute__((section(".data"))) = 0;   /* where the top'
 static u32 lb_marks[LB_CAP / 32] __attribute__((section(".data")));
 extern int smp_lib_used(int k), smp_lib_folder_of(int k), smp_lib_slot_of(int k);
 extern const char *smp_lib_name(int k), *smp_lib_folder_name(int f);
+extern int smp_lib_fmt(int k), smp_slot_fmt(int k);
+/* stereo: a stereo sample's row says ST before its slot, its name three characters shorter */
+#define FB_ST_FMT 2
+#define FB_ST_CHARS 3
+static int fb_st(int slot) { return (smp_fb_store == 1 ? smp_lib_fmt(slot) : smp_slot_fmt(slot)) == FB_ST_FMT; }
 extern int smp_lib_delete(int k), smp_lib_load(int k), smp_lib_pending(void);
 
 static int lb_in(int k, int folder) { return smp_lib_used(k) && smp_lib_folder_of(k) == folder; }
@@ -1675,6 +1680,8 @@ void smp_marquee_poll(void)
             slot_name(slot + 1, ln, 63);
             w = smp_fb_menu ? FB_MENU_W : FB_SLOT_W;
         }
+        if (slot >= 0 && !smp_fb_menu && fb_st(slot))
+            w -= FB_ST_CHARS;
         mq_follow(key, nm, w);
     } else if (smp_lst_open && list_slot >= 0) {
         char ln[64];
@@ -1755,9 +1762,12 @@ void smp_fb_draw(void *c, int samp)
             char sn[4];
             int s = smp_lib_slot_of(slot);
             char nm[FB_W + 3];                       /* v0.39: head...tail; the selected one scrolls */
-            fit_name(smp_lib_name(slot), smp_fb_menu ? FB_MENU_W : FB_W, i == smp_fb_cur ? mq_off(fb_key()) : -1, nm);
+            int st = !smp_fb_menu && fb_st(slot);
+            fit_name(smp_lib_name(slot), smp_fb_menu ? FB_MENU_W : FB_W - (st ? FB_ST_CHARS : 0), i == smp_fb_cur ? mq_off(fb_key()) : -1, nm);
             TEXT(c, FONT, 3, y, 0, "%s", nm);
             row_text(r, nm);
+            if (st)
+                LABEL(c, 98, y, "%s", "ST");
             if (!smp_fb_menu && s >= 0) {
                 num3(sn, s + 1);
                 LABEL(c, 109, y, ">A%s", sn);
@@ -1767,9 +1777,12 @@ void smp_fb_draw(void *c, int samp)
         } else {
             char ln[64], nm[FB_W + 3], sn[4];
             slot_name(slot + 1, ln, 63);
-            fit_name(ln, smp_fb_menu ? FB_MENU_W : FB_SLOT_W, i == smp_fb_cur ? mq_off(fb_key()) : -1, nm);
+            int st = !smp_fb_menu && fb_st(slot);
+            fit_name(ln, smp_fb_menu ? FB_MENU_W : FB_SLOT_W - (st ? FB_ST_CHARS : 0), i == smp_fb_cur ? mq_off(fb_key()) : -1, nm);
             TEXT(c, FONT, 3, y, 0, "%s", nm);
             row_text(r, nm);
+            if (st)
+                LABEL(c, 98, y, "%s", "ST");
             if (!smp_fb_menu) {
                 num3(sn, slot + 1);
                 LABEL(c, 109, y, ">A%s", sn);  /* the slot it plays from */

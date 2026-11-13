@@ -153,6 +153,7 @@ label.proj-only { max-width: 100%; }
           <option value="grid:16">grid of 16</option><option value="grid:32">grid of 32</option>
           <option value="onsets">hits (onsets)</option><option value="none">none</option>
         </select></label>
+      <label title="Stereo files keep both channels (ST). Only a stereo firmware plays them; others leave the slot silent."><input type="checkbox" id="stereoIn"> keep stereo (stereo firmware only)</label>
     </div>
     <p id="modeNote" class="note"></p>
     <div class="panes">
@@ -251,7 +252,7 @@ label.proj-only { max-width: 100%; }
 const DN2 = (() => {
   const C = {
     POOL_MAGIC: 0x31504D53, POOL_SLOTS: 128, USER_SLOTS: 122, ENTRY_WORDS: 4,
-    NAMES_OFFSET: 8 + 128 * 16, NAME_BYTES: 8, DATA_OFFSET: 0x1000, FMT_I16: 1,
+    NAMES_OFFSET: 8 + 128 * 16, NAME_BYTES: 8, DATA_OFFSET: 0x1000, FMT_I16: 1, FMT_I16S: 2,
     MAX_SLICES: 64, REC_OFFSET: 96 << 20, REC_END: 128 << 20, POOL_BYTES: 400 << 20,
     DSP_RATE: 48000, POOL_DDR: 0x84000000,
     HEADER: [0xF0, 0x00, 0x20, 0x3C, 0x7D, 0x01],
@@ -323,6 +324,7 @@ const DN2 = (() => {
     if (!fmt || !data) throw new Error("no fmt or data chunk");
     const tagv = fmt.tag === 0xFFFE ? fmt.ext : fmt.tag, bps = fmt.bits / 8, ch = fmt.ch;
     const n = Math.floor(data.size / (bps * ch)), out = new Float32Array(n);
+    const two = ch === 2, L = two ? new Float32Array(n) : null, R = two ? new Float32Array(n) : null;   /* stereo: both kept */
     for (let i = 0; i < n; i++) {
       let s = 0;
       for (let c = 0; c < ch; c++) {
@@ -334,10 +336,11 @@ const DN2 = (() => {
         else if (bps === 4) x = d.getInt32(o, true) / 2147483648;
         else throw new Error(`${fmt.bits}-bit samples are not read here`);
         s += x;
+        if (two) (c ? R : L)[i] = x;
       }
       out[i] = s / ch;
     }
-    return { frames: out, rate: fmt.rate, cues: [...new Set(cues)].sort((a, b) => a - b) };
+    return { frames: out, rate: fmt.rate, cues: [...new Set(cues)].sort((a, b) => a - b), ...(two ? { L, R } : {}) };
   }
   /* an AIFF or AIFF-C (NONE, sowt, fl32, fl64) -> as readWav; its markers are the cues */
   function readAiff(buf) {
@@ -362,6 +365,7 @@ const DN2 = (() => {
     if (!fl && !little && comm.comp !== "none") throw new Error(`compressed AIFF-C (${comm.comp}) is not read here`);
     const bps = fl ? (comm.comp === "fl64" ? 8 : 4) : Math.ceil(comm.bits / 8), ch = comm.ch;
     const n = Math.min(comm.frames, Math.floor(ssnd.size / (bps * ch))), out = new Float32Array(n);
+    const two = ch === 2, L = two ? new Float32Array(n) : null, R = two ? new Float32Array(n) : null;
     for (let i = 0; i < n; i++) {
       let s = 0;
       for (let c = 0; c < ch; c++) {
@@ -373,10 +377,11 @@ const DN2 = (() => {
         else if (bps === 4) x = d.getInt32(o, little) / 2147483648;
         else throw new Error(`${comm.bits}-bit samples are not read here`);
         s += x;
+        if (two) (c ? R : L)[i] = x;
       }
       out[i] = s / ch;
     }
-    return { frames: out, rate: Math.round(comm.rate), cues: [...new Set(cues)].filter(c => c < n).sort((a, b) => a - b) };
+    return { ...(two ? { L, R } : {}), frames: out, rate: Math.round(comm.rate), cues: [...new Set(cues)].filter(c => c < n).sort((a, b) => a - b) };
   }
 
   function onsets(s, rate, most = 64) {
@@ -401,8 +406,8 @@ const DN2 = (() => {
     if (mode === "onsets") return slicesFrom(onsets(w.frames, w.rate), n);
     return w.cues.length ? slicesFrom(w.cues, n) : [];
   }
-  function itemBytes(frames, nslices) {               /* a sample's frames and slice table, padded */
-    let b = frames * 2;
+  function itemBytes(frames, nslices, st = false) {   /* a sample's frames and slice table, padded */
+    let b = frames * (st ? 4 : 2);                     /* stereo (format 2): int16 L R a frame */
     if (nslices) b += (4 - b % 4) % 4 + 12 * nslices;
     return b + (0x40 - b % 0x40) % 0x40;
   }
@@ -412,12 +417,16 @@ const DN2 = (() => {
   /* one sample's bytes as the pool holds them: int16 frames (normalised if over 1), then
    * its slice table on a word, padded to 0x40 */
   function itemData(it) {
-    const f = it.frames, out = new Uint8Array(itemBytes(f.length, it.slices.length)), dv = new DataView(out.buffer);
-    let peak = 0; for (let i = 0; i < f.length; i++) peak = Math.max(peak, Math.abs(f[i]));
+    const st = !!(it.L && it.R), f = it.frames, out = new Uint8Array(itemBytes(f.length, it.slices.length, st)), dv = new DataView(out.buffer);
+    const q = x => Math.max(-32768, Math.min(32767, Math.round(x * 32768)));
+    let peak = 0;
+    if (st) for (let i = 0; i < f.length; i++) peak = Math.max(peak, Math.abs(it.L[i]), Math.abs(it.R[i]));
+    else for (let i = 0; i < f.length; i++) peak = Math.max(peak, Math.abs(f[i]));
     const g = peak > 1 ? 1 / peak : 1;
-    for (let i = 0; i < f.length; i++) dv.setInt16(2 * i, Math.max(-32768, Math.min(32767, Math.round(f[i] * g * 32768))), true);
+    if (st) for (let i = 0; i < f.length; i++) { dv.setInt16(4 * i, q(it.L[i] * g), true); dv.setInt16(4 * i + 2, q(it.R[i] * g), true); }
+    else for (let i = 0; i < f.length; i++) dv.setInt16(2 * i, q(f[i] * g), true);
     if (it.slices.length) {
-      let t = 2 * f.length; t += (4 - t % 4) % 4;
+      let t = (st ? 4 : 2) * f.length; t += (4 - t % 4) % 4;
       it.slices.forEach(([a, b, lp], j) => { dv.setUint32(t + 12 * j, a, true); dv.setUint32(t + 12 * j + 4, b, true); dv.setUint32(t + 12 * j + 8, lp, true); });
     }
     return out;
@@ -425,7 +434,7 @@ const DN2 = (() => {
   function putEntry(dir, k, addr, it) {
     const dv = new DataView(dir.buffer, dir.byteOffset), e = 8 + 16 * k;
     dv.setUint32(e, addr, true); dv.setUint32(e + 4, it.frames.length, true);
-    dv.setFloat32(e + 8, it.rate / C.DSP_RATE, true); dv.setUint32(e + 12, C.FMT_I16 | (it.slices.length << 8), true);
+    dv.setFloat32(e + 8, it.rate / C.DSP_RATE, true); dv.setUint32(e + 12, (it.L && it.R ? C.FMT_I16S : C.FMT_I16) | (it.slices.length << 8), true);
     const nm = (it.name || "").toUpperCase().slice(0, C.NAME_BYTES - 1);
     for (let j = 0; j < C.NAME_BYTES; j++) { const c = j < nm.length ? nm.charCodeAt(j) : 0; dir[C.NAMES_OFFSET + C.NAME_BYTES * k + j] = c < 128 ? c : 63; }
   }
@@ -436,7 +445,7 @@ const DN2 = (() => {
     const place = []; let len = 0;
     for (const it of items) {
       if (!it) { place.push(0); continue; }
-      const sz = itemBytes(it.frames.length, it.slices.length);
+      const sz = itemBytes(it.frames.length, it.slices.length, !!(it.L && it.R));
       if (hole && C.DATA_OFFSET + len < hole[1] && C.DATA_OFFSET + len + sz > hole[0]) len = hole[1] - C.DATA_OFFSET;
       place.push(C.DATA_OFFSET + len); len += sz;
     }
@@ -539,13 +548,13 @@ const DN2 = (() => {
     out.set(pool); out.set(meta, at); putMetaPtr(out, at, meta.length);
     return out;
   }
-  /* v0.31: one sample for the +Drive's library: int16 mono, as the pool holds it, no slices */
-  function libSample(it) { return itemData({ frames: it.frames, slices: [] }).slice(0, 2 * it.frames.length); }
+  /* v0.31: one sample for the +Drive's library: int16 mono (or L R, format 2), as the pool holds it, no slices */
+  function libSample(it) { return itemData({ frames: it.frames, L: it.L, R: it.R, slices: [] }).slice(0, (it.L && it.R ? 4 : 2) * it.frames.length); }
   function le32(v) { return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]; }
-  function libBegin(frames, folder, rate, name) {
+  function libBegin(frames, folder, rate, name, fmt = C.FMT_I16) {
     const r = new DataView(new ArrayBuffer(4)); r.setFloat32(0, rate / C.DSP_RATE, true);
     const nm = [...String(name).toUpperCase().slice(0, C.LONG_MAX)].map(ch => { const c = ch.charCodeAt(0); return c >= 32 && c < 127 ? c : 63; });
-    return [...le32(frames), C.FMT_I16, folder, ...new Uint8Array(r.buffer), ...nm];
+    return [...le32(frames), fmt, folder, ...new Uint8Array(r.buffer), ...nm];
   }
   function adler(b, s = 1) {
     let a = s & 0xFFFF, h = s >>> 16;
@@ -820,19 +829,25 @@ if (typeof module !== "undefined") module.exports = DN2;
     try { ab = await ctx.decodeAudioData(buf); } catch (e) { throw new Error("this browser cannot decode it"); }
     const n = ab.length, out = new Float32Array(n);
     for (let c = 0; c < ab.numberOfChannels; c++) { const x = ab.getChannelData(c); for (let i = 0; i < n; i++) out[i] += x[i] / ab.numberOfChannels; }
-    return { frames: out, rate: ab.sampleRate, cues: [] };
+    const two = ab.numberOfChannels === 2;
+    return { frames: out, rate: ab.sampleRate, cues: [], ...(two ? { L: ab.getChannelData(0), R: ab.getChannelData(1) } : {}) };
   }
+  /* stereo: an item keeps L and R only with "keep stereo" ticked (a stereo build plays format 2;
+   * others refuse it: a silent slot), else its mono mix as before */
+  const stOn = it => !!($("stereoIn") && $("stereoIn").checked && it.w.L && it.w.R);
+  const bpf = it => stOn(it) ? 4 : 2;
+  if ($("stereoIn")) $("stereoIn").onchange = () => refresh();
   function reslice() { items.forEach(it => { it.slices = DN2.slicing($("sliceSel").value, it.w); }); refresh(); }
 
   /* -- the page -- */
   function plan() {             /* -> {len: the image's end, send: bytes sent} without the audio */
     if (!items.length) return { len: 0, send: 0 };
-    if (mode === "lib") { const b = toSend().reduce((a, it) => a + 2 * it.w.frames.length, 0); return { len: 0, send: b }; }
+    if (mode === "lib") { const b = toSend().reduce((a, it) => a + bpf(it) * it.w.frames.length, 0); return { len: 0, send: b }; }
     if (mode === "add" && keep && keep.kept) {
       let at = Math.ceil(Math.max(keep.end, C.DATA_OFFSET) / DN2.BLOCK) * DN2.BLOCK, sent = 0;
       if (at >= C.REC_OFFSET && at < C.REC_END) at = C.REC_END;
       for (const it of [...items].sort((a, b) => a.slot - b.slot)) {
-        const sz = DN2.itemBytes(it.w.frames.length, it.slices.length);
+        const sz = DN2.itemBytes(it.w.frames.length, it.slices.length, stOn(it));
         if (at < C.REC_END && at + sz > C.REC_OFFSET) { sent += Math.max(0, C.REC_OFFSET - at); at = C.REC_END; }
         at += sz; sent += sz;
       }
@@ -841,7 +856,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     let len = 0;
     const order = mode === "pick" ? [...items].sort((a, b) => a.slot - b.slot) : items;
     for (const it of order) {
-      const sz = DN2.itemBytes(it.w.frames.length, it.slices.length);
+      const sz = DN2.itemBytes(it.w.frames.length, it.slices.length, stOn(it));
       if (C.DATA_OFFSET + len < C.REC_END && C.DATA_OFFSET + len + sz > C.REC_OFFSET) len = C.REC_END - C.DATA_OFFSET;
       len += sz;
     }
@@ -858,14 +873,14 @@ if (typeof module !== "undefined") module.exports = DN2;
     items.forEach((it, k) => {
       const tr = document.createElement("tr"); tr.draggable = mode === "fill" || lib; tr.dataset.k = k;
       if (it.sel) tr.className = "sel";
-      const sz = DN2.itemBytes(it.w.frames.length, it.slices.length);
+      const sz = DN2.itemBytes(it.w.frames.length, it.slices.length, stOn(it));
       const slotCell = lib ? `<td class="slot proj-only"></td>` : mode === "fill" ? `<td class="slot">SAMP ${k + 1}</td>`
         : `<td class="slot">SAMP <input type="number" class="slotIn" min="1" max="${C.USER_SLOTS}" value="${it.slot == null ? "" : it.slot + 1}" style="width:4.5em"></td>`;
       const over = mode !== "fill" && !lib && it.slot != null && devAt.get(it.slot);
       tr.innerHTML = `<td class="ck"><input type="checkbox" class="selIn" ${it.sel ? "checked" : ""} aria-label="Select"></td>${slotCell}<td title="${esc(it.file)}"><input type="text" class="longIn" maxlength="${C.LONG_MAX}" value="${esc(it.long)}" style="text-transform:none"><div class="note slot" style="margin:2px 0 0">${esc(it.name)}${over ? ` <span class="pill warn">${over.rec ? "recording moves" : "replaces " + esc(over.name)}</span>` : ""}</div></td>
         <td><input type="text" class="folderIn" list="folderList" maxlength="${C.PATH_MAX}" value="${esc(it.folder)}" placeholder="${lib ? "INCOMING" : "–"}" style="text-transform:none"></td>
-        <td class="num hide-sm">${(it.w.frames.length / it.w.rate).toFixed(2)} s</td>
-        <td class="num proj-only hide-sm">${it.slices.length || "–"}</td><td class="num">${fmtMB(lib ? 2 * it.w.frames.length : sz)}</td><td><button class="x" title="Remove from the list">✕</button></td>`;
+        <td class="num hide-sm">${stOn(it) ? "ST " : ""}${(it.w.frames.length / it.w.rate).toFixed(2)} s</td>
+        <td class="num proj-only hide-sm">${it.slices.length || "–"}</td><td class="num">${fmtMB(lib ? bpf(it) * it.w.frames.length : sz)}</td><td><button class="x" title="Remove from the list">✕</button></td>`;
       tr.querySelector(".selIn").onchange = e => { it.sel = e.target.checked; refresh(); };
       tr.querySelector(".longIn").oninput = e => { it.long = e.target.value.replace(/[^ -~]/g, "").slice(0, C.LONG_MAX); it.name = DN2.short(it.long); tr.querySelector(".note").textContent = it.name; };
       tr.querySelector(".longIn").onchange = refresh;
@@ -929,7 +944,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     const used = mode === "add" ? (pl.len ? Math.max(0, Math.min(pl.len, C.REC_OFFSET) - C.DATA_OFFSET) + Math.max(0, pl.len - C.REC_END) : kept) : send;
     /* v0.31: into the +Drive library its room is the +Drive's, not the project pool's */
     const lr = dev && dev.lib ? dev.lib : null;
-    const libSend = lib ? toSend().reduce((a, it) => a + Math.ceil(2 * it.w.frames.length / 512) * 512, 0) : 0;
+    const libSend = lib ? toSend().reduce((a, it) => a + Math.ceil(bpf(it) * it.w.frames.length / 512) * 512, 0) : 0;
     const libFree = lr && lr.room != null ? Math.max(0, lr.room - lr.used) : null;
     $("lCap").textContent = lib ? "room in the +Drive library" : "room for yours";
     $("lNow").textContent = lib ? "in the library now" : "yours on it now";
@@ -1116,7 +1131,7 @@ if (typeof module !== "undefined") module.exports = DN2;
   }
   async function sendLib() {
     const st = $("sendState"), list = [...toSend()], into = libAt != null ? libFolder(libAt) : null;
-    const total = list.reduce((a, it) => a + 2 * it.w.frames.length, 0);
+    const total = list.reduce((a, it) => a + bpf(it) * it.w.frames.length, 0);
     /* v0.40 (link 7): a dropped folder's folders kept: each level made inside the one before
      * (FOLDER_IN), under the open folder if one is; six levels at most (deeper files go into
      * the sixth). Before: one flat folder per file, as it was */
@@ -1125,7 +1140,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     queue = list.map(it => ({ it, name: it.long || it.name,
                               into: nested ? [...(libAt != null ? [libPath(libAt)] : []), ...levelsOf(it)].join("/") || "INCOMING"
                                            : into || (it.folder || "INCOMING").toUpperCase(),
-                              bytes: 2 * it.w.frames.length, st: "waiting" }));
+                              bytes: bpf(it) * it.w.frames.length, st: "waiting" }));
     const made = new Map(), capped = new Set();
     async function folderFor(it) {
       let at = libAt == null ? -1 : libAt, key = String(at);
@@ -1154,8 +1169,8 @@ if (typeof module !== "undefined") module.exports = DN2;
         const fname = folderBytes(q.into);
         const f = nested ? await folderFor(it) : (await call(C.LIB.FOLDER, fname.length ? fname : folderBytes("INCOMING"))).payload[0];
         if (f === 0xFF) throw new Error(`folder ${q.into}: refused (${(dev.lib && dev.lib.nf) || 64} folders at most)`);
-        const data = DN2.libSample({ frames: it.w.frames });
-        const b = (await call(C.LIB.BEGIN, DN2.libBegin(it.w.frames.length, f, it.w.rate, it.long || it.name), 10000)).payload;
+        const data = DN2.libSample({ frames: it.w.frames, ...(stOn(it) ? { L: it.w.L, R: it.w.R } : {}) });
+        const b = (await call(C.LIB.BEGIN, DN2.libBegin(it.w.frames.length, f, it.w.rate, it.long || it.name, stOn(it) ? C.FMT_I16S : C.FMT_I16), 10000)).payload;
         const k = new DataView(b.buffer, b.byteOffset, b.length).getUint32(0, true);
         for (let o = 0; o < data.length; o += 512) {
           await call(C.LIB.WRITE, [...DN2.le32(o), ...data.subarray(o, Math.min(o + 512, data.length))], 5000, 1);
@@ -1191,7 +1206,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     }
     try {
       st.textContent = "building"; st.className = "pill";
-      const audio = it => ({ frames: it.w.frames, rate: it.w.rate, name: it.name, slices: it.slices });
+      const audio = it => ({ frames: it.w.frames, ...(stOn(it) ? { L: it.w.L, R: it.w.R } : {}), rate: it.w.rate, name: it.name, slices: it.slices });
       let parts, end, remember, total;
       const metas = [];                       /* v0.25: each slot's long name and folder */
       const meta = it => ({ long: it.long, folder: it.folder });
@@ -1214,7 +1229,7 @@ if (typeof module !== "undefined") module.exports = DN2;
       }
       total = parts.reduce((a, [b, at]) => a + b.length - Math.max(0, Math.min(at + b.length, C.REC_END) - Math.max(at, C.REC_OFFSET)), 0);
       log(`${items.length} sample(s), image to ${fmtMB(end)}, ${fmtMB(total)} to send`);
-      queue = items.map(it => ({ name: it.long || it.name, into: "SAMP " + (it.slot + 1), bytes: DN2.itemBytes(it.w.frames.length, it.slices.length), st: "in this send", cls: "st-run" })); renderQueue();
+      queue = items.map(it => ({ name: it.long || it.name, into: "SAMP " + (it.slot + 1), bytes: DN2.itemBytes(it.w.frames.length, it.slices.length, stOn(it)), st: "in this send", cls: "st-run" })); renderQueue();
       await call(C.CMD.BEGIN, DN2.be32(end), 10000);
       st.textContent = "to the +Drive"; let done = 0; const t0 = performance.now();
       for (const [buf, at] of parts) {

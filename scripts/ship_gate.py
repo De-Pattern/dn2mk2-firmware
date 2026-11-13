@@ -192,6 +192,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("recorder", "recorder screen (ColdFire)"),
        ("mnmpages", "Monomachine pages and detents (ColdFire)"),
        ("playdet", "PLAY two detents a choice (ColdFire)"),
+       ("stfmt", "stereo format 2: a slot's format, TRIM by its frame size (ColdFire)"),
        ("question", "stock questions and held keys (ColdFire)"),
        ("mnmdefaults", "Monomachine start values (ColdFire)"),
        ("alloc", "GRID allocate slice locks (ColdFire)"),
@@ -1675,6 +1676,44 @@ def main() -> int:
                               if good else f"d0 {d0}, want [0, {32 << 8}, 0, 0]")
             later("playdet", "PLAY two detents a choice (ColdFire)", "PLAY two detents a choice (ColdFire)",
                   [pd_cmd, sorted(EMU_ENV.items())], pd_body)
+
+            # 6h3. stereo, stage 1 (docs/stereo-assessment.md, "The build, in order"): format 2,
+            # int16 L R a frame. A directory of three slots: 0 stereo (format 2), 1 mono (format 1),
+            # 2 empty. smp_slot_fmt reads 2, 1, 0 (the browser's ST); TRIM keeps frames [100, 4000)
+            # of each: the stereo entry moves 400 bytes (4 a frame), the mono one 200 as before;
+            # frames 3900 both. (A build without stereo moves both 200: its negative control.)
+            if "smp_slot_fmt" in lay and "smp_trim" in lay:
+                from dnfw.sampler import machines as SMs    # noqa: PLC0415
+                Ms = SMs.MIRROR
+                ds = bytearray(0x10)
+                struct.pack_into("<II", ds, 0, SMs.POOL_MAGIC, 3)
+                a0, a1 = 0x84001000, 0x84005000
+                ent = struct.pack("<IIfI", a0, 4096, 1.0, SMs.FMT_I16S) + struct.pack("<IIfI", a1, 4096, 1.0, SMs.FMT_I16)
+                sst = ["wait:2", f"poke:{Ms:#x}:{ds[:8].hex()}{ent.hex()}" + "00" * 16,
+                       f"poke:{lay['smp_dir_ok']:#x}:00000001", "wait:2"]
+                sst += [f"call:{lay['smp_slot_fmt']:#x}:{k}" for k in (0, 1, 2)]
+                sst += [f"call:{lay['smp_trim']:#x}:{k}:100:4000" for k in (0, 1)]
+                sst += [f"mem:{Ms + 8:#x}:32"]
+                sjs = work / "stfmt.json"
+                sf_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                          "--snapshot", snap, "--steps", ",".join(sst), "--png-dir", work / "stfmt", "--json", sjs]
+
+                def sf_body(tdir):
+                    rc, out = run("stereo format", sf_cmd, logs, env=EMU_ENV, trace=tdir)
+                    if rc != 0 or not sjs.exists():
+                        return False, out[-800:]
+                    res = json.loads(sjs.read_text())
+                    d0 = [c["d0"] for c in res["direct_calls"]]
+                    e = bytes.fromhex(res["memory"][f"{Ms + 8:#x}"])
+                    (b0, f0), (b1, f1) = struct.unpack_from("<II", e, 0), struct.unpack_from("<II", e, 16)
+                    facts = {"formats 2, 1, 0": d0[:3] == [2, 1, 0], "both trims taken": d0[3:] == [0, 0],
+                             "stereo moves 4 a frame": (b0, f0) == (a0 + 400, 3900),
+                             "mono moves 2 a frame": (b1, f1) == (a1 + 200, 3900)}
+                    good = all(facts.values())
+                    return good, ("format 2 read as stereo; TRIM moves a stereo slot 4 bytes a frame, a mono one 2"
+                                  if good else f"{facts} d0 {d0} entries {b0:#x}/{f0} {b1:#x}/{f1}")
+                later("stfmt", "stereo format 2 (ColdFire)", "stereo format 2 (ColdFire)",
+                      [sf_cmd, sorted(EMU_ENV.items())], sf_body)
 
         # 6j. v0.30: a stock question's keys are stock's (a user's report: on a sample track, the
         # OS update's "UPGRADE OS NOW?" answered by our page; v0.29's save question), and a YES
