@@ -25,6 +25,8 @@ dispatch, per-track chain), as Milestone 4 does. Steps, each PASS/FAIL
 4. **stock** -- types 0-4 are bit-identical: the same frames with no type-5 track on
    the modded and the stock image give identical buffers on all 16 tracks, and in a
    type-5 run tracks 1-15 match a stock run; the stock filter types likewise.
+4o. **stockout** (2026-11-12, `sharc_stockout_step.py`) -- with stock machines only, what leaves the engine (main mix,
+   tracks' routed and panned blocks, FX returns, TDM slots 0-13, Overbridge records) is the stock image's, every block.
 5. **frame** (with --frame/--frame-be/--frames) -- a caller's frame(s), used verbatim
    every block; every type-5 track bit-exact to the model.
 6-7. **PING, SHFT, GRAN** -- removed (SHFT, GRAN v0.27; PING v0.45); their step functions are kept only where shared.
@@ -43,6 +45,7 @@ import dataclasses
 import gc
 import glob
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -511,7 +514,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,tdm,stock,stockout,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -696,6 +699,13 @@ def main(argv=None):
             results["4b_filters"] = step_filters_stock(snap, m2mach, m5, stock_img, sound, machines,
                                                        max(3, a.blocks // 2))
             show(results["4b_filters"])
+
+        if "stockout" in steps:
+            print("\nstep 4o: stock's OUTPUT bit-identical (main, tracks, FX returns, TDM, records; 2026-11-12)")
+            so_step = importlib.import_module("sharc_stockout_step")
+            results["4o_stockout"] = so_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img, sound, machines)
+            gc.collect()
+            show(results["4o_stockout"])
 
         if "shft" in steps:
             print("\nstep 7: SHFT")
