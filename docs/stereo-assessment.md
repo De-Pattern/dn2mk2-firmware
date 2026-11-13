@@ -149,6 +149,35 @@ without the `6b_shiftimm` fix (identical results: the fix changes nothing this p
   sample costs nothing more), and a cap on simultaneous stereo voices (the guard's load figure, or a
   fixed number) beyond which a stereo voice plays mono (L+R). Confirm on the unit with the load meter.
 
+## Measured (2026-11-14): what a second pass must repeat
+
+`scripts/sharc_stereo_state.py` (M4's voice run, one note on track 0; every DM read and write of the
+traced block's chain run, tagged with the call it happened in). Facts:
+
+- **`0x1c8ef1` is one run for all sixteen voices**, not one call per voice: its run writes about
+  2,800 words across every voice's state blocks (strides `0x240`, `0x30c`, `0x2e8`, `0x55c`...). A
+  second run "for one voice" does not exist; the R pass has to be a per-voice copy of the chain.
+- **The stages' own memory is small.** What each stage call reads and writes back, for track 0:
+  `0x1cdb56` `0x24fa34`, `0x24fa50` (it writes `0x24fa30..38`, `0x24fa4c..54`); `0xb80c39`
+  `0x24f380..84`; `0xb81368` `0x2533f8..fc`; `0xb82342` `0x2505ac..b0` (and writes `0x250660..68`);
+  the amp `0xb80345` `0x2547bc`, `0x2547c8`; `0xb8251b` and `0xb8265b` none in their state.
+- **Their parameters are set before each call** by the body and by the helpers `0xb809cb`,
+  `0xb82096`, `0xb813e8`, `0xb8028c` (written into the state blocks: e.g. `0xb82342` reads
+  `0x2505b4..bc`, `0x2505d0`... that `0xb82096` wrote this block). A second call for R can use L's
+  parameters as they stand and keep only the stage's own words per channel.
+- **The body works on the block itself too**: one per-sample loop at `0x1c9492..0x1c949e`, between
+  `0xb8251b` and `0x1cdb56` (a constant `0x3fcade01`, about +4 dB, in it). An R pass has to repeat
+  that step as well as the seven calls.
+- The block is written in this order: the machine's render (`0x180100`, ours), `0xb8251b`, the body's
+  loop, then `0x1cdb56`, `0xb80c39`, `0xb8265b`, `0xb81368`, `0xb82342`, the amp.
+
+So the R pass is: after the chain, for each stereo voice, the same eight steps on the R block, each
+stage with a copy of its state whose parameter words follow L's and whose own words are R's (rule:
+a word changed by anything but the stage follows L; what the stage itself writes stays per channel;
+both copies equal at the note's start). Next: read the body's loop and the helpers' parameter writes
+per voice (which words, which voice stride), then build that pass behind `STEREO`, checked on the
+runner against L's math on R's input, bit for bit.
+
 ## The build, in order (owner, 2026-11-13: "stereo with a voice cap")
 
 Each stage its own commits behind `STEREO = 1`, each with its emulator check (and a negative

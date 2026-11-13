@@ -81,6 +81,8 @@ class StateTracer(m4.ChainTracer):
         self.pprev2 = None
         self.cur = None
         self.runs_seen = 0
+        self.show, self.shown, self.lines = None, set(), []
+        self.site = None
 
     def win(self, st, base):
         return [m4.m2.word(st, base + 4 * k) for k in range(self.window // 4)]
@@ -90,11 +92,19 @@ class StateTracer(m4.ChainTracer):
             pc = runner.state.pc_sw
             LOG["pc"] = pc
             st = runner.state
+            if self.show and self.show[0] <= pc < self.show[1] and LOG["ctx"] is not None and pc not in self.shown:
+                self.shown.add(pc)
+                self.lines.append(f"  {pc:#x}  {insn}")
             if pc == CHAIN and self.cur is None and self.runs_seen == 0:
                 self.cur = {"bases": {}}
                 self.runs_seen = 1
+                self.site = self.pprev2
                 LOG["ctx"] = "body"
-            if self.cur is not None:
+            elif self.site is not None and 1 <= pc - self.site <= 3:
+                LOG["ctx"] = None                  # the chain's run returned: the footprint is whole
+                self.site = None
+                self.cur = None
+            if self.cur is not None and LOG["ctx"] is not None:
                 inb = BODY[0] <= pc < BODY[1]
                 pin = self.pprev2 is not None and BODY[0] <= self.pprev2 < BODY[1]
                 if pin and not inb:
@@ -109,9 +119,7 @@ class StateTracer(m4.ChainTracer):
                     if "open" in self.cur:
                         tgt, r4, before = self.cur.pop("open")
                         self.res.append((tgt, r4, before, self.win(st, r4)))
-                        if len(self.res) >= len(STAGES):
-                            self.cur = None
-                            LOG["ctx"] = None
+                        pass
             self.pprev2 = pc
         return super().pre(runner, insn)
 
@@ -120,6 +128,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--blocks", type=int, default=4)
     p.add_argument("--window", type=lambda x: int(x, 0), default=0x200)
+    p.add_argument("--show", help="LO,HI: print each instruction run in [LO, HI) once (the traced chain run)")
     a = p.parse_args()
     dk = m4.m1.Digikit(pathlib.Path(m4.os.environ.get("DNFW_DIGIKIT_SHARC",
                                                       m4.ROOT.parent / "digikit-wt-sharcemu")))
@@ -137,12 +146,19 @@ def main() -> int:
         positions = m4.render.sweep(len(m4.testtable.table()), max(a.blocks, 2))
         prep = m4.voice_prep(375.0, positions)
         tr = StateTracer(a.window)
+        if a.show:
+            tr.show = tuple(int(x, 0) for x in a.show.split(","))
         wrap_memory()
 
         def frame(b):
             return m4.make_frame(m4.SOUND, 5, trig=(b == 1))
         on = m4.run_blocks(init, a.blocks, frame, type5=prep, tracer=tr, trace_block=a.blocks - 1)
         print("ok", on["ok"], on.get("halt"))
+        allw = [ad for ad in LOG["w"] if not 0x2FF000 <= ad < 0x300000]
+        print("everything the traced chain run wrote (stack 0x2ff000.. left out):", len(allw), "words")
+        for sp in spans(allw):
+            print("   ", sp)
+        print("\n".join(sorted(tr.lines, key=lambda x: int(x.split()[0], 16))))
         for tgt, r4, before, after in tr.res:
             ch = [k for k, (x, y) in enumerate(zip(before, after)) if x != y]
             print(f"stage {tgt:#x} state {r4:#x}: the call changed {len(ch)} words of {a.window // 4}: "
