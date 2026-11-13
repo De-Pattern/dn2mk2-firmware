@@ -221,6 +221,23 @@ def main() -> int:
     fx_g = c.call(lay["fx_get"], T, 3)[0]
     link("1f. v0.50: knob G is GAIN (+3 after three detents, back to 0; v0.51: kept in the track's sound)",
          g_up == 3 and g_back == 0 and fx_g == 0, f"rec_gain {g_up}, back {g_back}; the sound's {fx_g}")
+    # v0.53 (owner): FUNC + D moves R.LEN a bar (16 steps) a detent, onto the bars (20 -> 32 -> 16 -> 0
+    # MAX); without FUNC, a step a detent as before (0 -> 1). Put back as it was for the take
+    rl0 = c.call(lay["fx_get"], T, 2)[0]
+    c.call(lay["fx_set"], T, 2, 20)
+    held(17, True)
+    turn(3, 1, 1)
+    rl_up = c.call(lay["fx_get"], T, 2)[0]
+    turn(3, -1, 1)
+    rl_dn = c.call(lay["fx_get"], T, 2)[0]
+    turn(3, -1, 1)
+    rl_0 = c.call(lay["fx_get"], T, 2)[0]
+    held(17, False)
+    turn(3, 1, 1)
+    rl_1 = c.call(lay["fx_get"], T, 2)[0]
+    c.call(lay["fx_set"], T, 2, rl0)
+    link("1g. v0.53: FUNC + D moves R.LEN a bar a detent, onto the bars (20 -> 32 -> 16 -> MAX); D alone a step",
+         (rl_up, rl_dn, rl_0, rl_1) == (32, 16, 0, 1), f"20 -> {rl_up} -> {rl_dn} -> {rl_0}; alone {rl_1}")
     tap(12)                                                      # NO: the panel closed
     link("1d. NO closes FLEX REC", c.long(lay["rec_overlay"]) == 0, f"rec_overlay {c.long(lay['rec_overlay'])}")
     fired0 = c.long(lay["rt_fired"])
