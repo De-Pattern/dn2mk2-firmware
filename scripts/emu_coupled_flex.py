@@ -462,6 +462,29 @@ def main() -> int:
     link("8c. v0.54: a p-locked BUF, highlighted, keeps its number in the label's place (not BUF)",
          inv and shown_l and shown_u and shown_l != shown_u, f"highlighted {inv}, label pixels locked "
          f"{len(shown_l)}, unlocked {len(shown_u)}, differing {len(shown_l ^ shown_u)}")
+    # v0.53 (NiKo: a BUF lock on a playback trig was ignored, the voice played the track's BUF):
+    # every buffer given a take (their sizes poked: which buffer the voice is sent is what is
+    # tested), STOP and PLAY replay step 1, whose BUF 8c locked to another buffer than the
+    # track's: its voice is sent a buffer, and not the track's
+    bt = c.call(lay["rt_buf_of"], T)[0]
+    c.poke(lay["rt_rbytes"], struct.pack(">16I", *([4096] * 16)))
+    c.poke(lay["rt_play"], b"\x00" * 8)
+    c.poke(lay["rt_on"], struct.pack(">i", 1))
+    bufw = {(SM.BUF_SAMP0 + 2 * b) << 8: b for b in range(8)}
+    tap(21)                                                      # STOP
+    c.periods(4)
+    c.machine.pc = P.press(c.machine.m, c.panel.profile, *key(20))   # PLAY: step 1 again
+    fw3 = []
+    for n in range(40):
+        if n == 3:
+            c.machine.pc = P.release(c.machine.m, c.panel.profile, *key(20))
+        if not c.period():
+            break
+        vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
+        fw3 += [struct.unpack(">H", c.read(CF_FRAME + 168 + 2 * SLOT_SAMP + 146 * v, 2))[0] for v in range(16) if vt[v] == T]
+    got = sorted({bufw[w] + 1 for w in fw3 if w in bufw})
+    link("8d. v0.53: step 1's BUF lock is the buffer its voice plays (not the track's BUF)",
+         any(b != bt + 1 for b in got), f"track BUF {bt + 1}, buffers sent {got}")
     # (v0.51: TUNE's knob, a detent 0.01 and FUNC + turn 12.00, is stock's own on record 238 and unchanged;
     # this harness's encoder pulses do not reach a stock page's knob here, 8 pulses after SRC left the word as
     # it was, so TUNE's new display is checked in emu_rectext.py, its knob in the gate's functurn step)

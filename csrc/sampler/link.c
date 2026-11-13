@@ -2915,6 +2915,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
 #define TARGET_CELL(b, s) ((volatile u16 *)(0x80003AF0u + 34u + 202u * (u32)(b) + 2u * (u32)(s)))
 #define VOICE_SOUND(b) (*(u8 *volatile *)(0x800052A8u + 4u * (u32)(b)))
 #define SAMP_SLOT 43                            /* SAMP's frame slot (sound + 20 + 2 x 43) */
+#define FLEX_BUF_SLOT 35                        /* v0.53: FLEX's BUF (record 244; rectrig.c SLOT_BUF) */
 /* the only cell written, block 0's lowest of them, lies past the frame (CTL_FRAME, 2,748
  * bytes: test_sources): the mirror is not the frame, and nothing here touches the frame */
 _Static_assert(0x800068E4u + 34u + 2u * SAMP_SLOT >= 0x80005E60u + 2748u, "SAMP's mirror cells lie past the frame");
@@ -2977,10 +2978,13 @@ void smp_mod_apply(void *mirror)
         u8 *snd = VOICE_SOUND(b);
         if (!snd || snd[SOUND_TYPE] != BOUNCE_TYPE)
             continue;
-        extern u32 rt_bounce_samp(u32 t);
+        /* v0.53 (NiKo: a BUF lock on a playback trig was ignored): the voice plays the buffer its
+         * own BUF names (the voice's target, the step's lock applied), not the track's; FLEX REC
+         * still records into the track's BUF (rt_buf_of) */
+        extern u32 rt_buf_samp(u32 buf), rt_buf_value(u32 v);
         u32 ot = SLOT_TRACK[b];                 /* the voice's track */
         volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
-        u32 want = ot < 16 ? rt_bounce_samp(ot) : 0;
+        u32 want = ot < 16 ? rt_buf_samp(rt_buf_value((u32)(*TARGET_CELL(b, FLEX_BUF_SLOT) >> 8))) : 0;
         if ((u32)(*cell >> 8) != want)
             *cell = (u16)(want << 8);
     }
