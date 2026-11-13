@@ -1675,11 +1675,12 @@ def step_cost(init, sound, machines) -> dict:
         for k in ("L1", "L2", "DDR"):
             counts[k] = 0
         measure("(nothing)", lambda b: base_frame(sound, machines, trigger=False).to_bytes())
-        # v0.43: DNFW_COST_ONLY=mnm measures the Monomachine machines alone (the whole run is 2 h)
+        # v0.43: DNFW_COST_ONLY=mnm measures the Monomachine machines alone (the whole run is 2 h);
+        # 2026-11-12: =smp the sample machines alone
         only = os.environ.get("DNFW_COST_ONLY", "")
-        for k, name in enumerate(PM.NAMES if only != "mnm" else ()):
+        for k, name in enumerate(PM.NAMES if only not in ("mnm", "smp") else ()):
             measure(name, (lambda k: lambda b: base_frame(sound, machines, overrides=perc_words(k), trigger=b == 1).to_bytes())(k))
-        for k, name in enumerate(MMx.NAMES):
+        for k, name in enumerate(MMx.NAMES if only != "smp" else ()):
             def fb(b, k=k):
                 f = base_frame(sound, machines, t0=MMx.TYPES[k], trigger=b == 1)
                 for slot, w in mnm_words(k).items():

@@ -19,7 +19,8 @@ def layout() -> P.Layout:
     from ..perc import live as PL
     from ..waverider import dsp
     return P.Layout(state=dsp.SMP_STATE_DM, scratch=dsp.SMP_SCRATCH_DM, pool=dsp.SMP_POOL_DDR,
-                    exp2=PL.layout().T["exp2"], tables=dsp.SMP_TABLES_DDR, dec=dsp.SMP_DEC_DM)
+                    exp2=PL.layout().T["exp2"], tables=dsp.SMP_TABLES_L2, dec=dsp.SMP_DEC_DM,
+                    dtab=dsp.SMP_DTAB_DM, line=dsp.SMP_LINE_DM)
 
 
 def pool_bytes(samples, base: int, rates=None, fmts=None, names=None, slices=None, hole=None) -> bytes:
@@ -155,7 +156,9 @@ class Harness:
         self.words.update(PL.table_words(PL.layout()))
         tb = P.tables_bytes()                   # v0.18: the DT2 reader's coefficients
         self.words.update({self.L.T["poly"] + 4 * k: struct.unpack_from("<I", tb, 4 * k)[0]
-                           for k in range(len(tb) // 4)})
+                           for k in range(P.POLY_BYTES // 4)})
+        self.words.update({self.L.T["decim"] + 4 * k: struct.unpack_from("<I", tb, P.POLY_BYTES + 4 * k)[0]
+                           for k in range(P.DTAB_BYTES // 4)})     # 2026-11-12: apart, in L1
         self.mem = Mem(lambda a: self.words.get(a, 0))
         self.steps = 0
 

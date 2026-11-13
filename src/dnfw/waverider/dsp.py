@@ -117,8 +117,13 @@ SMP_STAGE_DM = SMP_SCRATCH_DM + 0x100        # the recorder's block (dnfw.sample
 SMP_LINK_DM = SMP_STAGE_DM + 0x80            # the fast link's scratch, then its packet buffer (v0.16)
 SMP_POOL_DDR = 0x84000000                    # the pool's directory, then its frames
 # v0.18: the DT2 reader's coefficients (dnfw.sampler.program.tables_bytes, from the owner's
-# DT2 image) in DDR; each voice's decimator (12 words) in L1, where Waverider's loop was
-SMP_TABLES_DDR = 0x81218000
+# DT2 image) in DDR; each voice's decimator (12 words) in L1, where Waverider's loop was.
+# 2026-11-12: every 96 kHz sample read a row of six and every output sample the decimator's
+# four, 640 DDR reads a voice-block. The interpolator's 256 x 6 now lie in L2, after the main
+# mix's tap (inside the range proven on units, 0x20088400..0x200b0000), the decimator's four and
+# the gain in L1, in REGION's free head, then the reader's taps' line (sampler.program.LINE_WORDS)
+SMP_TABLES_DDR = 0x81218000                             # until 2026-11-12 (no longer loaded)
+SMP_TABLES_L2 = 0x200AA000                              # 6,144 B, to 0x200ab800
 SMP_DEC_DM = SMP_LINK_DM + 0x500                        # 16 x 48 bytes, to 0x2e0080 (W2_RND_DM is 0x2e0100)
 # W2's random table (dnfw.waverider.live.rnd_table): Waverider is gone (v0.11), but
 # RESONATOR, CZ and GRAN read it here
@@ -126,6 +131,11 @@ W2_RND_DM = 0x2E0100                                         # 256 float32 in [0
 # v0.50: the recorder's GAIN (dnfw.sampler.machines.REC_GAIN): a buffer take's dB index (0: none,
 # the RECORDER's v0.49 scaling) and its factor, in the gap the decimators leave before W2_RND_DM
 REC_GAIN_DM = SMP_DEC_DM + 16 * 48                         # 0x2e0080, 2 words
+# 2026-11-12: the DT2 reader's decimator coefficients and LEV make-up gain (sampler.program.DTAB_BYTES,
+# 20 B), then its taps' line: the switch, the tag, then 24 words (zeros at power-on; a render sets the
+# switch and the tag before it reads the line). In REGION's head, free since v0.11
+SMP_DTAB_DM = 0x2DD600                                      # = REGION[0], to 0x2dd614
+SMP_LINE_DM = SMP_DTAB_DM + 0x20                            # 0x2dd620..0x2dd680 (switch 0x2dd618, tag 0x2dd61c)
 # PING (docs/ping.md): its code (entered from machine5_live's tail), 16 x 128 bytes
 # of state, a few words of scratch, then its tables (dnfw.ping.live.tables_bytes).
 # v0.45: PING removed. Only its code address stays in use (ping.asm, now the shared tail);
@@ -279,7 +289,10 @@ def spans() -> list[tuple[str, int, bytes]]:
     at least 64 bytes of zeros (a zero word is a NOP)."""
     obj = objects()
     raw = [
-        ("free since v0.11 (Waverider's reader and osc 2; zeros)", REGION[0], b""),
+        # v0.11 freed this head (Waverider's reader and osc 2); 2026-11-12: the DT2 reader's
+        # decimator coefficients and gain, then its taps' line (zeros), then zeros
+        ("the DT2 sample reader's decimator coefficients and gain (from the owner's DT2 image), its taps' "
+         "line, then free (zeros)", SMP_DTAB_DM, _smp_tables()[-_smp_dtab():]),
         ("state: save area, PERC scratch, idle_load's counters (zeros)", STATE_DM, bytes(STATE_BYTES)),
         ("PERC state: 16 voices x 128 bytes (zeros)", PERC_STATE_DM, bytes(16 * PERC_STATE_STRIDE)),
         ("idle_load.asm (wr_idle)", IDLE_DM, obj["idle_load"]),
@@ -335,8 +348,6 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         # is loaded by a span.
         ("PERC's amp-modulation sine (SHFT's table, kept for AMD)", SHFT_TABLES_DDR, _perc_sine()),
         ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
-        ("the DT2 sample reader's coefficients (from the owner's DT2 image; v0.18)", SMP_TABLES_DDR,
-         _smp_tables()),
         ("Machinedrum sine and tables (zeros: the DSP decodes them; v0.24)", MD_TABLES_DDR,
          bytes(_md_core().TABLE_LAYOUT[_md_core().SHIPPED][0])),
         # v0.26: what ships (the host's pitch table and zpack) comes over the fast link from
@@ -358,6 +369,12 @@ def _perc_sine() -> bytes:
 def _smp_tables() -> bytes:
     from ..sampler import program as smp_program
     return smp_program.tables_bytes()
+
+
+def _smp_dtab() -> int:
+    from ..sampler import program as smp_program
+    assert len(_smp_tables()) == smp_program.POLY_BYTES + smp_program.DTAB_BYTES
+    return smp_program.DTAB_BYTES
 
 
 def _smp_pool() -> bytes:
@@ -396,6 +413,11 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
                 bytes(MNM_DT_BYTES)))
     out.append(("the main mix's tap for the recorder's MAIN, in L2 (zeros; v0.37)", MAIN_TAP_L2,
                 bytes(MAIN_TAP_BYTES)))
+    # 2026-11-12: the DT2 sample reader's interpolator rows (in DDR v0.18 .. 2026-11-11)
+    poly = _smp_tables()[:-_smp_dtab()]
+    assert MAIN_TAP_L2 + MAIN_TAP_BYTES <= SMP_TABLES_L2 and SMP_TABLES_L2 + len(poly) <= 0x200B0000
+    out.append(("the DT2 sample reader's interpolator coefficients, in L2 (from the owner's DT2 image)",
+                SMP_TABLES_L2, poly))
     return out
 
 

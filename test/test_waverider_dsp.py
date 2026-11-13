@@ -158,15 +158,15 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     # Waverider's wavetables went in v0.11. v0.26: the Machinedrum's shipped tables (the
     # host's pitch table, zpack) are not in the image: the ColdFire sends them at power-on.
     # v0.45: PING's tables went with PING
+    # 2026-11-12: the DT2 reader's coefficients (v0.18) went to L2 and L1
     assert [a for _, a, _ in ddr] == [dsp.SHFT_TABLES_DDR,                      # v0.31: AMD's sine
                                       dsp.PERC_TABLES_DDR,
-                                      dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
                                       dsp.MD_TABLES_DDR,
                                       dsp.MD_DELAY_DDR,                         # v0.32: P-I's lines, zeroed
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[-1][2])
-    assert not any(ddr[3][2]) and not any(ddr[4][2])      # the MD's tables (the DSP fills them), P-I's lines
-    assert dsp.MD_TABLES_DDR + len(ddr[3][2]) <= dsp.MD_DELAY_DDR
+    assert not any(ddr[2][2]) and not any(ddr[3][2])      # the MD's tables (the DSP fills them), P-I's lines
+    assert dsp.MD_TABLES_DDR + len(ddr[2][2]) <= dsp.MD_DELAY_DDR
     # v0.32: the voices' working state in L2 (zeros), inside the room proven on units
     from dnfw.perc import live as PL
     L = PL.layout()
@@ -227,6 +227,28 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
             assert b.target + b.count <= dsp.L2_IMAGE_END
     assert dsp.PERC_SW == 0xBE0000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
     assert dsp.SMP_SW == 0xBF1800 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
+
+
+def test_the_sample_readers_coefficients_are_loaded_where_it_reads_them():
+    # 2026-11-12: the interpolator's rows in L2 after the main mix's tap (inside the range proven
+    # on units), the decimator's four and the gain in L1 at REGION's head, then the taps' line
+    from dnfw.sampler import live as SLv
+    from dnfw.sampler import program as SP
+    L, tb = SLv.layout(), SP.tables_bytes()
+    assert L.T["poly"] == dsp.SMP_TABLES_L2 and L.T["decim"] == dsp.SMP_DTAB_DM and L.T["gain"] == dsp.SMP_DTAB_DM + 16
+    l2 = {a: p for _, a, p in dsp.l2_spans()}
+    assert l2[dsp.SMP_TABLES_L2] == tb[:SP.POLY_BYTES]
+    assert dsp.MAIN_TAP_L2 + dsp.MAIN_TAP_BYTES <= dsp.SMP_TABLES_L2
+    assert 0x20088400 <= dsp.SMP_TABLES_L2 and dsp.SMP_TABLES_L2 + SP.POLY_BYTES <= 0x200B0000
+    l2s = sorted((a, a + len(p)) for _, a, p in dsp.l2_spans())
+    assert all(hi <= lo for (_, hi), (lo, _) in zip(l2s, l2s[1:]))   # no two L2 spans overlap
+    sp = dsp.spans()
+    assert dsp.SMP_DTAB_DM == dsp.REGION[0] and sp[0][1] == dsp.dm_to_load(dsp.SMP_DTAB_DM)
+    head = sp[0][2]
+    assert head[:SP.DTAB_BYTES] == tb[SP.POLY_BYTES:] and not any(head[SP.DTAB_BYTES:])
+    assert dsp.SMP_DTAB_DM + SP.DTAB_BYTES <= dsp.SMP_LINE_DM - 8                   # the line's switch, its tag
+    assert L.line == dsp.SMP_LINE_DM and dsp.SMP_LINE_DM + 4 * SP.LINE_WORDS <= dsp.STATE_DM
+    assert dsp.SMP_LINE_DM + 4 * SP.LINE_WORDS <= dsp.REGION[0] + len(head)
 
 
 def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
