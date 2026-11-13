@@ -175,6 +175,12 @@ def main() -> int:
     c.periods(4, label="settle")
     if not link("0. track 1 is FLEX", c.read(snd + 0xDE, 1)[0] == FLEX, f"type {c.read(snd + 0xDE, 1)[0]}"):
         return finish()
+    # v0.54 (owner): a switch to FLEX puts the track's trig LEN (TRIG page 1; the pattern's byte at
+    # +1153 + 1701 x track, stock's setter 0x4004eecc) at INF, 127; another track keeps stock's 1/16, 14
+    tl = c.read(pat + 1153 + 1701 * T, 1)[0]
+    tl0 = c.read(pat + 1153, 1)[0]
+    link("0b. v0.54: switching to FLEX sets the track's trig LEN to INF (127); track 0 (not switched) keeps its own",
+         tl == 127 and tl0 != 127, f"track {T} {tl}, track 0 {tl0}")
     held(16, True)
     tap(24 + T + 1)                                              # [TRK] + [TRIG 2]: track 1
     held(16, False)
@@ -420,6 +426,12 @@ def main() -> int:
     want = c.call(lay["rt_buf_value"], w1)[0]
     link("8. v0.50: the SYN page's BUF knob moves the buffer FLEX records and plays (rt_buf_of follows "
          "the knob's slot 35)", w1 != w0 and b1 == want and b1 != 0, f"slot 35 {w0} -> {w1}, rt_buf_of {b1}, want {want}")
+    # v0.54 (owner: BUF's detents are right, but the knob should not show it moving through them): the
+    # word is always a buffer's own value, lo + ceil(b x span / 8) of record 244 (0..100), never one
+    # in between, so the knob drawn from it jumps buffer to buffer
+    span = 101
+    link("8b. v0.54: the SYN page's BUF knob sits on its buffer's own value (the knob drawn moves only "
+         "with the buffer)", w1 == (b1 * span + 7) // 8, f"slot 35 {w1}, buffer {b1 + 1}, its value {(b1 * span + 7) // 8}")
     # (v0.51: TUNE's knob, a detent 0.01 and FUNC + turn 12.00, is stock's own on record 238 and unchanged;
     # this harness's encoder pulses do not reach a stock page's knob here, 8 pulses after SRC left the word as
     # it was, so TUNE's new display is checked in emu_rectext.py, its knob in the gate's functurn step)

@@ -32,6 +32,8 @@ typedef unsigned char u8;
 #define FRAMES (*(volatile u32 *)0x4058E8D4u)                         /* frames since boot, 1,500 a second */
 #define REC_THR_FLOOR 33u                       /* v0.30: THRES 0's level, -60 dB, under any real input */
 #define CTL_FRAME ((volatile u16 *)0x80005E60u)
+#define FLEX_TRIG_LEN_AT 1153u                  /* v0.54: the pattern's per-track trig LEN byte (+1701 a track) */
+#define FLEX_TRIG_LEN 127u                      /* v0.54: INF, the TRIG page LEN knob's top (stock 1/16 is 14) */
 #define TEMPO_WORD 108                                               /* the frame's BPM x 120 (byte 216) */
 #define KEY_ORIG ((int (*)(void *, void *))0x40016480u)              /* the parameter page's key handler */
 /* the UI queue's receive: the item in d0. Declared as returning an integer: GCC takes a
@@ -951,6 +953,14 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
          * the words held) */
         volatile unsigned short *src = (volatile unsigned short *)(KIT + 52u + 1163u * track + 20u + 2u * 38u);
         *src = (unsigned short)(*src & 0xFF00u);
+        /* v0.54 (owner: "so the user hears the playback trig playing by default"): the track's
+         * trig LEN (TRIG page 1, the pattern's per-track byte stock's setter 0x4004eecc writes:
+         * pattern + 1153 + 1701 x track; stock's default 14 is 1/16) at INF (127, the knob's
+         * top), so a note plays the whole take. Only here, on a switch to FLEX: a loaded
+         * pattern, an existing FLEX track and a trig's own LEN lock are left as they are */
+        u32 pat = *(volatile u32 *)0x42C5A9A0u;
+        if (pat)
+            *(volatile unsigned char *)(pat + FLEX_TRIG_LEN_AT + 1701u * track) = FLEX_TRIG_LEN;
     }
     /* v0.33: a Monomachine machine starts as its own (dnfw.mnm DEFAULTS: SID on a square
      * wave), not at the shared records' defaults (the owner: SID silent at first, on MIX) */
