@@ -36,14 +36,24 @@ class StereoTracer(m4.ChainTracer):
         self.snap = None
 
     n_all = 0
-    n_chain = 0
+    runs = None
+    run_at = None
+    pprev = None
 
     def pre(self, runner, insn):
         if self.active:
             self.n_all += 1
             pc = runner.state.pc_sw
-            if self.BODY[0] <= pc < self.BODY[1] or self.open is not None:
-                self.n_chain += 1               # the chain's body and the calls it makes
+            if self.runs is None:
+                self.runs = []
+            # each run of the chain: from its entry until control is back next to the call
+            # site (the return lands 1..3 past it: plain or delayed call)
+            if pc == CHAIN and self.run_at is None and self.pprev is not None:
+                self.run_at = (self.n_all, self.pprev)
+            elif self.run_at is not None and 1 <= pc - self.run_at[1] <= 3:
+                self.runs.append(self.n_all - self.run_at[0])
+                self.run_at = None
+            self.pprev = pc
             st = runner.state
             now = [m4.m2.word(st, base + 4 * k) for base in WATCH for k in (0, 5, 32, 37)]
             if self.snap is not None and now != self.snap and self.last_pc is not None:
@@ -95,8 +105,8 @@ def main() -> int:
             m4.fixups = lambda hooks=None: base_fix({**(hooks or {}), CHAIN: zero})
         on = m4.run_blocks(init, a.blocks, frame, type5=prep, tracer=tr, trace_block=a.blocks - 1)
         print("ok", on["ok"], on.get("halt"))
-        print(f"cost: traced block {tr.n_all:,} instructions; track 0's chain (body and its calls) "
-              f"{tr.n_chain:,} ({100 * tr.n_chain / max(tr.n_all, 1):.1f}%)")
+        print(f"cost: traced block {tr.n_all:,} instructions; the chain's runs {tr.runs} "
+              f"(open at the end: {tr.run_at is not None})")
         print("calls out of 0x1c8ef1 that touch track 0's mono buffer:")
         for i, c in enumerate(tr.calls):
             print(f"  {i:2d} {c['from']} -> {c['target']}  R4 {c['R4']}  peak {c['peak_in']:.4f} -> {c['peak_out']:.4f}")
