@@ -13,6 +13,7 @@ either does nothing (the runner steps as usual), runs after the step (a
 post-fix), or replaces the step outright:
 
   G1  SIMD PEy is modelled only in Types 2c and 2a_short (compute) and 14a,
+      (6b_shiftimm included since 2026-11-13: it has no compute field)
       3b and 15a (memory companion). Everything else runs PEx only. We run
       such an instruction twice in SISD: PEy on a copy with R<->S (and the
       other complementary pairs) swapped and the transfer address one
@@ -204,7 +205,12 @@ class Fixups:
             if t in FLOW:
                 if "compute[22:16]" in f:
                     return ("replace", lambda r: self.two_pass(r, insn, flow=True))
-            elif "compute[22:16]" in f or t in ("5a_move", "5b_move"):
+            elif "compute[22:16]" in f or t in ("5a_move", "5b_move") \
+                    or (t == "6b_shiftimm" and cond_of(f) == 31):
+                # (2026-11-13, found by armio's DN2 port: the shift-immediate form carries its
+                # operation in shiftimm fields, not compute, so it ran on PEx only and left Sn
+                # and PEy's status stale; stock's chain hits it at 0x1c948f and 0x1c94a1. A
+                # conditional one keeps G6's path. G11's FEXT mask still runs after, on Rn and Sn)
                 return ("replace", lambda r: self.two_pass(r, insn))
         if t in LOOP_ABORT_FORMS:
             return self.loop_abort(insn, s, pc) if F(f, "a") else None
