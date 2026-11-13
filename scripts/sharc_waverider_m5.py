@@ -1967,6 +1967,31 @@ def step_smp(init, sound, machines, blocks) -> dict:
     # (and on a SLICE track, with the bad entry claiming slices: none is read; the review's case)
     runs["bad_slices"] = rb(init, frames(SM.TYPE_OF["SLICE"], smp_words({SM.SAMP_REC: 3, SM.SLICE_REC: 6})), blocks,
                             extra_hooks=bad_entry(0x80000000, 48000, 1 | 8 << 8))
+    # stereo stage 2a (docs/stereo-assessment.md): KICK as a stereo sample (format 2, int16 L R:
+    # L the kick, R -L/2) and as a float32 sample of (L + R) / 65536, each poked into the pool
+    # past the test sounds and given slot 0's entry: the DSP plays the stereo one as the float's
+    # mono mix, bit for bit (and bit-exact to the model, above)
+    kpcm = [max(-32767, min(32767, round(x * 32767))) for x in SL.test_samples()[0]]
+    st_at, mix_at = dsp.SMP_POOL_DDR + 0x100000, dsp.SMP_POOL_DDR + 0x180000
+    st_words = [(l & 0xFFFF) | ((-(l // 2)) & 0xFFFF) << 16 for l in kpcm]
+    mix_words = [struct.unpack("<I", struct.pack("<f", (l - l // 2) / 65536))[0] for l in kpcm]
+    rate_w = struct.unpack("<I", struct.pack("<f", SL.test_rates()[0]))[0]
+
+    def as_slot0(at, words, fmt):
+        done = []
+
+        def poke(r):
+            if not done:
+                for k, w in enumerate(words):
+                    m2.poke(r.state, at + 4 * k, w)
+                done.append(1)
+            for k, w in enumerate((at, len(words), rate_w, fmt)):
+                m2.poke(r.state, dsp.SMP_POOL_DDR + 8 + 4 * k, w)
+        return {dsp.PERC_SW: poke}
+    runs["stereo"] = rb(init, frames(ONE, smp_words({SM.TUNE_REC: 67})), blocks,
+                        extra_hooks=as_slot0(st_at, st_words, SM.FMT_I16S))
+    runs["stereo_mix"] = rb(init, frames(ONE, smp_words({SM.TUNE_REC: 67})), blocks,
+                            extra_hooks=as_slot0(mix_at, mix_words, SM.FMT_F32))
     runs["retrig"] = rb(init, frames(ONE, smp_words(), trig=(1, RETRIG)), blocks)
     runs["tops"] = rb(init, frames(GRID, smp_words({r: 127 for r in SM.RECORDS})), blocks)
     # v0.19, SLICE on BEAT's own sixteen slices: slice 3 and the next; NOTE, C1 + 5 (the sixth)
@@ -2076,6 +2101,10 @@ def step_smp(init, sound, machines, blocks) -> dict:
         "frames) plays as an empty slot: silent, finite, bit-exact (above)":
             all(runs[k]["ok"] and all(x == 0.0 for x in smp_series(runs[k], 0))
                 for k in ("bad_below", "bad_above", "bad_long", "bad_end", "bad_fmt", "bad_zero", "bad_slices")),
+        "stereo: a format-2 sample plays (L + R) / 2, bit for bit the float32 sample of its mix, and sounds":
+            runs["stereo"]["ok"] and runs["stereo_mix"]["ok"]
+            and V.peak(smp_series(runs["stereo"], 0)) > 0.05
+            and smp_series(runs["stereo"], 0) == smp_series(runs["stereo_mix"], 0),
         "SAMP 0 (OFF), an empty slot and no trigger are silent":
             all(s and all(x == 0.0 for x in s) for s in (off, empty, silent)),
         "a second note restarts the sample": bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG]

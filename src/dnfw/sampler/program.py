@@ -488,7 +488,9 @@ def entry_check(p: Prog, L: Layout) -> None:
     p.iconst(12, 0xFF)
     p.iop(9, 8, "AND", 12)
     p.ifz(9, "EQ", lambda: p.lsh(11, 11, 1))  # float32: 4
-    p.iconst(12, 1)
+    p.iconst(12, SM.FMT_I16S)
+    p.if_(9, "EQ", 12, lambda: p.lsh(11, 11, 1), kind="i")   # stereo (int16 L R): 4
+    p.iconst(12, SM.FMT_I16S if SM.STEREO else SM.FMT_I16)
     p.if_(9, "GT", 12, bad, kind="i")
     p.iop(11, 10, "+", 11)                    # its end's offset
     p.iconst(12, SM.POOL_BYTES)
@@ -634,7 +636,8 @@ def slice_bounds(p: Prog, L: Layout) -> None:
         v(p, 6, "frames")
         v(p, 8, "fmt")
         p.lsh(7, 6, 2)
-        p.ifz(8, "NE", lambda: p.lsh(7, 6, 1))
+        p.iconst(12, SM.FMT_I16)
+        p.if_(8, "EQ", 12, lambda: p.lsh(7, 6, 1), kind="i")   # int16 mono 2 bytes; float32, stereo 4
         p.iconst(12, 3)
         p.iop(7, 12, "+", 7)
         p.iconst(12, -4)
@@ -919,7 +922,25 @@ def fetch(p: Prog, d: int, k: int) -> None:
         p.iop(d, d, "AND", 12)           # the half alone, on top: a signed 32-bit value
         p.iconst(12, -31)
         p.float_(d, d, 12)               # / 2^31 = the int16 / 32768 (no ASHIFT: the runner lacks it)
-    p.ifz(8, "NE", i16, f32)
+
+    def i16s():                          # stereo: frame k's word, L its low half, R its high
+        p.lsh(12, k, 2)
+        p.ipass(13, 10)
+        p.iop(12, 13, "+", 12)
+        p.seti(1, 12)
+        p.ldi(d, 0, 1)
+        p.iconst(12, 0xFFFF0000 - (1 << 32))
+        p.iop(13, d, "AND", 12)          # R on top
+        p.lsh(d, d, 16)                  # L on top
+        p.iconst(12, -32)
+        p.float_(d, d, 12)               # L / 65536
+        p.float_(13, 13, 12)             # R / 65536
+        p.fop(d, d, "+", 13)             # (L + R) / 2, exact
+
+    def nonzero():
+        p.iconst(12, SM.FMT_I16S)
+        p.if_(8, "EQ", 12, i16s, i16, kind="i")
+    p.ifz(8, "NE", nonzero if SM.STEREO else i16, f32)
 
 
 def window(p: Prog, L: Layout) -> None:
@@ -1049,7 +1070,28 @@ def _tick(p: Prog, L: Layout) -> None:
             even = [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1)]
             odd = [(0, 1), (1, 0), (1, 1), (2, 0), (2, 1), (3, 0)]
             p.ifz(13, "EQ", lambda: taps(even), lambda: taps(odd))
-        p.ifz(8, "NE", i16, f32)
+
+        def i16s():                      # stereo: a word a frame, (L + R) / 2 each tap
+            p.lsh(12, 11, 2)
+            p.iop(12, 10, "+", 12)
+            p.seti(1, 12)
+            p.iconst(8, -32)
+            p.iconst(14, 0xFFFF0000 - (1 << 32))
+            for k in range(POLY_TAPS):
+                p.ldpost(5, 1)
+                p.iop(6, 5, "AND", 14)   # R on top
+                p.lsh(5, 5, 16)          # L on top
+                p.float_(5, 5, 8)
+                p.float_(6, 6, 8)
+                p.fop(5, 5, "+", 6)      # (L + R) / 2
+                p.ldi(6, k, 3)
+                p.fop(5, 5, "*", 6)
+                p.fop(7, 7, "+", 5)
+
+        def nonzero():
+            p.iconst(12, SM.FMT_I16S)
+            p.if_(8, "EQ", 12, i16s, i16, kind="i")
+        p.ifz(8, "NE", nonzero if SM.STEREO else i16, f32)
     p.ifz(13, "EQ", fast, slow)
     # the DT2's MAC keeps the sum's whole 16-bit steps, toward -inf: floor(32768 y) / 32768
     p.fconst(12, 32768.0)

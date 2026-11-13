@@ -140,7 +140,7 @@ def slot_plays(word, base: int, slot: int) -> bool:
     off = addr - base
     if off < SM.DATA_OFFSET or off >= SM.POOL_BYTES:
         return False
-    if frames == 0 or frames >= 1 << 31 or frames > SM.POOL_BYTES // 4 or fmt > 1:
+    if frames == 0 or frames >= 1 << 31 or frames > SM.POOL_BYTES // 4 or fmt > (SM.FMT_I16S if SM.STEREO else SM.FMT_I16):
         return False
     return off + frames * (2 if fmt == SM.FMT_I16 else 4) <= SM.POOL_BYTES
 

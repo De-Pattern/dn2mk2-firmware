@@ -1050,7 +1050,7 @@ def test_v038_slot_plays_is_the_dsps_own_rule(case):
     slot = {"below": 1, "at": count, "past": count + 5, "rec": SM.REC_FIRST + 1}.get(case, 2)
     ent = list(kick)
     if case == "fmt":
-        ent[3] = (ent[3] & ~0xFF) | 2
+        ent[3] = (ent[3] & ~0xFF) | ((SM.FMT_I16S if SM.STEREO else SM.FMT_I16) + 1)   # past the last format (stereo: 3)
     if case == "base":
         ent[0] = pool + 0x800
     if case == "frames":
@@ -1113,3 +1113,43 @@ def test_v044_a_bounce_take_plays_from_the_buffer_directory_for_its_steps_at_the
     # (the first block fades the note before out, as the DT2's retrigger does)
     assert all(x == 0.0 for x in play(120, SM.BUF_SAMP0 + SM.BUF_HALVES)[0][32:])      # past the halves
     assert all(x == 0.0 for x in play(120, SM.BUF_SAMP0 + 5)[0][32:])                  # never recorded
+
+
+def test_stereo_format_2_plays_its_left_plus_right_halved_on_every_reader():
+    """stereo stage 2a (docs/stereo-assessment.md): a stereo sample (format 2, int16 L R a frame)
+    plays (L + R) / 2 -- every reader (ONESHOT's fast and edge taps, REPITCH, STRETCH, WERP, GRID),
+    bit for bit the same output as a float32 sample holding (L + R) / 65536, exact in float32.
+    Stereo voices past the cap play this; it is also the whole of a stereo sample before stage 2b.
+    The negative: a build without STEREO trusts no format 2 entry: silence"""
+    n = 6000
+    pairs = [(((k * 37) % 4001 - 2000) * 7, -(((k * 11) % 3001) - 1500) * 9) for k in range(n)]
+    st = [(l / 32768, r / 32768) for l, r in pairs]
+    mix = [(l + r) / 65536 for l, r in pairs]
+
+    def run(sample, fmt, mtype, note, play):
+        h = SL.Harness(0, samples=[sample], rates=[1.0], fmts=[fmt])
+        h.defaults()
+        h.set(SM.PLAY_REC, play)
+        _tempo(h, 120)
+        out = []
+        for b in range(40):
+            out += h.block(mtype, note, b == 0)
+        return out
+    for name, note, play in (("ONESHOT", 67.0, 127), ("ONESHOT", 55.0, 40), ("REPITCH", 60.0, 127),
+                             ("STRETCH", 60.0, 127), ("WERP", 60.0, 127), ("GRID", 60.0, 127)):
+        mt = SM.TYPE_OF[name]
+        a, b = run(st, SM.FMT_I16S, mt, note, play), run(mix, SM.FMT_F32, mt, note, play)
+        assert max(abs(x) for x in b) > 0.01, name
+        assert [struct.pack("<f", x) for x in a] == [struct.pack("<f", x) for x in b], (name, note, play)
+    # the negative: STEREO 0 (a build without it) refuses the entry, the voice silent
+    import importlib
+    try:
+        SM.STEREO = 0
+        importlib.reload(P)
+        importlib.reload(SL)
+        silent = run(st, SM.FMT_I16S, SM.TYPE_OF["ONESHOT"], 60.0, 127)
+        assert max(abs(x) for x in silent) == 0.0
+    finally:
+        SM.STEREO = 1
+        importlib.reload(P)
+        importlib.reload(SL)
