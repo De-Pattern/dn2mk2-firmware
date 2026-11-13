@@ -95,6 +95,35 @@ Each is answerable on the SHARC runner before any firmware change.
 | the image as heard, the sends' stereo | partly | yes |
 | DSP load with many stereo voices | the runner's cost step | the unit's meter |
 
+## What armio's DN2 port shows (2026-11-13)
+
+`github.com/armio/dn2-dt2-firmware-research` (AGPL-3.0; it relocates Elektron's DT2 DSP code)
+puts the DT2's sample machines on the DN2, stereo included. **Read for addresses and method only;
+nothing of it is copied here.** What it settles:
+
+- **The same method as ours.** `build_dn2_right_process.py` relocates stock's per-track chain
+  (`0x1c8ef1..0x1c9c5d`, the function our probe found) to run a second time on the right channel,
+  with its own state from an "effects-only" constructor and independent voice resets
+  (`build_dn2_right_engine.py`). The output then uses the DT2's own pan/balance/mixer code.
+- **Question 1 answered: per voice.** Their paired records are sixteen 472-byte records, one per
+  voice, and the frame record at `0x25c566 + 146 v`. A stereo note costs the chain twice for its
+  voice, not for the track.
+- **Question 3, partly:** a second pass needs its own state and its own reset, which they built.
+  Possible, not free.
+- **Storage clash.** Their sample area is the DT2 layout, LBA `0x5D8000..0x2DF0180`. All four of
+  our +Drive regions (`docs/erase-mod-data.md`) are inside it: their FORMAT SAMPLES erases ours, and
+  either firmware's writes damage the other's. Users moving between the two must back up first.
+
+## A runner gap that matters for stereo (2026-11-13)
+
+armio found that the SHARC runner executes `6b_shiftimm` (shift by immediate) on PEx only in SIMD.
+Ours has the same gap: `sharc_dn2_fixups.py`'s G1 two-pass branch needs a `compute[22:16]` field,
+and `6b_shiftimm` has none. **Stock's chain hits it**: on the probe's run, SIMD `6b_shiftimm` at
+`0x1c948f` and `0x1c94a1` (48 each, inside the chain) and at `0xb840e6/0xb840eb/0xb84225/0xb8431b`.
+PEy's result (and its status) is then stale; armio saw an even-count loop run its odd tail.
+Stereo measurements wait for the fix (route `6b_shiftimm` in SIMD through `two_pass`), with a
+test, and a check of what it changes in the gate's SHARC steps.
+
 ## Next
 
 Answer the four questions on the runner, then report to the owner with the cost before any code.
