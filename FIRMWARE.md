@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.52** | 2026-11-12 | FLEX MUTE SRC: REC SETUP's knob H takes the SRC track out of the mix (its level and FX sends) while FLEX still records it; the RECORDER's R.LEN counts steps at the pattern's scale (impbox) | `builds/v0.52-MUTE/` | yes |
+| **v0.53** | 2026-11-13 | FLEX polish: FLEX REC's page LEDs follow its page (NiKo); a switch to FLEX sets trig LEN to INF; BUF snaps buffer to buffer, a p-locked BUF shows its number, and BUF locks pick the buffer a trig plays (NiKo); PLAY two detents a mode; FUNC + turn moves R.LEN a bar | `builds/v0.53-PAGES/` | yes |
+| v0.52 | 2026-11-12 | FLEX MUTE SRC: REC SETUP's knob H takes the SRC track out of the mix (its level and FX sends) while FLEX still records it; the RECORDER's R.LEN counts steps at the pattern's scale (impbox) | `builds/v0.52-MUTE/` | yes |
 | v0.51 | 2026-11-12 | lighter Monomachine and Machinedrum machines, not bit for bit (SID -64 %, DDRW -43 %, DENS -40 %, VO-6 -9 %, TRX-CY -33 %, TRX-MA -26 %), so more voices before the guard drops one; FLEX REC's settings per track, saved with the kit; CLEAR BUF (FUNC + NO); REC SETUP's state in the left column; sample TUNE plays its fine values and is drawn as WaveTone's ruler | `builds/v0.51-LIGHTER/` | yes |
 | v0.50 | 2026-11-12 | FLEX takes of a track at the track's level (v0.49's were very quiet); GAIN on REC SETUP (G, -24..+38 dB) with a level meter on H; BUF fixed (the take was read 14 slots off) and C BUF on REC SETUP; impbox's fixes: TUNE rounds, SMP readable with TRK held, page-2 locks shown, E/F pushed clear SLD/SLEN; gate: SHARC step flexlevel, the link steps ~20x faster | `builds/v0.50-LEVEL/` | yes |
 | v0.49 | 2026-11-11 | FLEX, the live-buffer machine that replaces BOUNCE: recorder trigs on steps ([TRIG] a one-shot, FUNC + [TRIG] every pass) record a track, IN or MAIN into one of 8 buffers for R.LEN steps, and the FLEX track plays the take with its own notes (ONESHOT's page, BUF 01..08); FLEX REC's two pages (REC TRIGS, REC SETUP); Q.REC; old BOUNCE tracks open as FLEX; the DSP guard gives sample voices their time first and stops a dropped one cleanly; STRT/LEN/LOOP turned mid-note no longer move the playhead | `builds/v0.49-FLEX/` | yes |
@@ -90,6 +91,64 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.53 — PAGES (FLEX page LEDs, BUF locks play, quicker PLAY, R.LEN by bars)
+
+`DN2mod_v0.53_PAGES_OS1.11.syx`
+sha256 `13c01517cd5b6cc0c0a57639874a01662a096b07e0cb5d24a11fb0bcbc6789e0`
+Gate: CLEARED TO FLASH, 2026-11-13 (52 gates; 36 reused, each a pass of this same build whose every input is byte-identical; the run spanned three jobs under the two-hour limit). Source: commit `2457f6c` (branch `v054`).
+
+Everything in v0.52, plus (each with the commit that adds it, so it can be taken out alone):
+
+**Fixed**
+- **FLEX REC's page LEDs** (NiKo): while FLEX REC is open, the eight page LEDs show its page the way stock
+  does in grid recording: the page you're on green, the pattern's other pages dim red, pages past its
+  length off. Closed, they're stock's again. Commit `e5518f2`.
+- **BUF snaps** (owner): four detents a buffer, and the knob holds on its buffer's own value instead of
+  creeping through the detents in between. Commit `fcca299`.
+- **A p-locked BUF shows its number** (owner): with the trig held, the highlighted cell shows 01..08, not
+  BUF. Commit `122a8ec`.
+- **BUF locks play** (NiKo): a trig with BUF locked plays that buffer. Before, every note played the
+  track's BUF. The track's BUF is still where FLEX REC records and what unlocked trigs play.
+  Commit `7b7ecd2`.
+
+**Changed**
+- **Trig LEN INF on a switch to FLEX** (owner): MACHINE SEL to FLEX sets the track's TRIG page LEN to INF
+  so a playback trig plays the whole take. Only on the switch: saved projects, existing FLEX tracks and
+  LEN locks keep theirs. Commit `fcca299`.
+- **PLAY two detents a mode** (owner): FWD / FWD loop / REV / REV loop on the sample machines take two
+  detents each (was four). WERP's MODE keeps four. Commit `42c2f99`.
+- **R.LEN by bars** (owner): in FLEX REC, FUNC + turn moves R.LEN 16 steps a detent and lands on whole
+  bars (MAX, 16, 32 .. 128); without FUNC, a step a detent. Commit `42c2f99`.
+
+**Gate:**
+- **`flexcore`:** at 64 steps, the page LEDs follow FLEX REC's page (green, dim red, off past the length).
+- **Coupled flex links:** 0b (the switch sets LEN INF; another track keeps its own); 8b (BUF's word is
+  always a buffer's own value); 8c (a locked BUF, highlighted, shows its number; it fails on the build
+  before); 8d (a BUF-locked step's voice is sent that buffer, not the track's; it fails on the build
+  before); 1g (FUNC + D: R.LEN 20 to 32, 16, MAX; D alone a step).
+- **`playdet`:** PLAY moves on the second detent through `smp_quant`; WERP's MODE keeps four.
+
+**Tests**
+1. A 64-step pattern, FLEX REC open (FUNC + VOICE on a FLEX track): page 1 is green. PAGE: the green
+   moves to 2, 3, 4, then back to 1, with the screen's 1/4..4/4. Close FLEX REC: the page LEDs are
+   stock's again.
+2. Switch a track to FLEX in MACHINE SEL: TRIG page LEN reads INF. Record a take and place a note: it
+   plays to the end of the take.
+3. Turn BUF on the SYN page slowly: the knob jumps buffer to buffer, four detents each, no movement in
+   between.
+4. GRID RECORD, hold a trig and lock BUF to another buffer: the highlighted cell shows the buffer's number.
+5. Record a take into buffer 1, then one into buffer 2 (track BUF 2). Lock a trig to BUF 1: that step
+   plays the first take, the unlocked trigs the second.
+6. PLAY on a ONESHOT track: two detents to each next mode.
+7. FLEX REC, R.LEN at 20: FUNC + turn right gives 32, left 16, left again MAX.
+
+**Known issues**
+- Turning PLAY or BUF while holding a trig (a p-lock) still moves through the raw range, many detents a
+  choice, and a held PLAY cell can show a number instead of the mode. A lock turn doesn't go through
+  the setter that snaps them.
+- Test 5's unlocked trigs on a buffer other than 01 are checked on the instrument only: the gate checks
+  that a locked step plays its buffer, and that a track on BUF 01 plays buffer 1.
 
 ## v0.52 — MUTE (FLEX MUTE SRC, R.LEN at the pattern's scale)
 
