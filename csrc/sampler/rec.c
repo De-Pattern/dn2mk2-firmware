@@ -786,9 +786,16 @@ __attribute__((optimize("no-jump-tables"))) static void knob(int index, int delt
             rt_knob(5, delta);                  /* Q.REC: four detents a choice */
         else if (index == 5)
             rt_knob(7, delta);                  /* ARM: four detents a choice */
-        else if (index == 4)
-            rec_rlen = clamp(rec_rlen + delta, 0, 128);
-        else if (index == 3)
+        else if (index == 4) {
+            /* v0.54 (owner): FUNC + turn moves R.LEN a bar (16 steps) a detent, onto the bars:
+             * 0 (MAX), 16, 32 .. 128; from 20, up is 32 and down 16 */
+            extern int smp_func_held;
+            if (smp_func_held && delta)
+                rec_rlen = clamp(delta > 0 ? (rec_rlen / 16 + delta) * 16
+                                           : ((rec_rlen + 15) / 16 + delta) * 16, 0, 128);
+            else
+                rec_rlen = clamp(rec_rlen + delta, 0, 128);
+        } else if (index == 3)
             buf_turn(delta);                    /* v0.50: C BUF, the SYN page's (record 244) */
         else if (index == 7) {
             rec_gain = clamp(rec_gain + delta, -24, 38);   /* v0.50: G GAIN, a dB a detent */

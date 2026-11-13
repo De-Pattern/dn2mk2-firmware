@@ -19,6 +19,8 @@ typedef unsigned char u8;
 
 #define SEG_DETENTS 3                           /* v0.25: WERP's SEG, detents a choice */
 #define CHOICE_DETENTS 4                        /* v0.26: PLAY, MODE, BARS, GRID */
+#define PLAY_DETENTS 2                          /* v0.53 (owner: PLAY's four took too much turning, above all
+                                                 * locking a trig): FWD .. RLOOP in 6 detents, not 12 */
 #define SOUND_TYPE 0xDE                         /* the sound's machine type byte */
 #define SOUND_VALUES 0x14                       /* its values, a 16-bit word a slot */
 #define MNM_TUNE_J 7                            /* TUNE: knob H on every Monomachine machine */
@@ -280,7 +282,8 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
             static int q_acc __attribute__((section(".data"))) = 0;
             static u32 q_at __attribute__((section(".data"))) = 0;
             static int q_slot __attribute__((section(".data"))) = -1;
-            int need = fq_click ? 1 : slot == SMP_SEG_SLOT ? SEG_DETENTS : CHOICE_DETENTS;
+            int need = fq_click ? 1 : slot == SMP_SEG_SLOT ? SEG_DETENTS
+                     : id == SMP_PLAY_REC ? PLAY_DETENTS : CHOICE_DETENTS;
             u32 now = *(volatile u32 *)0x4058E8D4u;
             int dir = d > 0 ? 1 : -1;
             if (now - q_at > 3000u || (q_acc > 0) != (dir > 0) || q_slot != slot)   /* 2 s */
