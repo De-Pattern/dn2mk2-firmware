@@ -1008,6 +1008,7 @@
   "smp_slices_get": 1185690752,
   "smp_slices_set": 1185690978,
   "smp_slot_empty": 1185686862,
+  "smp_slot_fmt": 1185689194,
   "smp_slot_frames": 1185689922,
   "smp_tables": 1185804084,
   "smp_tdm_heard": 1185804540,

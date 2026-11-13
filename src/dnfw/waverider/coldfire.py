@@ -874,7 +874,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "smp_er_retries", "smp_er_waits", "smp_er_resume",   # v0.41
                  # v0.40: the slice menus' wait, LINKED points, the playhead's redraw (gate: slice, samplist)
                  "slc_pop", "slc_poll", "slc_stock_asked", "slc_fails", "slc_linked", "smp_norm_state",
-                 "smp_pl_quiesce", "smp_analysis_slot", "smp_slot_frames", "wr_draws", "smp_pos_in", "smp_playhead",
+                 "smp_pl_quiesce", "smp_analysis_slot", "smp_slot_frames", "smp_slot_fmt", "wr_draws", "smp_pos_in", "smp_playhead",
                  # v0.40: folders inside folders
                  "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
