@@ -145,3 +145,26 @@ free). v0.47 with BOUNCE was 2,080,802; FASCIA added about 15 KB (not in v0.49 u
 - Playing while recording needs the DSP voice to follow a growing take (a note latches the take's
   length; one started on the trig's own step sees an almost empty take and ends): not in v0.49's
   first cut; a finished take plays normally.
+
+## v0.52: MUTE SRC (owner, 2026-11-12, option B)
+
+- **What it does.** REC SETUP's knob H, MUTE (OFF / ON, four detents a choice), kept in the FLEX
+  track's sound (slot 33, R.STRT's record, which FLEX does not use; `rectrig.c` FX_MUTE). While it is
+  ON and SRC is a track (not IN, MAIN or the FLEX track itself), that track is out of the mix the
+  whole time: its voices' track LEVEL and three FX sends are faded to 0 in every frame the ColdFire
+  sends (`ms_frame`, about 21 ms). OFF gives them back the same way.
+- **What it does not do.** It is not stock's mute: the track still plays (notes, voices, DSP time),
+  its LED and stock's mute screens are unchanged, and stock mute and solo work on top of it. The
+  sound, the kit and the track's LEVEL knob are never written.
+- **Why the take is not silenced.** A TRK take records the track's block after its chain (the amp),
+  before its LEVEL, pan and sends (`docs/link-research.md` B). Measured on the SHARC runner
+  (`scripts/sharc_stereo_probe.py`): LEVEL 0 and the sends at 0 leave that block exactly as it was.
+- **The hook.** The frame ISR's first copy after its voice loop (`0x400275b0`, `jsr 0x40134490`): the
+  loop has just written each voice's LEVEL (frame `116 + 2v`), its slots (sends at `168 + 2s + 146v`,
+  s = 86..88) and routing; `ms_frame` runs stock's copy, then scales those words.
+- **Screen.** H's box reads ON / OFF ("--" when SRC is IN or MAIN); the meter that was in H's place is
+  in the left column, its top level with the bottom row's boxes, CLIP over it at full scale.
+- **Gate.** `mute` (coupled, `scripts/emu_coupled_mute.py`; its negative control `--break nomute`, measured 2026-11-12, fails at links 1, 2 and 3 and passes 4..6);
+  `rectext` (the column with the meter and CLIP, MUTE ON); `engine --fx-roundtrip` (slot 33 through
+  SAVE/LOAD).
+- **Hardware only.** The mix and the sends going silent as heard, and no click at ON / OFF.

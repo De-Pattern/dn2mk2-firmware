@@ -184,7 +184,21 @@ static u32 rec_length(void)
     u32 bpm120 = CTL_FRAME[TEMPO_WORD];
     if (bpm120 < 1200)
         bpm120 = 14400;
-    u32 f = (u32)rec_rlen * (86400000u / bpm120);
+    /* v0.52 (impbox: "R.LEN 64 with R.STRT on PLAY: the take does not stop after 64 steps"): the
+     * steps at the pattern's scale, as the sequencer plays them (slide.c ticks_a_step: 6 ticks a
+     * step at 1x; 2x 3, 1/2x 12 ...). v0.15..v0.51 counted 1x sixteenths: at 2x, 64 steps took
+     * twice the pattern's 64 */
+    u32 ticks = 6;
+    const u8 *pat = (const u8 *)*(volatile u32 *)0x42C5A9A0u;   /* the pattern playing */
+    if (pat) {
+        signed char i = (signed char)pat[122202];
+        if (i >= 0 && i <= 6) {
+            u32 n = ((const u8 *)0x401F6B08u)[4 * i + 3];
+            if (n >= 3 && n <= 48)
+                ticks = n;
+        }
+    }
+    u32 f = (u32)rec_rlen * ticks * (86400000u / bpm120) / 6u;
     return f > full ? full : f;
 }
 
@@ -565,6 +579,7 @@ extern int fx_get(u32 t, int k);
 extern void fx_set(u32 t, int k, int v);
 extern int fx_valid(u32 t);
 extern int rt_qrec, rt_arm;
+int bn_mute __attribute__((section(".data"))) = 0;     /* v0.52: H MUTE SRC (FX_MUTE) as the panel shows it */
 static void fx_load(void)
 {
     u32 t = UI_TRACK_B;
@@ -574,11 +589,12 @@ static void fx_load(void)
     rec_gain = fx_get(t, FX_GAIN);
     rt_qrec = fx_get(t, FX_QREC);
     rt_arm = fx_get(t, FX_ARM);
+    bn_mute = fx_get(t, FX_MUTE);
 }
 static void fx_save(void)
 {
     u32 t = UI_TRACK_B;
-    int v[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm};
+    int v[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm, bn_mute};
     for (int k = 0; k < FX_N; k++)
         if (!fx_valid(t) || fx_get(t, k) != v[k])
             fx_set(t, k, v[k]);
@@ -605,9 +621,9 @@ void rec_poll(void)
     extern void rt_poll(void);
     extern int rt_manual, rt_q_waiting(void);
     if (bn_active()) {                          /* v0.51: FLEX REC shows the track's own settings */
-        int was[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm};
+        int was[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm, bn_mute};
         fx_load();
-        int now[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm};
+        int now[FX_N] = {rec_src, rec_chan, rec_rlen, rec_gain, rt_qrec, rt_arm, bn_mute};
         for (int k = 0; k < FX_N; k++)
             if (was[k] != now[k]) {
                 smp_overlay_dirty = 1;
@@ -747,7 +763,7 @@ __attribute__((optimize("no-jump-tables"))) static void knob(int index, int delt
     extern void rt_knob(int index, int delta);
     if (index == 8 && sl_rec_knob(delta))
         return;
-    if (bn_active()) {                          /* v0.49 FLEX REC (both pages): A SRC, B CHAN, D R.LEN, E ARM, F Q.REC */
+    if (bn_active()) {                          /* v0.49 FLEX REC (both pages): A SRC, B CHAN, D R.LEN, E ARM, F Q.REC; v0.52 H MUTE SRC */
         fx_load();                              /* v0.51: the track's own, then kept in its sound */
         if (index == 1)
             rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1);
@@ -765,6 +781,9 @@ __attribute__((optimize("no-jump-tables"))) static void knob(int index, int delt
         else if (index == 7) {
             rec_gain = clamp(rec_gain + delta, -24, 38);   /* v0.50: G GAIN, a dB a detent */
             mon_known = 0;                      /* the meter's MONITOR again, with it */
+        } else if (index == 8) {
+            extern int rt_mute_knob(int delta);
+            bn_mute = rt_mute_knob(delta);      /* v0.52: H MUTE SRC, OFF / ON, four detents a choice */
         }
         fx_save();
         return;

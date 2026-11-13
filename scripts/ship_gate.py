@@ -211,6 +211,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
        ("thres", "THRES on both processors (coupled)"),
        ("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)"),
+       ("mute", "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)"),
        ("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"),
        ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
@@ -2263,6 +2264,27 @@ def main() -> int:
         later("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)",
               "FLEX: a recorder trig's take played by a note, on both processors (coupled)",
               [fx_cmd, sorted(EMU_ENV.items())], fx_body)
+
+        # v0.52 FLEX MUTE SRC (owner, option B): knob H on REC SETUP turns it ON; a note on the SRC
+        # track: its voices' frame LEVEL and FX sends 0 (the DSP's LEVEL too), the other voices' as
+        # unmuted, its block after the chain (the TRK source) as loud; OFF gives them back
+        if "ms_frame" in lay:
+            mu_js = work / "mute.json"
+            mu_cmd = [a.coupled_py, "-u", "scripts/emu_coupled_mute.py", "--build", a.build, "--stock", a.stock,
+                      "--snapshot", snap, "--json", mu_js]
+
+            def mu_body(tdir):
+                rc, out = run("mute coupled", mu_cmd, logs, env=EMU_ENV, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, out[-900:]
+                return True, ("on the ColdFire and the DSP together: knob H on FLEX REC SETUP turns MUTE ON; the "
+                              "SRC track's voices get LEVEL and FX sends 0 in the frame and the DSP, the other "
+                              "voices' LEVEL unchanged, its block after the chain (the TRK source) as loud; OFF "
+                              "gives LEVEL and the sends back")
+            later("mute", "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)",
+                  "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)",
+                  [mu_cmd, sorted(EMU_ENV.items())], mu_body)
 
         # v0.48 (impbox, the owner: "exact dt2"): STRT, LEN, LOOP's fine records (fmt.c
         # smp_fine), on the ColdFire emulator: swapped in on ONESHOT/STRETCH/REPITCH/BOUNCE,

@@ -195,7 +195,7 @@ def main() -> int:
     b = call(lay["rt_buf_of"], T)[0] & 7
     longest = 660 * 9600                                   # 66.0 s (rt_state: tenths = bytes / 9600)
 
-    def flex_state(rbytes=0, rec=False, wait=False, busy=False):
+    def flex_state(rbytes=0, rec=False, wait=False, busy=False, clip=False, mute=False):
         for k in range(16):
             put32(lay["rt_rbytes"] + 4 * k, rbytes if k == 2 * b else 0)
         put32(lay["rt_cur"], b if rec else 0xFFFFFFFF)
@@ -206,9 +206,15 @@ def main() -> int:
         put32(lay["bn_cleared"], 2 if busy else 0)
         put32(lay["bn_cleared_at"], machine.long(FRAMES) if busy else 0)
         put32(lay["bn_clear_ask"], 0)
+        # v0.52: the meter in the column (CLIP at full scale) and H MUTE SRC ON (SRC TRK 3)
+        put32(lay["rec_peak"], 32767 if clip else 0)
+        put32(lay["rec_heard"], machine.long(FRAMES) + 1 if clip else 0)
+        call(lay["fx_set"], T, 0, 4 if mute else 0)       # FX_SRC: TRK3 (2 + 2) or IN
+        call(lay["fx_set"], T, 6, 1 if mute else 0)       # FX_MUTE
 
     fstates = [("empty", {}), ("ready_66s", dict(rbytes=longest)), ("rec_66s", dict(rbytes=longest, rec=True)),
-               ("ready_short", dict(rbytes=9600)), ("wait", dict(wait=True)), ("busy", dict(rbytes=longest, busy=True))]
+               ("ready_short", dict(rbytes=9600)), ("wait", dict(wait=True)), ("busy", dict(rbytes=longest, busy=True)),
+               ("clip_66s", dict(rbytes=longest, clip=True)), ("mute_on", dict(mute=True))]
     shots = {}
     for name, v in fstates:
         flex_state(**v)
@@ -238,11 +244,17 @@ def main() -> int:
             why.append("nothing drawn")
         if why:
             bad[name] = why
+    # v0.52: MUTE ON changes only H's box (SRC's box reads TRK3); its pixels inside H's and A's columns
+    mute_px = shots.get("mute_on", set()) ^ shots["empty"]
+    if bad.get("mute_on") == ["the rest of the screen changed"] and all(
+            20 <= p[0] <= 46 or 97 <= p[0] <= 125 for p in mute_px if p[0] >= 20):
+        del bad["mute_on"]
     qrec_box = {p for p in shots["wait"] ^ shots["empty"] if p[0] >= 20}
     for name in ("wait",):                                 # (its Q.REC box reads 8: the setting that makes it wait)
         if bad.get(name) == ["the rest of the screen changed"] and all(45 <= p[0] <= 75 for p in qrec_box):
             del bad[name]
-    check("FLEX REC SETUP's state column (EMPTY, READY and REC at 66.0 s, WAIT, BUSY) inside x 0..18 (three "
+    check("FLEX REC SETUP's state column (EMPTY, READY and REC at 66.0 s, WAIT, BUSY; v0.52 the meter and CLIP, "
+          "MUTE ON) inside x 0..18 (three "
           "dark columns before the SRC box), clear of the title and the arrow, the rest of the screen unchanged",
           bool(shots) and not bad, bad)
 

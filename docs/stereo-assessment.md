@@ -1,0 +1,100 @@
+# Stereo sampling: an assessment (2026-11-12, revised the same day)
+
+The owner asked for this before any code (ROADMAP, 2026-11-10). The first draft proposed L/R
+pairs on two tracks and a WIDTH control; **the owner rejected that** (2026-11-12): "its just a left
+and right channel", look at how the DT2 (or the Octatrack) does it.
+
+## The design, as the DT2 does it (owner, 2026-11-12)
+
+- **One sample, one slot, an internal L/R split.** One entry in the sample list, marked ST.
+  The DT2's own sample file is the same: one file, a mono/stereo flag in its 64-byte header
+  (`docs/drive-library-plan.md`, `docs/drive-storage-research.md`).
+- **Stereo through the whole voice.** The DT2 has "16 stereo audio voices" (manual 4.1); the
+  chain is SRC machine, bit reduction, overdrive, SRR, filter, base-width filter, amp, pan, the
+  sends, track level. A stereo sample stays stereo through all of it, and PAN acts as balance.
+- **No new controls.** No WIDTH, no pairs, no helper.
+- **CHAN STEREO** on the recorder (the DT2's STEREO L R, MONO L, MONO R), for **IN and MAIN**.
+  It may become the default. TRK on a stereo sample track records the track's stereo.
+- **Mono samples and existing projects unchanged.**
+
+## Separate and removable (owner, 2026-11-12)
+
+- All stereo work is on its own branch, `stereo`, from v0.51, with its own builds and gate runs.
+- One constant turns it on (`STEREO = 1`); every change is in its own commits.
+- If it costs too much, takes too much room or goes wrong anywhere, v0.51's line simply never
+  merges it. Nothing on `main` changes until the owner says so.
+- The pool and +Drive formats stay readable by builds without stereo: a mono entry is
+  byte-for-byte today's, and a stereo one is marked so that an older build can refuse it cleanly.
+
+## What the DN2's chain is (measured 2026-11-12)
+
+`scripts/sharc_stereo_probe.py`, on the SHARC runner (stock section 7, track 0, a triggered
+note). Facts:
+
+- **The whole per-track chain runs in place on one mono block** (`TRACK_BUFFERS[t]`, 32 floats).
+  After the machine's render, sw `0x1c8ef1` calls, in order, on that one buffer:
+  `0xb8251b`, `0x1cdb56`, `0xb80c39`, `0xb8265b`, `0xb81368`, `0xb82342` (the filters, the DC
+  blocker and a level: `docs/waverider-feasibility.md`), then the amp `0xb80345`. Each has its
+  own state block for the track (track 0: `0x250020`, `0x24fa20`, `0x24f320`, `0x250160`,
+  `0x2533e0`, `0x2505a0`, `0x2547a0`).
+- **Mono becomes stereo only at the output**, in `0x1c244d` (`0x1c24bb..0x1c254b`). It pans the
+  mono block into the stereo buffer `0x259f68 + 0x100 k` (here L = R: PAN centre).
+- The per-track stereo buffer `0x257ee8` and the routing buffer `0x258f68` stayed zero in this
+  run; where the stock fills them (overdrive? the sends at non-zero levels?) is **not yet read**.
+
+So on the DN2, unlike the DT2, **the chain itself is mono**.
+
+## How stereo can work on the DN2
+
+**Run the track's chain twice, once for L and once for R, then pan them apart.**
+- Our sample machine renders L into the track's block and R into a second block.
+- The same seven stock stages run on R with **a second copy of each stage's state** (so the
+  filter's memory of L never leaks into R), with the same settings, p-locks and LFOs.
+- At the output, L and R go to their sides, PAN as balance, instead of one mono block panned.
+- The sends get both channels.
+
+This is what the DT2 does, done with the DN2's own stages: one voice, the same filter, amp and
+envelopes, in stereo. No second voice and no change to voice allocation.
+
+## Cost
+
+- **DSP:** a stereo note costs the chain twice plus a second channel of our render. The sample
+  render is about 2.6 % of the frame a voice (`docs/dsp-cost.md`); the chain's own cost a track is
+  to measure (the probe can count it). The guard counts it as it does now.
+- **Voices:** unchanged. A stereo note is still one voice.
+- **Memory:** 2x a sample. The pool (400 MB after the RAM check, 128 MB proven otherwise;
+  `docs/sampler.md`) holds about 70 minutes of 48 kHz int16 mono, so about 35 minutes of stereo
+  (23 and 11 at 128 MB). The +Drive's image is the pool byte for byte, so the same limit.
+  FLEX's 32 MB recordings area holds about 5 1/2 minutes mono, about 2 3/4 stereo.
+- **ColdFire:** the stereo flag, the recorder's STEREO, the list's ST, the formats. Small.
+- **The DSP's room:** seven extra state blocks a stereo track and a second buffer. To measure
+  against the L2 map.
+
+## The open questions (to answer before code)
+
+1. **Is `TRACK_BUFFERS[t]` per track or per voice?** The frame's records are per voice (sixteen
+   146-byte records, `docs/lfo4-build-plan.md`). If a polyphonic sample track's voices each have
+   their own chain, then "twice" is per voice; that changes the cost, not the method.
+2. **Where the stock fills `0x257ee8` and `0x258f68`** (overdrive, the sends): both channels must
+   reach them.
+3. **Can the seven stages run a second time a block safely?** They are called with R4 = their
+   state. A second call with a copied state is the plan; its effects on anything else the stage
+   touches (shared tables, ramps) must be read first.
+4. **The chain's cost a track,** counted.
+
+Each is answerable on the SHARC runner before any firmware change.
+
+## What the emulator can prove, and what only the unit can
+
+| question | emulator | hardware only |
+|---|---|---|
+| the recorder writes both channels, the take equals IN's L and R | yes, coupled | |
+| the stereo slot format, import, pool and +Drive, SAVE/LOAD | yes, ColdFire and unit tests | |
+| the second chain pass: R through the same stages equals L's math on R's input | yes, bit for bit on the runner | |
+| a stereo sample's L and R reach the output on their sides, PAN as balance | yes, the runner's output buffers | |
+| the image as heard, the sends' stereo | partly | yes |
+| DSP load with many stereo voices | the runner's cost step | the unit's meter |
+
+## Next
+
+Answer the four questions on the runner, then report to the owner with the cost before any code.

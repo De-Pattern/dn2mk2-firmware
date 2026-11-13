@@ -194,10 +194,12 @@ static u32 ctl(u32 t, u32 slot)                 /* a track's control, as its sou
  * sound written so carries FX_MARK in SRC's low byte: an older FLEX track (v0.49, v0.50), whose
  * words hold the shared records' defaults, reads the v0.50 defaults until it is first set. */
 #define FX_MARK 0xF1u
-static const u8 FX_SLOT[FX_N] = {38, 46, 40, 32, 37, 27};
-static const short FX_LO[FX_N] = {0, 0, 0, -24, 0, 0};
-static const short FX_TOP[FX_N] = {SMP_REC_SOURCES - 1, 2, 128, 38, 8, 1};
-static const short FX_DEF[FX_N] = {0, 0, 0, 0, 0, 1};       /* IN, L+R, MAX, 0 dB, OFF, ON */
+/* v0.52: MUTE SRC on R.STRT's 33 (the RECORDER's record 251: FLEX REC has no R.STRT, nothing reads
+ * it for a FLEX voice; 0 in a v0.51 sound: OFF) */
+static const u8 FX_SLOT[FX_N] = {38, 46, 40, 32, 37, 27, 33};
+static const short FX_LO[FX_N] = {0, 0, 0, -24, 0, 0, 0};
+static const short FX_TOP[FX_N] = {SMP_REC_SOURCES - 1, 2, 128, 38, 8, 1, 1};
+static const short FX_DEF[FX_N] = {0, 0, 0, 0, 0, 1, 0};    /* IN, L+R, MAX, 0 dB, OFF, ON, OFF */
 int fx_valid(u32 t)
 {
     const u8 *snd = sound_of(t);
@@ -591,6 +593,84 @@ void rt_knob(int index, int delta)
     *q += n;
     if (*q < 0) *q = 0;
     if (*q > top) *q = top;
+}
+
+/* v0.52: H MUTE SRC on FLEX REC SETUP, OFF / ON, four detents a choice (rt_knob's way) */
+int rt_mute_knob(int delta)
+{
+    extern int bn_mute;
+    u32 now = FRAMES;
+    if (qk_idx != 8 || now - qk_at > 3000u || (qk_acc > 0 && delta < 0) || (qk_acc < 0 && delta > 0))
+        qk_acc = 0;
+    qk_idx = 8;
+    qk_at = now;
+    qk_acc += delta;
+    int n = qk_acc / 4;
+    qk_acc -= n * 4;
+    int m = bn_mute + n;
+    return m < 0 ? 0 : m > 1 ? 1 : m;
+}
+
+/* v0.52 MUTE SRC (owner, 2026-11-12, option B: "the whole time" it is ON). A FLEX track whose SRC
+ * is a track (TRK1..16, not itself) and whose MUTE is ON takes that track out of the mix: in every
+ * frame, for each DSP voice playing it (0x80005308[v]), the frame's track LEVEL (116 + 2v) and the
+ * three FX sends (slots 86..88) go to 0, faded over 32 frames (about 21 ms). The track still plays:
+ * its notes, its voices and the DSP's track buffer are as before (measured on the SHARC runner,
+ * scripts/sharc_stereo_probe.py: neither LEVEL nor the sends change the block the TRK source
+ * records), so FLEX records it as before. Nothing is stored: stock's mute, the sound, the kit are
+ * untouched; OFF (or the FLEX track gone) gives the track back on the next frames.
+ * Called from the frame ISR (coldfire.py: the jsr after the voice loop that builds the frame) */
+#define VOICE_TRACK ((volatile u32 *)0x80005308u)
+#define FRAME_LEVEL(v) (58u + (v))                    /* u16 index: byte 116 + 2v */
+#define FRAME_SLOT(v, s) (84u + (s) + 73u * (v))       /* u16 index: byte 168 + 2s + 146v (slots 25..92) */
+#define MS_STEP 8u
+u32 ms_mask D = 0;                                    /* the tracks muted now (bit t), for tests and the screen */
+static u16 ms_gain[16] D = {256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256};
+static u8 ms_track[16] D = {0};                       /* each voice's track at its last frame */
+u32 ms_frames D = 0;
+typedef void (*copy_fn)(void *, const void *, u32);
+#define STOCK_COPY ((copy_fn)0x40134490u)
+
+static u32 ms_mask_now(void)
+{
+    u32 m = 0;
+    if (!KIT_POINTER)
+        return 0;
+    for (u32 t = 0; t < 16; t++) {
+        if (!rt_is_bounce(t) || !fx_valid(t) || !fx_get(t, FX_MUTE))
+            continue;
+        int src = fx_get(t, FX_SRC);
+        if (src >= 2 && src < 18 && (u32)(src - 2) != t)
+            m |= 1u << (src - 2);
+    }
+    return m;
+}
+
+void ms_frame(void *dst, const void *src, u32 n)
+{
+    STOCK_COPY(dst, src, n);                          /* the stock call this replaces */
+    ms_frames++;
+    u32 m = ms_mask_now();
+    ms_mask = m;
+    for (u32 v = 0; v < 16; v++) {
+        u32 t = VOICE_TRACK[v];
+        u32 g = ms_gain[v];
+        int muted = t < 16 && (m >> t & 1u);
+        if ((u8)t != ms_track[v]) {                   /* the voice now plays another track: no fade over */
+            ms_track[v] = (u8)t;
+            g = muted ? 0u : 256u;
+        } else if (muted)
+            g = g > MS_STEP ? g - MS_STEP : 0;
+        else
+            g = g + MS_STEP < 256u ? g + MS_STEP : 256u;
+        ms_gain[v] = (u16)g;
+        if (g >= 256u)
+            continue;
+        volatile u16 *f = CTL_FRAME;
+        f[FRAME_LEVEL(v)] = (u16)((f[FRAME_LEVEL(v)] * g) >> 8);
+        for (u32 s = 86; s <= 88; s++)
+            f[FRAME_SLOT(v, s)] = (u16)((f[FRAME_SLOT(v, s)] * g) >> 8);
+    }
 }
 
 int rt_q_waiting(void)                          /* a QREC take not started yet */
