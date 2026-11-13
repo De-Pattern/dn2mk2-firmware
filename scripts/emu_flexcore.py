@@ -205,6 +205,11 @@ def main() -> int:
     SAMP_SLOT, VOICE_SOUND, MIRROR = 43, 0x800052A8, 0x800068E4
     snd0 = kit + 52 + SOUND_STRIDE * T
     put32(VOICE_SOUND + 4 * 0, snd0)                   # voice 0 plays track 0's sound
+    # v0.53: a voice plays the buffer its own BUF names (its target cell, the note's locks applied,
+    # link.c smp_mod_apply); a note with no lock gives it the sound's BUF, as stock's note-on copies
+    # the sound into the voice's target. No note plays here, so that copy is made by hand
+    BUF_SLOT, TARGET = 35, 0x80003AF0
+    machine.write(TARGET + 34 + 202 * 0 + 2 * BUF_SLOT, machine.read(snd0 + 0x14 + 2 * BUF_SLOT, 2))
     mir = MIRROR + 34 + 202 * 0 + 2 * SAMP_SLOT
     gen0, fired0 = L("rt_gen"), L("rt_fired")
 
