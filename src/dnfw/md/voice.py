@@ -99,6 +99,22 @@ def _each(p: Prog, L: K.Layout, step: str) -> None:
     p.place(end)
 
 
+def peak32(p: Prog, i: int, counter: int = 2) -> None:
+    """F7 = MAX(F7, |x|) over the 32 words from Ii on (post-modified), as MAX(F7, x) then MAX(F7, 0 - x)
+    a word: the quiet tests' peak. Four words a pass of a register loop, the 0.0 held in F13 (it was a
+    memory-counter loop reloading the 0 every word: 10 instructions a word, 4.75 now); the same operations
+    in the same order. Clobbers F6, F13, Rcounter, R12."""
+    p.fconst(13, 0.0)
+
+    def four():
+        for _ in range(4):
+            p.ldpost(6, i)
+            p.fop(7, 7, "MAX", 6)
+            p.fop(6, 13, "-", 6)
+            p.fop(7, 7, "MAX", 6)
+    p.loop_r(counter, 8, four)
+
+
 def reset(p: Prog, L: K.Layout) -> None:
     """The slot's words cleared, no machine, the stream asking for a block. Clobbers R0,
     R12, I5."""
@@ -252,14 +268,7 @@ def advance(p: Prog, L: K.Layout) -> None:
         p.iop(1, 12, "+", 1)
         p.seti(5, 1)
         p.fconst(7, 0.0)
-
-        def peak():
-            p.ldpost(6, 5)
-            p.fop(7, 7, "MAX", 6)
-            p.fconst(13, 0.0)
-            p.fop(6, 13, "-", 6)
-            p.fop(7, 7, "MAX", 6)
-        p.loop(L.C["n1"], 32, peak)
+        peak32(p, 5)
         K.vw(p, 0, "quiet")
         p.fconst(12, QUIET_LEVEL)
         p.if_(7, "LT", 12, lambda: (p.iconst(12, 1), p.iop(0, 12, "+", 0)),
@@ -276,19 +285,20 @@ def advance(p: Prog, L: K.Layout) -> None:
 
 def inputs(p: Prog, L: K.Layout, knobs: list[int]) -> None:
     """Step 1: the knob words (scratch addresses KNOBS, floats 0..1) -> the eight 14-bit
-    inputs; any change marks the words dirty. Clobbers R0-R2, R12."""
+    inputs; any change marks the words dirty. The four constants are held in R4, R6-R8 through
+    the eight (the same operations). Clobbers R0-R2, R4, R6-R8, R12."""
+    p.fconst(4, 127.0)
+    p.fconst(6, 0.5)
+    p.iconst(7, 0)
+    p.iconst(8, 16383)
     for k, a in enumerate(knobs):
         p.ld(0, a)
-        p.fconst(12, 127.0)
-        p.fop(0, 0, "*", 12)
-        p.fconst(12, 0.5)
-        p.fop(0, 0, "+", 12)
+        p.fop(0, 0, "*", 4)
+        p.fop(0, 0, "+", 6)
         p.trunc(0, 0)
         p.lsh(0, 0, 7)                         # the Machinedrum's knob, 0..127, << 7
-        p.iconst(12, 0)
-        p.iop(0, 0, "MAX", 12)
-        p.iconst(12, 16383)
-        p.iop(0, 0, "MIN", 12)
+        p.iop(0, 0, "MAX", 7)
+        p.iop(0, 0, "MIN", 8)
         K.inp(p, 1, k)
         p.e("COMP(R0, R1);")
 
@@ -327,15 +337,18 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
     else:                                      # v0.26: the level from a word (x 0.5, then x level:
         p.fconst(14, 0.5)                      # the same product, bit for bit)
         p.ld(15, level_word)
+    # the step (F4) and 4.0 (F7) held through the 32 samples, the index in R9 (free until the cubic
+    # needs it), FLOAT Ra for FLOAT Ra BY 0: the same operations on the same values
+    p.fconst(4, K.STEP)
+    p.fconst(7, 4.0)
 
     def one():
-        p.trunc(7, 6)
-        p.iconst(12, 0)
-        p.float_(8, 7, 12)
+        p.trunc(9, 6)
+        p.float0(8, 9)
         p.fop(8, 6, "-", 8)                    # f
-        p.lsh(7, 7, 2)
-        p.iop(7, 13, "+", 7)
-        p.seti(1, 7)
+        p.lsh(9, 9, 2)
+        p.iop(9, 13, "+", 9)
+        p.seti(1, 9)
         p.ldpost(0, 1)                         # a = B[i-1]
         p.ldpost(1, 1)                         # b
         p.ldpost(2, 1)                         # c
@@ -351,8 +364,7 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
         p.fconst(12, 5.0)
         p.fop(11, 1, "*", 12)
         p.fop(10, 10, "-", 11)                 # - 5b
-        p.fconst(12, 4.0)
-        p.fop(11, 2, "*", 12)
+        p.fop(11, 2, "*", 7)
         p.fop(10, 10, "+", 11)                 # + 4c
         p.fop(10, 10, "-", 3)                  # - d
         p.fop(9, 9, "+", 10)
@@ -366,8 +378,7 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
         p.fop(10, 1, "*", 15)
         p.fop(9, 9, "+", 10)
         p.stpost(4, 9)
-        p.fconst(12, K.STEP)
-        p.fop(6, 6, "+", 12)
+        p.fop(6, 6, "+", 4)
     p.loop_r(5, 32, one)
     K.vws(p, "pos", 6)
     p.st(L.C["n1"], 5)
