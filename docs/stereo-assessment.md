@@ -148,3 +148,23 @@ without the `6b_shiftimm` fix (identical results: the fix changes nothing this p
 - **What follows for the design:** stereo per voice, only when the voice's sample is stereo (a mono
   sample costs nothing more), and a cap on simultaneous stereo voices (the guard's load figure, or a
   fixed number) beyond which a stereo voice plays mono (L+R). Confirm on the unit with the load meter.
+
+## The build, in order (owner, 2026-11-13: "stereo with a voice cap")
+
+Each stage its own commits behind `STEREO = 1`, each with its emulator check (and a negative
+control), on the `stereo` branch; nothing merges to `main` until the owner says so.
+
+1. **Format.** A pool entry's format word: 1 int16 mono (today, byte for byte), 2 int16 stereo
+   interleaved. Builds without stereo refuse 2 cleanly (their check: a format they don't know is not
+   loaded). Import of a stereo WAV keeps both channels (today it mixes down); the list shows ST.
+   ColdFire + unit tests.
+2. **Render.** Our sample render reads format 2: L into the track's block as now, R into a second
+   block per voice. A mono sample is unchanged, bit for bit (the gate's SHARC steps).
+3. **The second pass (question 3 first).** Read each stage of the chain for state it shares beyond
+   R4 (tables, ramps, the envelope's position). Then: for a voice whose R block is live, run the
+   chain again on R with a copy of each stage's state, kept per voice. Runner check: R through the
+   chain equals L's math on R's input, bit for bit, when L = R.
+4. **Output.** L and R to their sides at `0x1c244d`'s pan, PAN as balance; both reach the sends.
+5. **The cap.** At most N stereo voices a block (start N = 4; the load meter on the unit decides);
+   past it a stereo voice plays L+R mono through one pass.
+6. **Recorder.** CHAN STEREO for IN and MAIN (and FLEX's takes), writing format 2.
