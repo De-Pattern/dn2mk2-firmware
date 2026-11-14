@@ -3356,13 +3356,14 @@ def _addr(p: Prog, L: Layout, i: int, base: int, shift: int) -> None:
 
 
 def _copy_words(p: Prog, n: int) -> None:
-    """N words from I1 on to I3 on (I1 I3 move on). Clobbers R0, R12."""
-    p.loop(ST.STCTR, n, lambda: (p.ldpost(0, 1), p.stpost(3, 0)))
+    """N words from I1 on to I2 on (I1 I2 move on; never I0 I3 I5 post-modified: their L
+    registers are stock's). Clobbers R0, R12."""
+    p.loop(ST.STCTR, n, lambda: (p.ldpost(0, 1), p.stpost(2, 0)))
 
 
 def _own(p: Prog, L: Layout, snap: int, back: bool) -> None:
     """the voice's own words (its state, its decimator, its relatch words) to SNAP, or back
-    from it (BACK). Clobbers R0, R9, R11, R12, I1, I3."""
+    from it (BACK). Clobbers R0, R9, R11, R12, I1, I2."""
     parts = ((L.state, 7, VOICE_WORDS), (L.dec, None, DEC_WORDS), (RELATCH, 4, RELATCH_WORDS))
     at = snap
     for base, shift, n in parts:
@@ -3372,29 +3373,29 @@ def _own(p: Prog, L: Layout, snap: int, back: bool) -> None:
             p.mul_ssi(12, 9, 12)
             p.iconst(11, base)
             p.iop(12, 11, "+", 12)
-            p.seti(1 if not back else 3, 12)
+            p.seti(1 if not back else 2, 12)
         else:
-            _addr(p, L, 1 if not back else 3, base, shift)
+            _addr(p, L, 1 if not back else 2, base, shift)
         p.iconst(12, at)
-        p.seti(3 if not back else 1, 12)
+        p.seti(2 if not back else 1, 12)
         _copy_words(p, n)
         at += 4 * n
 
 
 def _dec_with(p: Prog, L: Layout, to_rdec: bool) -> None:
-    """the voice's decimator words to or from its slot's RDEC. Clobbers R0, R9, R11, R12, I1, I3."""
+    """the voice's decimator words to or from its slot's RDEC. Clobbers R0, R9, R11, R12, I1, I2."""
     p.ld(9, L.C["t"])
     p.iconst(12, DEC_STRIDE)
     p.mul_ssi(12, 9, 12)
     p.iconst(11, L.dec)
     p.iop(12, 11, "+", 12)
-    p.seti(1 if to_rdec else 3, 12)
+    p.seti(1 if to_rdec else 2, 12)
     p.ld(9, ST.STSL)
     p.iconst(12, DEC_STRIDE)
     p.mul_ssi(12, 9, 12)
     p.iconst(11, ST.RDEC)
     p.iop(12, 11, "+", 12)
-    p.seti(3 if to_rdec else 1, 12)
+    p.seti(2 if to_rdec else 1, 12)
     _copy_words(p, DEC_WORDS)
 
 
@@ -3420,7 +3421,7 @@ def _slot_of_t(p: Prog, L: Layout) -> None:
 
 def _assign(p: Prog, L: Layout) -> None:
     """a free slot for voice t (STSL; -1 at the cap): its chain states and voice, R's
-    decimator from L's, ANY + 1. Clobbers R0..R2, R9, R11, R12, I1, I3."""
+    decimator from L's, ANY + 1. Clobbers R0..R2, R9, R11, R12, I1, I2."""
     for sl in range(ST.SLOTS):                     # structured (the run model takes no jumps)
         def take(sl=sl):
             p.ld(9, L.C["t"])
@@ -3444,7 +3445,7 @@ def _assign(p: Prog, L: Layout) -> None:
             p.mul_ssi(12, 9, 12)
             p.iconst(11, ST.RDEC)
             p.iop(12, 11, "+", 12)
-            p.seti(3, 12)
+            p.seti(2, 12)
             _copy_words(p, DEC_WORDS)
 
         def free_here(sl=sl):
@@ -3472,14 +3473,14 @@ def _free(p: Prog) -> None:
 def stereo_rblk_clear(p: Prog) -> None:
     """stereo: every slot's R block zeroed at the block's start, while any slot is in use, so
     a voice the guard leaves out (its L block zeroed, ...guard.around) has a silent R too, not
-    its last block again. Clobbers R0, R12, I3."""
+    its last block again. Clobbers R0, R12, I2."""
     if not SM.STEREO:
         return
 
     def clear():
         p.iconst(12, ST.RBLK)
-        p.seti(3, 12)
-        p.loop(ST.STCTR, ST.SLOTS * 32, lambda: (p.iconst(0, 0), p.stpost(3, 0)))
+        p.seti(2, 12)
+        p.loop(ST.STCTR, ST.SLOTS * 32, lambda: (p.iconst(0, 0), p.stpost(2, 0)))
     p.ld(0, ST.ANY)
     p.ifz(0, "NE", clear)
 
