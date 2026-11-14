@@ -202,63 +202,47 @@ def half(p: Prog, L: C.Layout) -> None:
     p.iconst(12, L.tables)
     p.iop(2, 12, "+", 2)
     p.st(W["base"], 2)
-    # 64 samples into IN
-    p.iconst(12, L.IN)
-    p.seti(5, 12)
+    # 64 samples into IN. v0.52 (speed): the phase, its increment, the window's end, the wave's base and
+    # the constants held in registers (v0.42 loaded and stored them every sample), I0 walking IN, T[s1] read
+    # at I1's next word (s1 = 2 nb + 1 - h is i + 1, or i - 511 when nb = (i + 1) >> 1 reaches hlf, that is
+    # when i >= 2 hlf - 1): the same operations on the same words, every sample the same
+    p.ld(13, W["hlf"])
+    p.iop(3, 13, "+", 13)
+    p.dec(3, 3)                                   # R3 = 2 hlf - 1
+    p.ld(10, W["len"])
+    p.ld(8, W["base"])
+    p.ld(9, W["inc"])
+    p.iconst(11, -(512 << FRAC))
+    p.iconst(12, (1 << FRAC) - 1)
+    p.iconst(6, -FRAC)
+    p.fconst(15, C.TOP)
+    p.fconst(5, -1.0)
+    p.iconst(13, L.IN)
+    p.seti(0, 13)
+    C.st(p, 1, S_PH)
 
     def one():
-        C.st(p, 1, S_PH)
         p.lsh(2, 1, -FRAC)                        # i, the sample index
-        p.iconst(12, 1)
-        p.iop(3, 2, "AND", 12)                    # h
-        p.lsh(4, 2, -1)                           # n0
-        p.ipass(12, 4)
-        p.iop(4, 12, "+", 3)                      # nb = n0 + h
-        p.ld(6, W["hlf"])
-
-        def wrap():
-            p.iconst(12, -256)
-            p.iop(4, 12, "+", 4)
-        p.if_(4, "GE", 6, wrap, kind="i")
-        p.lsh(4, 4, 1)
-        p.ipass(12, 4)
-        p.iconst(6, 1)
-        p.iop(4, 12, "+", 6)
-        p.ipass(12, 4)
-        p.iop(4, 12, "-", 3)                      # s1 = 2 nb + 1 - h
-        p.ld(6, W["base"])
         p.lsh(7, 2, 2)
-        p.ipass(12, 6)
-        p.iop(7, 12, "+", 7)
+        p.iop(7, 8, "+", 7)
         p.seti(1, 7)
-        p.ldi(8, 0, 1)                            # T[s0]
-        p.lsh(7, 4, 2)
-        p.ipass(12, 6)
-        p.iop(7, 12, "+", 7)
-        p.seti(1, 7)
-        p.ldi(9, 0, 1)                            # T[s1]
-        p.iconst(12, (1 << FRAC) - 1)
-        p.iop(7, 1, "AND", 12)
-        p.iconst(12, -FRAC)
-        p.float_(7, 7, 12)                        # f
-        p.fop(9, 9, "-", 8)
-        p.fop(9, 9, "*", 7)
-        p.fop(8, 8, "+", 9)                       # T[s0] + (T[s1] - T[s0]) f
-        p.fop(8, 8, "+", 8)                       # x 2: MPYSU's unsigned weights are Q23 (up to 2)
-        C.sat(p, 8)
-        p.stpost(5, 8)
+        p.ldi(13, 0, 1)                           # T[s0]
+        p.iop(4, 1, "AND", 12)
+        p.float_(4, 4, 6)                         # f
+        p.if_(2, "GE", 3, lambda: p.ldi(14, -511, 1), lambda: p.ldi(14, 1, 1), kind="i")   # T[s1]
+        p.fop(14, 14, "-", 13)
+        p.fop(14, 14, "*", 4)
+        p.fop(13, 13, "+", 14)                    # T[s0] + (T[s1] - T[s0]) f
+        p.fop(13, 13, "+", 13)                    # x 2: MPYSU's unsigned weights are Q23 (up to 2)
+        p.fop(13, 13, "MIN", 15)
+        p.fop(13, 13, "MAX", 5)
+        p.stpost(0, 13)
         # the phase moves on, back 512 samples past the window's end
-        p.ld(2, W["inc"])
-        p.ipass(12, 1)
-        p.iop(1, 12, "+", 2)
-        p.ld(2, W["len"])
-
-        def back():
-            p.iconst(12, -(512 << FRAC))
-            p.iop(1, 12, "+", 1)
-        p.if_(1, "GE", 2, back, kind="i")
-        C.sts(p, S_PH, 1)
-    p.loop(W["n4"], N, one)
+        p.iop(1, 9, "+", 1)
+        p.if_(1, "GE", 10, lambda: p.iop(1, 11, "+", 1), kind="i")
+    p.loop_r(0, N, one, one=0)
+    p.st(W["n4"], 0)
+    C.sts(p, S_PH, 1)
     # decimate
     coefs(p, L, COEF, GAIN, OS - 2, 5)
     p.iconst(12, L.IN)
