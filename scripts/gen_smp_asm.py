@@ -47,6 +47,13 @@ def main(argv=None) -> int:
         with tempfile.TemporaryDirectory() as tmp:
             pv, _be, _offs = R.resolve(pv, dsp.PVMIX_SW, pathlib.Path(tmp))
     (OUT.parent / "pvmix.asm").write_text(pv, encoding="utf-8", newline="\n")
+    from dnfw.sampler import stereo as ST       # stereo stage 3: the R pass (STEREO builds)
+    st = ST.program()
+    if not a.no_resolve:
+        with tempfile.TemporaryDirectory() as tmp:
+            st, _be, _offs = R.resolve(st, ST.CODE_SW, pathlib.Path(tmp))
+        print(f"stereo.asm resolved at sw {ST.CODE_SW:#x}: {len(_be)} bytes")
+    (OUT.parent / "stereo.asm").write_text(st, encoding="utf-8", newline="\n")
     n = sum(1 for ln in text.splitlines() if ln.startswith("      ") and not ln.strip().startswith("//"))
     print(f"wrote {OUT.relative_to(ROOT)}: {n} instructions")
     return 0

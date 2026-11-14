@@ -93,6 +93,7 @@ class StateTracer(m4.ChainTracer):
         self.runs_seen = 0
         self.show, self.shown, self.lines = None, set(), []
         self.site = None
+        self.notes, self.r4s = [], {}
 
     def win(self, st, base):
         return [m4.m2.word(st, base + 4 * k) for k in range(self.window // 4)]
@@ -102,6 +103,10 @@ class StateTracer(m4.ChainTracer):
             pc = runner.state.pc_sw
             LOG["pc"] = pc
             st = runner.state
+            if pc == 0x1C8FE8 and LOG["ctx"] is not None:
+                self.notes.append(f"0x1c8fe8: R9 = DM(I2) with I2 = {m4.m2.word_reg(runner, 'I2'):#x}")
+            if pc in STAGES and LOG["ctx"] is not None:
+                self.r4s.setdefault(pc, []).append(m4.m2.word_reg(runner, "R4"))
             if self.show and self.show[0] <= pc < self.show[1] and LOG["ctx"] is not None and pc not in self.shown:
                 self.shown.add(pc)
                 self.lines.append(f"  {pc:#x}  {render(pc, insn)}")
@@ -164,6 +169,10 @@ def main() -> int:
             return m4.make_frame(m4.SOUND, 5, trig=(b == 1))
         on = m4.run_blocks(init, a.blocks, frame, type5=prep, tracer=tr, trace_block=a.blocks - 1)
         print("ok", on["ok"], on.get("halt"))
+        print("\n".join(dict.fromkeys(tr.notes)))
+        for tgt, r4 in tr.r4s.items():
+            d = sorted({b - a for a, b in zip(r4, r4[1:])})
+            print(f"stage {tgt:#x}: {len(r4)} calls, R4 from {min(r4):#x}, steps {[hex(x) for x in d][:6]}")
         allw = [ad for ad in LOG["w"] if not 0x2FF000 <= ad < 0x300000]
         print("everything the traced chain run wrote (stack 0x2ff000.. left out):", len(allw), "words")
         for sp in spans(allw):

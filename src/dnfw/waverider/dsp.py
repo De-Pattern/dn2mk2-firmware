@@ -396,6 +396,34 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
                 bytes(MNM_DT_BYTES)))
     out.append(("the main mix's tap for the recorder's MAIN, in L2 (zeros; v0.37)", MAIN_TAP_L2,
                 bytes(MAIN_TAP_BYTES)))
+    if _smp_types.STEREO:                       # stereo stage 3: the R pass's code and its data (zeros)
+        from ..sampler import stereo as ST
+        code = stereo_object()
+        room = ST.DATA_L2 - ST.CODE_L2
+        if room - len(code) < 64:
+            raise DspError(f"stereo.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 room")
+        out.append(("stereo.asm (the R pass), in L2", ST.CODE_L2, code + bytes(room - len(code))))
+        out.append(("the R pass's state, blocks and saves, in L2 (zeros)", ST.DATA_L2, bytes(ST.DATA_BYTES)))
+    return out
+
+
+def stereo_object() -> bytes:
+    spec = _code()
+    return sharc_object.load_bytes(bytes.fromhex(spec["stereo"]["object_parcels_be"]))
+
+
+def stereo_jumps() -> list[tuple[int, bytes, bytes]]:
+    """(call site sw, the stock CJUMP there, ours): each of the chain's seven stage calls,
+    pointed at its wrapper in stereo.asm"""
+    from ..sampler import stereo as ST
+    spec = _code()
+    out = []
+    for (site, target, _b, _s), j in zip(ST.STAGES, spec["stereo_jumps"], strict=True):
+        stock = sharc_object.load_bytes(bytes.fromhex(f"180400{target:06x}"))
+        ours = sharc_object.load_bytes(bytes.fromhex(j["object_parcels_be"]))
+        if int(j["at_sw"], 16) != site or len(ours) != len(stock):
+            raise DspError(f"the stereo jump for sw {site:#x} is not one CJUMP there")
+        out.append((site, stock, ours))
     return out
 
 
@@ -602,6 +630,11 @@ def section7(stock: bytes) -> bytes:
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
     bootstream.write_span(out, sw_to_load(CALL_SITE_SW), obj["emark_jump"])
     bootstream.write_span(out, sw_to_load(PVMIX_SITE_SW), obj["pvmix_jump"])
+    if _smp_types.STEREO:                       # stereo stage 3: the chain's stage calls -> the R pass
+        for site, stock_call, ours in stereo_jumps():
+            if bootstream.read_span(stock, sw_to_load(site), len(stock_call)) != stock_call:
+                raise DspError(f"sw {site:#x} is not the stock stage call")
+            bootstream.write_span(out, sw_to_load(site), ours)
     result = bytes(out)
     walked = bootstream.walk(result)
     if not walked.complete or walked.stopped_at != len(result):

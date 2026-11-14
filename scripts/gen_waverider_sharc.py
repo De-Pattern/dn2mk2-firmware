@@ -84,6 +84,13 @@ def main(argv=None) -> int:
             emark = assemble("entry_mark", dsp.EMARK_SW, work)
             ping = assemble("ping", dsp.PING_SW, work)
             pvmix = assemble("pvmix", dsp.PVMIX_SW, work)
+            from dnfw.sampler import stereo as ST  # noqa: PLC0415
+            stereo = assemble("stereo", ST.CODE_SW, work)
+            import sharc_resolve_jumps as RJ  # noqa: PLC0415
+            from dnfw.sampler import stereo as ST  # noqa: PLC0415
+            lab = RJ.labels((SHARC / "stereo.asm").read_text(encoding="utf-8"))
+            sjumps = [one_jump(f"CJUMP {ST.CODE_SW + stereo['instruction_offsets'][lab[f'wr_st_t{k}']] // 2:#x} (DB);",
+                               site, work) for k, (site, *_r) in enumerate(ST.STAGES)]
             pjump = one_jump(PVMIX_LINE, dsp.PVMIX_SITE_SW, work)
             ejump = one_jump(EMARK_LINE, dsp.CALL_SITE_SW, work)
             lptr = one_jump(LOOKUP_LINE, dsp.LOOKUP_SITE_SW, work)
@@ -97,6 +104,8 @@ def main(argv=None) -> int:
             emark = committed("entry_mark")
             ping = committed("ping")
             pvmix = committed("pvmix")
+            stereo = committed("stereo")
+            sjumps = old["stereo_jumps"]
             pjump = old["pvmix_jump"]
             ejump = old["emark_jump"]
             lptr = old["lookup_ptr"]
@@ -115,7 +124,9 @@ def main(argv=None) -> int:
             "lookup_ptr": lptr,
             "ping": {k: v for k, v in ping.items() if k != "instruction_offsets"},
             "pvmix": {k: v for k, v in pvmix.items() if k != "instruction_offsets"},
-            "pvmix_jump": pjump}
+            "pvmix_jump": pjump,
+            "stereo": {k: v for k, v in stereo.items() if k != "instruction_offsets"},
+            "stereo_jumps": sjumps}
     dsp.CODE.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {dsp.CODE.relative_to(ROOT)}: perc {len(perc['object_parcels_be']) // 2} B, ping {len(ping['object_parcels_be']) // 2} B, entry {len(jump['object_parcels_be']) // 2} B")
     return 0
