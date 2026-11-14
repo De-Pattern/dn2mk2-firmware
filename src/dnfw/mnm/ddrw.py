@@ -288,7 +288,43 @@ def _half(p: Prog, L: C.Layout) -> None:
                     p.fop(4, 4, "*", 15)
                     sat(4)
                     p.stpost(5, 4)
-                p.loop_r(0, D.NBUF, one)
+                # v0.52 (speed): the same wave both sides (cb = fb: no change pending, the steady
+                # state): old + fade (new - old) is old itself (new - old = +0) and within the limits (a Q23
+                # word), so the word is read once and reduced; the fade moves on as before (the same words).
+                # R0 counts down from NBUF: the index is (i0 + NBUF - R0) & msk. I0 walks BUF
+                def steady():
+                    p.iconst(12, D.NBUF)
+                    p.iop(1, 8, "+", 12)            # i0 + NBUF
+                    p.fconst(3, C.TOP)
+                    p.iconst(4, -256)
+                    p.iconst(6, -1)
+                    p.fconst(11, -1.0)
+                    p.fconst(12, 2.0 ** 31)
+                    p.iconst(2, L.BUF)
+                    p.seti(0, 2)
+
+                    def fast():
+                        p.iop(2, 1, "-", 0)
+                        p.iop(2, 2, "AND", 9)
+                        p.lsh(2, 2, 2)
+                        p.iop(2, 10, "+", 2)
+                        p.seti(1, 2)
+                        p.ldi(2, 0, 1)
+                        p.fop(7, 7, "+", 13)        # the fade moves on
+                        p.lsh(2, 2, 8)
+                        p.float_(2, 2, 5)           # the wave (D.q23)
+                        p.fop(2, 2, "*", 12)
+                        p.trunc(2, 2)               # t x 2^31 (saturates at the top)
+                        p.iop(2, 2, "AND", 4)       # t24 << 8
+                        p.mul_ssf(2, 2, 14)         # the truncation that reduces the bits
+                        p.float_(2, 2, 6)           # / 2: X48 x t x 2^-24
+                        p.fop(2, 2, "*", 15)
+                        p.fop(2, 2, "MIN", 3)
+                        p.fop(2, 2, "MAX", 11)
+                        p.stpost(0, 2)
+                    p.loop_r(0, D.NBUF, fast, one=0)
+                    p.ipass(8, 1)                   # i0 + NBUF, as the loop below leaves it
+                p.if_(10, "EQ", 11, steady, lambda: p.loop_r(0, D.NBUF, one), kind="i")
                 p.st(W["i0"], 8)
                 p.st(W["w"], 7)
                 p.st(W["j"], 0)
@@ -349,24 +385,30 @@ def _half(p: Prog, L: C.Layout) -> None:
     p.iconst(12, L.W2)
     p.seti(2, 12)
     p.iconst(12, L.MIX)
-    p.seti(5, 12)
+    p.seti(0, 12)
+    # v0.52 (speed): the ramp's weight and step (F3, F4) and the constants held, the count in R0,
+    # I0 walking MIX: the same operations, the same words
+    p.fpass(3, 2)
+    p.fpass(4, 1)
+    p.fconst(5, 0x547AE1 * C.Q23)
+    p.fconst(6, 4.0)
+    p.fconst(7, C.TOP)
+    p.fconst(8, -1.0)
 
     def mix():
         p.ldpost(1, 1)
         p.ldpost(2, 2)
         p.fop(2, 2, "-", 1)
-        p.ld(3, W["w"])
         p.fop(2, 2, "*", 3)
-        p.ld(4, W["x1"])
         p.fop(3, 3, "+", 4)
-        p.st(W["w"], 3)
-        p.fconst(12, 0x547AE1 * C.Q23)
-        p.fop(1, 1, "*", 12)
+        p.fop(1, 1, "*", 5)
         p.fop(1, 1, "+", 2)
-        p.fconst(12, 4.0)
-        p.fop(1, 1, "*", 12)
-        C.sat(p, 1)
-        p.stpost(5, 1)
-    p.loop(W["j"], D.N2, mix)
+        p.fop(1, 1, "*", 6)
+        p.fop(1, 1, "MIN", 7)
+        p.fop(1, 1, "MAX", 8)               # C.sat
+        p.stpost(0, 1)
+    p.loop_r(0, D.N2, mix, one=0)
+    p.st(W["j"], 0)
+    p.st(W["w"], 3)
     D.state_ptr(p, L, 2, S_DEC)
     D.dec2(p, L)
