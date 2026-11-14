@@ -132,55 +132,16 @@ def i2f(p: Prog, d: int, r: int) -> None:
     p.float_(d, r, 12)
 
 
-def _mulq_body(p: Prog) -> None:
-    """R1 = floor(R1 x R2 / 2^23) exactly (the 56300's MPY then a1), R2 >= 0, R1 >= 0 (or R2 = 0);
-    R3 = the product's low 23 bits (0: exact). Clobbers R4-R7, R12, R13."""
-    p.lsh(3, 1, -12)
-    p.iconst(12, 0xFFF)
-    p.iop(4, 1, "AND", 12)
-    p.lsh(5, 2, -12)
-    p.iop(6, 2, "AND", 12)
-    p.iconst(12, 0)
-    for r in (3, 4, 5, 6):
-        p.float_(r, r, 12)
-    p.fop(7, 3, "*", 5)
-    p.trunc(7, 7)                              # hh
-    p.fop(13, 3, "*", 6)
-    p.trunc(13, 13)
-    p.fop(3, 4, "*", 5)
-    p.trunc(3, 3)
-    p.iop(13, 13, "+", 3)                      # m
-    p.fop(4, 4, "*", 6)
-    p.trunc(4, 4)                              # l
-    p.lsh(3, 13, 12)
-    p.ipass(12, 3)
-    p.iop(3, 12, "+", 4)
-    p.iconst(12, 0x7FFFFF)
-    p.iop(3, 3, "AND", 12)                     # the low 23 bits
-    p.lsh(4, 4, -12)
-    p.iop(13, 13, "+", 4)
-    p.lsh(13, 13, -11)
-    p.lsh(7, 7, 1)
-    p.iop(1, 13, "+", 7)
-
-
-def _mul_body(p: Prog) -> None:
-    """R1 = floor(R1 R2 / 2^23) (the 56300's MPY, a1), any signs; R3 = |R1 R2|'s low 23 bits.
-    Clobbers R2, R4-R8, R12, R13."""
-    p.iconst(8, 0)
-    p.ifz(2, "LT", lambda: (p.iconst(12, 0), p.iop(2, 12, "-", 2), p.iop(1, 12, "-", 1)))
-    p.ifz(1, "LT", lambda: (p.iconst(12, 0), p.iop(1, 12, "-", 1), p.iconst(8, 1)))
-    _mulq_body(p)
-
-    def neg():
-        p.iconst(12, 0)
-        p.iop(1, 12, "-", 1)
-        p.ifz(3, "NE", lambda: (p.iconst(12, 1), p.iop(1, 1, "-", 12)))
-    p.ifz(8, "NE", neg)
-
-
 def mul(p: Prog) -> None:
-    p.call("vo6_mul", lambda: _mul_body(p))
+    """R1 = floor(R1 R2 / 2^23) (the 56300's MPY, a1), any signs, |R1| < 2^24, |R2| < 2^30. Clobbers R12, R13.
+
+    v0.52 (speed): on the fixed-point multiplier, R1 << 7 times R2 << 1 (SSF): bits 63..32 of
+    the doubled product, floor(R1 R2 2^9 / 2^32), the floor for either sign (v0.42 and older: a leaf
+    subroutine splitting both into 12-bit halves, four float partial products summed as ints, the
+    signs apart; the same words, scripts/mnm_identity.py)."""
+    p.lsh(12, 1, 7)
+    p.lsh(13, 2, 1)
+    p.mul_ssf(1, 12, 13)
 
 
 mulq = mulqs = mul
@@ -419,7 +380,8 @@ def _pulses(p: Prog, L: C.Layout) -> None:
     _ring_addr(p, L, 3, 2)
     p.seti(5, 3)
     p.iconst(6, 0)
-    p.loop(_a(L, "n1"), 16, lambda: p.stpost(5, 6))
+    p.loop_r(0, 16, lambda: p.stpost(5, 6), one=0)    # (v0.52: the count in R0)
+    p.st(_a(L, "n1"), 0)
 
     def one():
         ls(p, 1, "pi")
@@ -437,7 +399,10 @@ def _pulses(p: Prog, L: C.Layout) -> None:
             p.iop(1, 2, "AND", 12)
             p.lsh(1, 1, 5)                     # y0 of MPYSU (0x10, b0): the weight << 5
             p.iconst(2, 0xCCCCD)
-            mulq(p)                            # floor(0xCCCCD w / 2^23), R3 its low 23 bits
+            p.mul_ssi(3, 1, 2)                 # R3 = the product's low 23 bits (w x 0xCCCCD < 2^43)
+            p.iconst(12, 0x7FFFFF)
+            p.iop(3, 3, "AND", 12)
+            mulq(p)                            # floor(0xCCCCD w / 2^23)
             p.iconst(12, 1)
             p.iop(4, 1, "AND", 12)
             p.lsh(4, 4, 23)
@@ -704,29 +669,38 @@ def _copy(p, L, src, dst):
     p.seti(5, 12)
     p.iconst(12, _a(L, dst))
     p.seti(2, 12)
-    p.call("vo6_copy", lambda: p.loop(_a(L, "n4"), 16, lambda: (p.ldpost(1, 5), p.stpost(2, 1))))
+    p.call("vo6_copy", lambda: (p.loop_r(0, 16, lambda: (p.ldpost(1, 5), p.stpost(2, 1)), one=0),
+                                p.st(_a(L, "n4"), 0)))
 
 
 def _qconsts(p: Prog) -> None:
-    """the floor quantizer's constants: F8 2^23, R9 -23, F11 2^100, F13 -2^-23, F14 0"""
+    """the floor quantizer's constants: F8 2^23, R9 -23, F11 TOP, F13 -2^-23, F14 -1.0"""
     p.fconst(8, 2.0 ** 23)
     p.iconst(9, -23)
-    p.fconst(11, 2.0 ** 100)
+    p.fconst(11, C.TOP)
     p.fconst(13, -Q23)
-    p.fconst(14, 0.0)
+    p.fconst(14, -1.0)
 
 
-def _floor(p: Prog, x: int, t: int, u: int) -> None:
+def _floor(p: Prog, x: int, t: int, u: int, sat: bool = False, dst: int | None = None) -> None:
     """Fx = floor(Fx 2^23) / 2^23 (the 56300's a1: a word's value, the limiter's truncation), no
-    branch: trunc, then one LSB down where that went up (Fx - trunc < 0). Clobbers Ft, Fu."""
+    branch: trunc, then one LSB down where that went up (Fx - trunc < 0); SAT: then limited
+    (C.sat, on the constants held). Clobbers Ft, Fu.
+
+    v0.52 (speed): the LSB down as `IF LT` on Fx - trunc's sign (v0.42: (Fx - trunc) x 2^100
+    clamped to [-2^-23, 0] and added, the same word wherever |Fx - trunc| >= 2^-123, which every
+    value here is: multiples of 2^-46 or 0); the limiter's constants held in F11, F14."""
     p.fop(t, x, "*", 8)
     p.trunc(t, t)
     p.float_(t, t, 9)
     p.fop(u, x, "-", t)
-    p.fop(u, u, "*", 11)
-    p.fop(u, u, "MIN", 14)
-    p.fop(u, u, "MAX", 13)
-    p.fop(x, t, "+", u)
+    p.fop_lt(t, t, "+", 13)
+    d = x if dst is None else dst                # (DST: the result there, Fx left as it was)
+    if sat:
+        p.fop(d, t, "MIN", 11)
+        p.fop(d, d, "MAX", 14)
+    else:
+        p.fpass(d, t)
 
 
 def _bq_body(p: Prog, L: C.Layout) -> None:
@@ -737,31 +711,33 @@ def _bq_body(p: Prog, L: C.Layout) -> None:
     p.ldi(3, 1, 0)
     p.ldi(4, 2, 0)
     p.ldi(5, 3, 0)
+    p.iconst(12, _a(L, "CO"))                   # v0.52 (speed): the coefficients through I1, each
+    p.seti(1, 12)                               # on the compute before its use (were five plain loads)
+    p.ldi(10, 0, 1)
 
     def one():
         p.ldpost(1, 5)
-        p.ld(10, _a(L, "CO"))
         p.fop(6, 10, "*", 1)
-        p.ld(10, _a(L, "CO") + 4)
+        p.ldi(10, 1, 1)
         p.fop(7, 10, "*", 2)
+        p.ldi(10, 2, 1)
         p.fop(6, 6, "+", 7)
-        p.ld(10, _a(L, "CO") + 8)
         p.fop(7, 10, "*", 3)
+        p.ldi(10, 3, 1)
         p.fop(6, 6, "+", 7)
-        p.ld(10, _a(L, "CO") + 12)
         p.fop(7, 10, "*", 4)
+        p.ldi(10, 4, 1)
         p.fop(6, 6, "-", 7)
-        p.ld(10, _a(L, "CO") + 16)
         p.fop(7, 10, "*", 5)
         p.fop(6, 6, "-", 7)
         p.fop(6, 6, "+", 6)
-        _floor(p, 6, 7, 15)
-        C.sat(p, 6)
+        _floor(p, 6, 7, 15, sat=True)
         p.stpost(2, 6)
         p.fpass(3, 2)
         p.fpass(2, 1)
         p.fpass(5, 4)
         p.fpass(4, 6)
+        p.ldi(10, 0, 1)
     p.loop_r(0, 16, one)                  # v0.42: the count in R0 (docs/mnm-recode.md)
     p.iconst(12, 0)
     p.st(_a(L, "n4"), 12)
@@ -1114,8 +1090,7 @@ def _rrscale(p: Prog, L: C.Layout) -> None:
     def one():
         p.ldi(2, 0, 5)
         p.fop(2, 2, "*", 1)
-        _floor(p, 2, 0, 15)
-        C.sat(p, 2)
+        _floor(p, 2, 0, 15, sat=True)
         p.stpost(5, 2)
     p.loop_r(3, 16, one)                  # v0.42: the count in R3 (docs/mnm-recode.md)
     p.iconst(12, 0)
@@ -1148,29 +1123,30 @@ def _res_body(p: Prog, L: C.Layout, parallel: bool) -> None:
     p.iconst(12, _a(L, "RAMP"))
     p.seti(1, 12)
 
-    def one():
+    # v0.52 (speed): the count in R0 (no scratch count), two samples a round with y1 and y2 in
+    # F2 and F3 by turns (no moves): the same words
+    def one(y1, y2):
         p.ldpost(1, 5)
         p.ldpost(4, 1)
         p.ldpost(5, 1)
+        p.float_(4, 4, 9)                       # c1, c2: the ramps' words (v0.52: floated here, i2f as before)
+        p.float_(5, 5, 9)
         p.fop(6, 4, "*", 1)
-        p.fop(7, 5, "*", 2)
+        p.fop(7, 5, "*", y1)
         p.fop(6, 6, "-", 7)
         p.fop(6, 6, "-", 7)
-        p.fop(7, 10, "*", 3)
+        p.fop(7, 10, "*", y2)
         p.fop(6, 6, "-", 7)
         if parallel:
             p.ldi(7, 0, 2)
             p.fop(7, 7, "+", 6)
-            _floor(p, 7, 0, 15)
-            C.sat(p, 7)
+            _floor(p, 7, 12, 15, sat=True)
             p.stpost(2, 7)
-        p.fpass(3, 2)
-        p.fpass(2, 6)
-        _floor(p, 2, 0, 15)
-        C.sat(p, 2)
+        _floor(p, 6, 12, 15, sat=True, dst=y2)  # the new y1 where y2 was
         if not parallel:
-            p.stpost(2, 2)
-    p.loop(_a(L, "n4"), 16, one)
+            p.stpost(2, y2)
+    p.loop_r(0, 8, lambda: (one(2, 3), one(3, 2)), one=0)
+    p.st(_a(L, "n4"), 0)
     p.sti(0, 0, 2)
     p.sti(1, 0, 3)
 
@@ -1236,6 +1212,8 @@ def _ser_body(p: Prog, L: C.Layout) -> None:
     p.ld(5, _a(L, "R"))
     p.lsh(2, 5, 7)
     p.iconst(6, 0x3FFFF)
+    p.iconst(4, 0x7FFFFF)                      # v0.52 (speed): the limiter's bounds held
+    p.iconst(15, -0x800000)
     p.iconst(12, _a(L, "RAMP"))
     p.seti(1, 12)
 
@@ -1259,28 +1237,25 @@ def _ser_body(p: Prog, L: C.Layout) -> None:
         p.iop(14, 14, "-", 8)
 
     def one():
-        p.ldpost(9, 5)
-        _word(p, 9, 9)                          # x
-        p.ldpost(10, 1)
-        _word(p, 10, 10)                        # c1
+        p.ldpost(9, 5)                          # x (v0.52: the words, EXC's held as words over the series)
+        p.ldpost(10, 1)                         # c1, c2: the ramps' words (v0.52: no longer floated and back)
         p.ldpost(11, 1)
-        _word(p, 11, 11)                        # c2
         term(10, None, 9, first=True)           # + c1 x
         term(11, None, 1, twice=True)           # - 2 c2 y1
         term(5, 2, 3)                           # - R y2
         p.ash(14, 14, -18)
         p.iop(13, 13, "+", 14)
         p.ash(13, 13, -5)                       # floor(S / 2^23)
-        limi(p, 13)
+        p.iop(13, 13, "MIN", 4)
+        p.iop(13, 13, "MAX", 15)                # limi
         p.ipass(3, 1)
         p.ipass(1, 13)
-        i2f(p, 7, 13)
-        p.stpost(2, 7)
+        p.stpost(2, 13)                         # the word (the next stage's input as it is)
     p.loop_r(0, 16, one)
     p.st(_a(L, "n4"), 0)
-    p.ldi(7, -1, 2)
+    i2f(p, 7, 1)                               # the state as before: y1, y2 as floats
     p.sti(0, 0, 7)
-    p.ldi(7, -2, 2)
+    i2f(p, 7, 3)
     p.sti(1, 0, 7)
 
 
@@ -1293,6 +1268,8 @@ def _formant_loop(p: Prog, L: C.Layout) -> None:
         p.st(_a(L, f"r{k}"), 1)
         p.iconst(1, s24(r))
         p.st(_a(L, f"R{k}i"), 1)
+    if SER_EXACT:                              # (the series' words: their exact form reads and writes words)
+        _exc_words(p, L, True)
     p.iconst(0, 0)
     p.st(_a(L, "kk"), 0)
 
@@ -1355,28 +1332,41 @@ def _formant_loop(p: Prog, L: C.Layout) -> None:
         p.ldi(2, 1, 0)                         # old c2
         p.sti(0, 0, 4)
         p.sti(1, 0, 5)
-        # the ramps, exactly: floor(old + n lim(new - old) / 16), n = 0..15
-        _word(p, 6, 4)
-        _word(p, 7, 5)
+        # the ramps, exactly: floor(old + n lim(new - old) / 16), n = 0..15, the words into RAMP
+        _word(p, 10, 4)
+        _word(p, 11, 5)
         _word(p, 1, 1)
         _word(p, 2, 2)
-        p.iop(6, 6, "-", 1)
-        limi(p, 6)
-        p.iop(7, 7, "-", 2)
-        limi(p, 7)
-        p.lsh(1, 1, 4)
-        p.lsh(2, 2, 4)
+        p.iop(10, 10, "-", 1)
+        limi(p, 10)
+        p.iop(11, 11, "-", 2)
+        limi(p, 11)
         p.iconst(12, _a(L, "RAMP"))
         p.seti(2, 12)
 
-        def ramp():
-            for acc_r, d in ((1, 6), (2, 7)):
-                p.ash(3, acc_r, -4)
-                limi(p, 3)
-                i2f(p, 3, 3)
-                p.stpost(2, 3)
-                p.iop(acc_r, acc_r, "+", d) if 8 <= acc_r <= 15 else (p.ipass(12, d), p.iop(acc_r, 12, "+", acc_r))
-        p.loop(_a(L, "n3"), 16, ramp)
+        # v0.52 (speed): the limiter's bounds held (R5, R8), the steps in R10, R11, the count in R0;
+        # both steps 0 (the targets held, a sustained vowel): every word the old one (floor(old + 0), within
+        # the limits: a word), stored as it is. The same words
+        def ramps():
+            p.lsh(1, 1, 4)
+            p.lsh(2, 2, 4)
+            p.iconst(5, 0x7FFFFF)
+            p.iconst(8, -0x800000)
+
+            def ramp():
+                for acc_r, d in ((1, 10), (2, 11)):
+                    p.ash(3, acc_r, -4)
+                    p.iop(3, 3, "MIN", 5)
+                    p.iop(3, 3, "MAX", 8)
+                    p.stpost(2, 3)              # (the word: the series filter's input as it is, the parallel one's floated)
+                    p.iop(acc_r, d, "+", acc_r)
+            p.loop_r(0, 16, ramp, one=0)
+
+        def held():
+            p.loop_r(0, 4, lambda: [p.stpost(2, r) for _ in range(4) for r in (1, 2)], one=0)
+        p.iop(3, 10, "OR", 11)
+        p.ifz(3, "EQ", held, ramps)
+        p.st(_a(L, "n3"), 0)
         # the filter: its state at ser + 2 k (par follows ser)
         p.ld(1, L.md.C["mdb"])
         p.ld(8, _a(L, "kk"))
@@ -1414,7 +1404,8 @@ def _formant_loop(p: Prog, L: C.Layout) -> None:
                 p.iconst(12, _a(L, "C30"))
                 p.seti(5, 12)
                 p.iconst(6, 0)
-                p.loop(_a(L, "n3"), 16, lambda: p.stpost(5, 6))
+                p.loop_r(0, 16, lambda: p.stpost(5, 6), one=0)
+                p.st(_a(L, "n3"), 0)
             p.ld(8, _a(L, "kk"))
             p.if_(8, "EQ", 12, clear, kind="i")
             p.iconst(12, _a(L, "UNV"))
@@ -1427,6 +1418,29 @@ def _formant_loop(p: Prog, L: C.Layout) -> None:
         addk(p, 8, 8, 1)
         p.st(_a(L, "kk"), 8)
     p.loop(_a(L, "n2"), 8, one)
+    if SER_EXACT:
+        _exc_words(p, L, False)
+
+
+def _exc_words(p: Prog, L: C.Layout, to_words: bool) -> None:
+    """v0.52 (speed): EXC's 16 floats as their Q23 words (TO_WORDS: _word, exact: they are words'
+    values) for the series resonators, which read and write words, or back (i2f). Clobbers R0-R2, R12, I0."""
+    p.iconst(12, _a(L, "EXC"))
+    p.seti(0, 12)
+    if to_words:
+        p.fconst(2, 2.0 ** 23)
+    else:
+        p.iconst(2, -23)
+
+    def one():
+        p.ldi(1, 0, 0)
+        if to_words:
+            p.fop(1, 1, "*", 2)
+            p.trunc(1, 1)
+        else:
+            p.float_(1, 1, 2)
+        p.stpost(0, 1)
+    p.loop_r(0, 16, one, one=0)
 
 
 def _c1_addr(p: Prog, L: C.Layout) -> None:
@@ -1470,7 +1484,8 @@ def _source(p: Prog, L: C.Layout) -> None:
             p.iconst(12, -31)
             p.float_(5, 5, 12)
             p.stpost(5, 5)
-    p.loop(_a(L, "n1"), 8, one)
+    p.loop_r(0, 8, one, one=0)
+    p.st(_a(L, "n1"), 0)
     ss(p, "nb", 2)
     ss(p, "nx", 1)
     C.knob(p, 1, 3)
@@ -1498,14 +1513,14 @@ def _source(p: Prog, L: C.Layout) -> None:
         p.fop(7, 4, "*", 2)
         p.fop(6, 6, "*", 3)
         p.fop(7, 7, "+", 6)
-        _floor(p, 7, 10, 15)
-        C.sat(p, 7)
+        _floor(p, 7, 10, 15, sat=True)
         p.stpost(1, 7)
         p.fconst(12, 0.125)
         p.fop(4, 4, "*", 12)
         _floor(p, 4, 10, 15)
         p.stpost(5, 4)
-    p.loop(_a(L, "n1"), 16, exc)
+    p.loop_r(0, 16, exc, one=0)
+    p.st(_a(L, "n1"), 0)
 
 
 # -- the level, the AGC, the gain, the mix ---------------------------------------------------
@@ -1524,15 +1539,13 @@ def _follower(p: Prog, L: C.Layout) -> None:
     def one():
         p.ldpost(1, 5)
         p.fpass(4, 2)
-        _floor(p, 4, 5, 7)
-        C.sat(p, 4)                             # x1 = lim(b)
+        _floor(p, 4, 5, 7, sat=True)       # x1 = lim(b)
         p.fop(5, 1, "*", 1)
         p.fop(2, 2, "+", 5)
         p.fop(5, 4, "*", 10)
         p.fop(2, 2, "-", 5)
         p.fpass(6, 3)
-        _floor(p, 6, 5, 7)
-        C.sat(p, 6)                             # lim(a)
+        _floor(p, 6, 5, 7, sat=True)       # lim(a)
         p.fop(5, 4, "*", 10)
         p.fop(3, 3, "+", 5)
         p.fop(5, 6, "*", 10)
@@ -1644,23 +1657,19 @@ def _gain_mix(p: Prog, L: C.Layout) -> None:
 
     def one():
         p.fpass(7, 4)
-        _floor(p, 7, 12, 15)
-        C.sat(p, 7)                             # G[n]
+        _floor(p, 7, 12, 15, sat=True)       # G[n]
         p.fpass(2, 5)
-        _floor(p, 2, 12, 15)
-        C.sat(p, 2)                             # y31[n]
+        _floor(p, 2, 12, 15, sat=True)       # y31[n]
         p.ldpost(0, 5)
         p.fop(0, 0, "*", 7)
         p.fconst(12, 4096.0)
         p.fop(0, 0, "*", 12)
         p.ldpost(10, 1)
         p.fop(10, 10, "*", 6)
-        _floor(p, 10, 12, 15)
-        C.sat(p, 10)
+        _floor(p, 10, 12, 15, sat=True)
         p.fop(10, 10, "*", 2)
         p.fop(0, 0, "+", 10)
-        _floor(p, 0, 12, 15)
-        C.sat(p, 0)
+        _floor(p, 0, 12, 15, sat=True)
         p.stpost(2, 0)
         p.fop(4, 4, "+", 1)
         p.fop(5, 5, "+", 3)
@@ -1681,7 +1690,8 @@ def half(p: Prog, L: C.Layout) -> None:
     _biquad(p, L, OUT_EQ, "UNV", "C30", "ob")
     p.iconst(12, _a(L, "C30"))
     p.seti(5, 12)
-    p.loop(_a(L, "n1"), 16, lambda: (p.ldpost(1, 5), p.stpost(4, 1)))
+    p.loop_r(0, 16, lambda: (p.ldpost(1, 5), p.stpost(4, 1)), one=0)
+    p.st(_a(L, "n1"), 0)
     ls(p, 1, "lev")
     addk(p, 1, 1, LEV_STEP)
     p.iconst(12, LEV_TOP)
