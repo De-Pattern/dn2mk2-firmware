@@ -68,6 +68,7 @@ from dnfw.image import bootstream, sharc_object                # noqa: E402
 from dnfw.waverider import dsp, testtable                       # noqa: E402
 from dnfw.perc import live as PL                                # noqa: E402
 from dnfw.perc import machines as PM                            # noqa: E402
+from dnfw.perc import mf                                        # noqa: E402
 from dnfw.perc import program as PP                             # noqa: E402
 from dnfw.sampler import live as SL                             # noqa: E402
 from dnfw.sampler import machines as SM                         # noqa: E402
@@ -448,10 +449,23 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
             insn = dk.st.decode_at(image.memory, None, load_sw + off // 2)
             if insn.kind in ("unknown", "uncertain") or (insn.length_bytes or 0) != end - off:
                 bad.append(f"+{off} digikit {insn.type_name}/{insn.length_bytes} vs {end - off}")
+            mfc = mf.parse(lines[k])
+            if mfc is not None:                  # a multifunction line: digikit's compute field is mf's
+                fl = insn.fields or {}
+                dkc = (fl["compute[22:16]"] << 16 | fl["compute[15:0]"]) if "compute[22:16]" in fl \
+                    else fl.get("compute")
+                if dkc != mfc:
+                    bad.append(f"+{off} digikit compute {dkc if dkc is None else hex(dkc)} vs {mfc:#x}"
+                               f" for '{lines[k].strip()}'")
             if use_selmap:
                 n, text = sel.get(off, (0, "?"))
                 want = norm(lines[k])
                 got = norm(text)
+                if mfc is not None:
+                    # selmap reads the float multifunction categories 011000 / 011001 as
+                    # `Fm = MRF + Fx * Fy`: a known misreading, so for these lines its text,
+                    # the MRF aside, must still be the source
+                    got = got.replace("=mrf+", "=")
                 if "do" in want and "until" in want:
                     same = got.startswith(want.split("do")[0] + "do")
                 else:

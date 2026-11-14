@@ -30,6 +30,8 @@ import math
 import re
 import struct
 
+from . import mf
+
 
 def f32(x: float) -> float:
     return struct.unpack("<f", struct.pack("<f", x))[0]
@@ -574,6 +576,123 @@ class Prog:
         self._compute(d, f"F{d} = FLOAT R{a};", note, (a,))
         if self.run:
             self.setF(d, f32(float(s32(self.r[a]))))
+
+    # -- parallel instructions ---------------------------------------------------------
+    def par(self, *ops) -> None:
+        """One SHARC instruction doing several things at once: every operand (the stored
+        register too) is read before any result is written, as the core does.
+
+        Compute (at most one group):
+          ("op", d, a, OP, b)      any one float op (+ - * MIN MAX), any registers;
+          ("*", d, a, b) with ("+"|"-", d, a, b), or with ("+-", d1, d2, a, b) (Fd1 = a + b,
+                                   Fd2 = a - b): the multifunction forms, the multiplier's
+                                   operands F0-F3 x F4-F7 and the ALU's F8-F11, F12-F15
+                                   (selas does not check these groups: it encodes the
+                                   multiply alone, so mf.verify checks every such line);
+          ("*", ...) or ("+", ...) alone is a single op (any registers).
+        Move (at most one, through I0-I3, PAR_I): ("ld", d, i) Fd = DM(Ii, M6), Ii one word
+          on; ("st", i, s) DM(Ii, M6) = Fs; ("ldk", d, k, i) Fd = DM(k, Ii); ("stk", k, i, s)
+          DM(k, Ii) = Fs, -32 <= bk(i, k) < 32."""
+        comp = [o for o in ops if o[0] in ("op", "*", "+", "-", "+-")]
+        moves = [o for o in ops if o[0] in ("ld", "st", "ldk", "stk")]
+        assert len(comp) + len(moves) == len(ops), ops
+        assert len(moves) <= 1, "one memory move a compute (no PM bus here)"
+        for m in moves:
+            i = m[{"ld": 2, "st": 1, "ldk": 3, "stk": 2}[m[0]]]
+            assert i in PAR_I, f"a compute's move through I{i}: selmap reads it as a 4-byte instruction"
+        texts, writes, results = [], [], []
+        ops_f = {"+": lambda x, y: x + y, "-": lambda x, y: x - y, "*": lambda x, y: x * y,
+                 "MIN": min, "MAX": max}
+
+        def fval(op, a, b):
+            x, y = self.F(a), self.F(b)
+            if math.isnan(x) or math.isnan(y):
+                return 0xFFFFFFFF
+            return bits(f32(ops_f[op](x, y)))
+        single = len(comp) == 1 and comp[0][0] in ("op", "*", "+", "-")
+        if single:
+            c = comp[0]
+            d, a, op, b = (c[1], c[2], c[3], c[4]) if c[0] == "op" else (c[1], c[2], c[0], c[3])
+            assert op in ops_f
+            texts.append(f"F{d} = {op}(F{a}, F{b})" if op in ("MIN", "MAX") else f"F{d} = F{a} {op} F{b}")
+            writes.append(d)
+            if self.run:
+                results.append((d, fval(op, a, b)))
+        elif comp:
+            # the multifunction forms with + or - (or both): selas encodes them as the firmware
+            # does (compute 0x58c830 for `F12 = F0 * F7, F8 = F8 + F12`), checked line by line
+            # against mf's own encoding (sharc_waverider_m3._selas), and digikit decodes them; the
+            # gate reads selmap's MRF text for them as the multiply (sharc_waverider_m5
+            # .decode_check). The MIN / MAX / ABS / average forms: selas drops the ALU half in
+            # silence, so not here
+            assert not [c for c in comp if c[0] == "op"], comp
+            mul = [c for c in comp if c[0] == "*"]
+            alu = [c for c in comp if c[0] in ("+", "-", "+-")]
+            assert len(mul) == 1 and len(alu) == 1, comp
+            _, d, a, b = mul[0]
+            assert a in range(0, 4) and b in range(4, 8), f"multifunction multiply F{a} * F{b}"
+            texts.append(f"F{d} = F{a} * F{b}")
+            writes.append(d)
+            if self.run:
+                results.append((d, fval("*", a, b)))
+            c = alu[0]
+            if c[0] == "+-":
+                _, d1, d2, a, b = c
+                assert a in range(8, 12) and b in range(12, 16), f"multifunction F{a} +- F{b}"
+                texts += [f"F{d1} = F{a} + F{b}", f"F{d2} = F{a} - F{b}"]
+                writes += [d1, d2]
+                if self.run:
+                    results += [(d1, fval("+", a, b)), (d2, fval("-", a, b))]
+            else:
+                op, d, a, b = c
+                assert a in range(8, 12) and b in range(12, 16), f"multifunction F{a} {op} F{b}"
+                texts.append(f"F{d} = F{a} {op} F{b}")
+                writes.append(d)
+                if self.run:
+                    results.append((d, fval(op, a, b)))
+        load = None
+        for m in moves:
+            if m[0] in ("ld", "st"):
+                i = m[2] if m[0] == "ld" else m[1]
+                if m[0] == "ld":
+                    texts.append(f"F{m[1]} = DM(I{i}, M6)")
+                    writes.append(m[1])
+                    if self.run:
+                        load = (m[1], self.mem.get(self.i[i]))
+                        self.i[i] += 4
+                else:
+                    texts.append(f"DM(I{i}, M6) = F{m[2]}")
+                    if self.run:
+                        self.mem.put(self.i[i], self.r[m[2]])
+                        self.i[i] += 4
+            else:
+                k, i = (m[2], m[3]) if m[0] == "ldk" else (m[1], m[2])
+                k = self.bk(i, k)
+                assert -32 <= k < 32, f"offset {k}: not the 4-byte form"
+                if m[0] == "ldk":
+                    texts.append(f"F{m[1]} = DM({k}, I{i})")
+                    writes.append(m[1])
+                    if self.run:
+                        load = (m[1], self.mem.get(self.i[i] + 4 * k))
+                else:
+                    texts.append(f"DM({k}, I{i}) = F{m[3]}")
+                    if self.run:
+                        self.mem.put(self.i[i] + 4 * k, self.r[m[3]])
+        assert len(writes) == len(set(writes)), f"two results in one register: {texts}"
+        self.e(", ".join(texts) + ";")
+        if comp and not single and not self.run:
+            # a multifunction line must be one mf.verify (and the gate's decode step) can check
+            assert mf.parse(self.lines[-1]) is not None, self.lines[-1]
+        if self.run:
+            for d, v in results:
+                self.r[d] = v
+            if load:
+                self.r[load[0]] = load[1]
+        # the ALU op's result sets the flags a fop_if right after decides on, as a lone fop's
+        # does (the multiplier and a move set none of AZ / AN)
+        alu_d = next((c[1] for c in comp if c[0] in ("+", "-") or (c[0] == "op" and c[3] in ("+", "-"))), None)
+        if alu_d is not None:
+            self._alu = self.r[alu_d] if self.run else 0
 
     # -- structured control flow ------------------------------------------------------
     def _cmp(self, a: int, b: int, kind: str) -> int:
