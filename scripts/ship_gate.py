@@ -179,7 +179,8 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_sampler_relatch.py", "test/test_pools.py",
          "test/test_gate_cache_foreign.py",                 # v0.48: the cache's cross-worktree guard and its control
          "test/test_slides.py",
-         "test/test_libtree.py", "test/test_web_tool.py"]   # v0.40: nested folders (the model, the page's levels)
+         "test/test_libtree.py", "test/test_web_tool.py",   # v0.40: nested folders (the model, the page's levels)
+         "test/test_dsl_merge.py"]                          # the DSL's packing: off by default, the same programs
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
