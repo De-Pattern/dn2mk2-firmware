@@ -183,6 +183,35 @@ traced block's chain run, tagged with the call it happened in). Facts:
 - **Stage 2a on the runner** (2026-11-14, gate part `smp`): a format-2 sample plays (L + R) / 2,
   bit for bit the float32 sample of its mix, and bit-exact to the model.
 
+## Stage 3 built (2026-11-14): the R pass
+
+`dnfw.sampler.stereo` (stereo.asm, L2 0x200a9400; its data 0x200ac000, zeros): each of the seven
+stage call sites is pointed at a wrapper. No stereo slot in use, or a mono voice: straight on to
+the stage. A stereo voice: L's call as stock, then the stage again on R's block with R's state
+(a word changed by anything but the stage follows L; the stage's own words stay R's), the +4 dB
+step read from L's block (unchanged / x the constant). Each extra call copies the six words
+above the wrapper's frame (the body's arguments) and makes its own frame, so calls and returns
+pair as stock's.
+
+- **Runner** (`scripts/sharc_stereo_rpass.py`, M5, one ONESHOT note, voice 0 stereo in test
+  mode: R's block is L's render): after every stage R == L bit for bit (84 of 84 over 12
+  blocks), and every voice's block is bit-identical to the same run without stereo.
+- **The runner's decoder** reads the code at the assembler's boundaries
+  (`scripts/sharc_stereo_walk.py`): a 16-bit add before `I3 = R0` read as one 32-bit
+  instruction at first; the address arithmetic now uses the DSL's own idiom (R12, R13).
+
+## Stage 4, what is next: the voices into the tracks, the tracks into the mix
+
+- After the chain nothing writes a voice's block. It is read at `0x1c2515..0x1c2554`: a loop
+  over the sixteen voices that adds each block, times a per-sample gain (the voice's level and
+  its fade ramp), into its track's buffer (`0x259f68 + track x 128`); the voice's level word
+  from `0x2578b8`, its track from `0x257898`, its block from the pointer table `0x257ea8`. Then
+  the mixer call at `0x1c304d` takes the track buffers to the stereo bus with PAN.
+- So R needs the same: R's block times the same gain into an R track buffer, then to the right
+  side where L's goes to the left. Next: read that loop and the mixer exactly (the gains, the
+  ramp, where PAN is applied), then add R's sum and its side behind `STEREO`, checked on the
+  runner (a stereo voice with R == L must give stock's mix bit for bit).
+
 So the R pass is: after the chain, for each stereo voice, the same eight steps on the R block, each
 stage with a copy of its state whose parameter words follow L's and whose own words are R's (rule:
 a word changed by anything but the stage follows L; what the stage itself writes stays per channel;

@@ -50,6 +50,7 @@ def wrap_memory():
             ad = getattr(address, "value", address)
             if isinstance(ad, int):
                 LOG["r"].setdefault(ad & ~3, []).append(LOG["ctx"])
+                LOG.setdefault("rpc", {}).setdefault(ad & ~3, []).append(LOG.get("pc"))
         return orr(state, address, width, *a, **k)
     for m in list(sys.modules.values()):
         if getattr(m, "_dm_write", None) is ow:
@@ -107,7 +108,7 @@ class StateTracer(m4.ChainTracer):
                 self.notes.append(f"0x1c8fe8: R9 = DM(I2) with I2 = {m4.m2.word_reg(runner, 'I2'):#x}")
             if pc in STAGES and LOG["ctx"] is not None:
                 self.r4s.setdefault(pc, []).append(m4.m2.word_reg(runner, "R4"))
-            if self.show and self.show[0] <= pc < self.show[1] and LOG["ctx"] is not None and pc not in self.shown:
+            if self.show and self.show[0] <= pc < self.show[1] and LOG["ctx"] is not None and pc not in self.shown and len(self.shown) < 4000:
                 self.shown.add(pc)
                 self.lines.append(f"  {pc:#x}  {render(pc, insn)}")
             if pc == CHAIN and self.cur is None and self.runs_seen == 0:
@@ -116,10 +117,10 @@ class StateTracer(m4.ChainTracer):
                 self.site = self.pprev2
                 LOG["ctx"] = "body"
             elif self.site is not None and 1 <= pc - self.site <= 3:
-                LOG["ctx"] = None                  # the chain's run returned: the footprint is whole
+                LOG["ctx"] = "after"               # the chain's run returned: now what follows it
                 self.site = None
                 self.cur = None
-            if self.cur is not None and LOG["ctx"] is not None:
+            if self.cur is not None and LOG["ctx"] not in (None, "after"):
                 inb = BODY[0] <= pc < BODY[1]
                 pin = self.pprev2 is not None and BODY[0] <= self.pprev2 < BODY[1]
                 if pin and not inb:
@@ -173,6 +174,10 @@ def main() -> int:
         for tgt, r4 in tr.r4s.items():
             d = sorted({b - a for a, b in zip(r4, r4[1:])})
             print(f"stage {tgt:#x}: {len(r4)} calls, R4 from {min(r4):#x}, steps {[hex(x) for x in d][:6]}")
+        blk = range(0x804ACF90, 0x804AD010, 4)
+        aw = sorted({q for ad in blk for c, q in zip(LOG["w"].get(ad, []), LOG["wpc"].get(ad, [])) if c == "after"})
+        ar = sorted({q for ad in blk for c, q in zip(LOG["r"].get(ad, []), LOG.get("rpc", {}).get(ad, [])) if c == "after"})
+        print("after the chain, voice 0's block: written at", [hex(x) for x in aw][:20], "read at", [hex(x) for x in ar][:20])
         allw = [ad for ad in LOG["w"] if not 0x2FF000 <= ad < 0x300000]
         print("everything the traced chain run wrote (stack 0x2ff000.. left out):", len(allw), "words")
         for sp in spans(allw):
