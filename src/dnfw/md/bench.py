@@ -44,13 +44,16 @@ def unpack(s: str) -> list[float]:
     return [x * K.Q23 for x in struct.unpack(f"<{len(raw) // 4}i", raw)]
 
 
-_TABLE_MEM: dict[int, dict[int, int]] = {}
+_TABLE_MEM: dict[tuple, dict[int, int]] = {}    # by (tables, the shipped part's base, the ready word)
 
 
 def table_mem(L: K.Layout) -> dict[int, int]:
     """The tables as the DSP holds them: the ROM's from the firmware, and the sine as the
-    DSP's own fill computes it (run once here, through the DSL)."""
-    if L.tables not in _TABLE_MEM:
+    DSP's own fill computes it (run once here, through the DSL). Kept per layout: two layouts
+    may share the tables' address with the shipped part elsewhere or a ready word (the bench's
+    and PERC's live harness do), and each must get its own."""
+    key = (L.tables, L.T[K.SHIPPED], L.ready)
+    if key not in _TABLE_MEM:
         m: dict[int, int] = {}
         data = K.tables_bytes()
         base = L.T[K.SHIPPED]
@@ -64,8 +67,8 @@ def table_mem(L: K.Layout) -> dict[int, int]:
         for _ in range(K.Z_N // K.Z_PER_BLOCK):
             K.table_fill(p, L)
         m.update({a: v for a, v in mem.w.items() if L.tables <= a < L.T[K.SHIPPED]})
-        _TABLE_MEM[L.tables] = m
-    return _TABLE_MEM[L.tables]
+        _TABLE_MEM[key] = m
+    return _TABLE_MEM[key]
 
 
 class Bench:
