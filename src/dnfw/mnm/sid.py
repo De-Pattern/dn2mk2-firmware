@@ -189,16 +189,10 @@ def wave_(p: Prog, L: C.Layout) -> None:
         p.loop_r(0, N, one)
         p.st(W["n4"], 0)
 
-    def plain():
+    def plain():                                # MIX or NOIS (TRI, SAW, PULS: fused)
         C.par(p, 1, 3)                          # WAVE
-        p.fconst(12, 0x199999 * C.Q23)
-        p.if_(1, "LT", 12, lambda: _tri(p, L), lambda: (
-            p.fconst(12, 0x333333 * C.Q23),
-            p.if_(1, "LT", 12, lambda: _saw(p, L), lambda: (
-                p.fconst(12, 0x4CCCCC * C.Q23),
-                p.if_(1, "LT", 12, lambda: _puls(p, L), lambda: (
-                    p.fconst(12, 0x666666 * C.Q23),
-                    p.if_(1, "LT", 12, lambda: _mix(p, L), lambda: _noise(p, L))))))))
+        p.fconst(12, 0x666666 * C.Q23)
+        p.if_(1, "LT", 12, lambda: _mix(p, L), lambda: _noise(p, L))
     p.ifz(1, "NE", ring, plain)
 
 
@@ -232,37 +226,8 @@ def _abs(p: Prog, x: int) -> None:
     p.fop(x, x, "MAX", 13)
 
 
-def _tri(p: Prog, L: C.Layout) -> None:
-    consts, q23, fabs, sat = _held(p)
-    consts()
-    p.fconst(9, 0.5)
-
-    def one():
-        p.ldpost(3, 1)
-        q23(3, 3)
-        fabs(3)
-        p.fop(3, 3, "-", 9)
-        p.fop(3, 3, "+", 3)
-        sat(3)
-        p.stpost(5, 3)
-    p.loop_r(0, N, one)
-    p.st(L.W["n4"], 0)
-
-
-def _saw(p: Prog, L: C.Layout) -> None:
-    consts, q23, fabs, sat = _held(p)
-    consts()
-
-    def one():
-        p.ldpost(3, 1)
-        q23(3, 3)
-        p.stpost(5, 3)
-    p.loop_r(0, N, one)
-    p.st(L.W["n4"], 0)
-
-
-def _puls(p: Prog, L: C.Layout) -> None:
-    W = L.W
+def _thr(p: Prog, L: C.Layout) -> None:
+    """PULS: the sweep moves on a block; F4 = the threshold."""
     C.knob(p, 2, 1)                             # PWAD: the sweep += PWAD << 7 (24 bits)
     p.lsh(2, 2, 7)
     C.st(p, 3, S_PW)
@@ -278,22 +243,80 @@ def _puls(p: Prog, L: C.Layout) -> None:
     _q23(p, 3, 3)
     _abs(p, 3)
     C.sat(p, 3)
-    p.st(W["thr"], 3)
+    p.st(L.W["thr"], 3)
+    p.fpass(4, 3)
 
-    consts, q23, fabs, sat = _held(p)
-    consts()
-    p.ld(4, W["thr"])
-    p.fconst(9, 128.0)
 
-    def one():
-        p.ldpost(3, 1)
-        q23(3, 3)
-        p.fop(3, 3, "-", 4)
-        p.fop(3, 3, "*", 9)
-        sat(3)
-        p.stpost(5, 3)
-    p.loop_r(0, N, one)
+def fused(p: Prog, L: C.Layout, kind: str) -> None:
+    """v0.52 (speed): TRI, SAW, PULS straight from the phases, N samples into IN, without XB and YB:
+    the note's phase (or SYNC's second) a held as a << 8, so the 32-bit add wraps it as `AND M24` did and it
+    is the q23 shift's input already; the second phase (free) moved on N increments at once, mod 2^24 as
+    N masked adds; TRI's |x| as ABS (x is never -0: a FLOAT) and its MAX(-1) left out (2|x| - 1 >= -1).
+    The same words as phases() and the v0.42 wave loops (scripts/mnm_identity.py)."""
+    W = L.W
+    if kind == "PULS":
+        _thr(p, L)
+        p.fconst(9, 128.0)
+        p.fconst(5, -1.0)
+    elif kind == "TRI":
+        p.fconst(9, 0.5)
+    p.iconst(14, -31)
+    p.fconst(15, C.TOP)
+    p.iconst(12, L.IN)
+    p.seti(0, 12)
+    C.st(p, 1, S_B)
+    C.st(p, 3, S_A)
+    p.lsh(3, 3, 8)
+    p.ld(11, W["x0"])
+    p.ld(10, W["minc"])
+    p.iconst(8, M24)
+
+    def wave():
+        p.float_(6, 3, 14)                      # q23(a)
+        if kind == "TRI":
+            p.fabs_(6, 6)
+            p.fop(6, 6, "-", 9)
+            p.fop(6, 6, "+", 6)
+            p.fop(6, 6, "MIN", 15)
+        elif kind == "PULS":
+            p.fop(6, 6, "-", 4)
+            p.fop(6, 6, "*", 9)
+            p.fop(6, 6, "MIN", 15)
+            p.fop(6, 6, "MAX", 5)
+        p.stpost(0, 6)
+
+    def synced():                               # b (S_B) the note, a (S_A) the second, reset at b's wrap
+        p.lsh(10, 10, 8)
+
+        def one():
+            p.iop(1, 11, "+", 1)
+            p.iop(3, 10, "+", 3)
+
+            def wrapped():
+                p.iop(1, 1, "AND", 8)
+                p.iconst(3, 0)
+            p.if_(1, "GT", 8, wrapped, kind="i")
+            wave()
+        p.loop_r(0, N // 2, lambda: (one(), one()), one=0)    # (two samples a round)
+
+    def free():                                 # a the note, b the second
+        p.iconst(12, N)                         # b += N minc, mod 2^24 (the product's low 32 bits)
+        p.mul_ssi(12, 10, 12)
+        p.iop(1, 12, "+", 1)
+        p.iop(1, 1, "AND", 8)
+        p.lsh(11, 11, 8)
+
+        def one():
+            wave()
+            p.iop(3, 11, "+", 3)
+        p.loop_r(0, N // 2, lambda: (one(), one()), one=0)    # (two samples a round)
+    C.par(p, 6, 4)                              # MOD
+    p.fconst(12, 0.5)
+    p.if_(6, "GE", 12, synced, free)
     p.st(W["n4"], 0)
+    p.lsh(3, 3, -8)
+    C.sts(p, S_B, 1)
+    C.sts(p, S_A, 3)
 
 
 def _mix(p: Prog, L: C.Layout) -> None:
@@ -419,8 +442,20 @@ def half(p: Prog, L: C.Layout) -> None:
             p.iconst(12, M24)
             p.if_(1, "GT", 12, lambda: p.iconst(1, M24), kind="i")
         p.st(W[d], 1)
-    phases(p, L)
-    wave_(p, L)
+    C.knob(p, 1, 4)                             # RING or R+S: the phases, then the ring
+    p.iconst(12, 32)
+    p.iop(1, 1, "AND", 12)
+
+    C.par(p, 2, 3)                              # WAVE: MIX or NOIS too
+    p.fconst(12, 0x4CCCCC * C.Q23)
+    p.if_(2, "GE", 12, lambda: p.iconst(1, 1))
+
+    def plain():                                # TRI, SAW, PULS
+        p.fconst(12, 0x199999 * C.Q23)
+        p.if_(2, "LT", 12, lambda: fused(p, L, "TRI"), lambda: (
+            p.fconst(12, 0x333333 * C.Q23),
+            p.if_(2, "LT", 12, lambda: fused(p, L, "SAW"), lambda: fused(p, L, "PULS"))))
+    p.ifz(1, "NE", lambda: (phases(p, L), wave_(p, L)), plain)
     if OS == 12:
         coefs(p, L, COEF, GAIN, 10, 6)
     else:                                       # v0.51: DPRO-WAVE's decimator (4:1)
