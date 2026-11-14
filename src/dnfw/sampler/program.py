@@ -189,7 +189,7 @@ def tofloat(p: Prog, d: int, a: int, scale: float = 1.0) -> None:
 
 def voice(p: Prog, L: Layout, t: int | None = None) -> None:
     C = L.C
-    if p.run:
+    if p.run and t is not None:               # (stereo_voice's model: C["t"] set already)
         p.iconst(9, t)
         p.st(C["t"], 9)
     p.ld(9, C["t"])
@@ -346,6 +346,9 @@ def buffer(p: Prog, L: Layout) -> None:
     p.seti(1, 12)
     p.ldi(0, 0, 1)
     p.seti(4, 0, "the slot's buffer")
+    if SM.STEREO:                             # stage 2b: R's run writes R's block
+        p.ld(12, ST.STBUF)
+        p.ifz(12, "NE", lambda: p.seti(4, 12, "R's block"))
 
 
 def start(p: Prog, L: Layout) -> None:
@@ -935,7 +938,13 @@ def fetch(p: Prog, d: int, k: int) -> None:
         p.iconst(12, -32)
         p.float_(d, d, 12)               # L / 65536
         p.float_(13, 13, 12)             # R / 65536
-        p.fop(d, d, "+", 13)             # (L + R) / 2, exact
+        p.fop(8, d, "+", 13)             # (L + R) / 2, exact
+        p.ld(12, ST.STW_L)               # stage 2b: + WL L + WR R (0 0: the mix; 1 -1: L; -1 1: R)
+        p.fop(d, d, "*", 12)
+        p.fop(8, 8, "+", d)
+        p.ld(12, ST.STW_R)
+        p.fop(13, 13, "*", 12)
+        p.fop(d, 8, "+", 13)             # every step exact (17-bit values)
 
     def nonzero():
         p.iconst(12, SM.FMT_I16S)
@@ -1077,13 +1086,19 @@ def _tick(p: Prog, L: Layout) -> None:
             p.seti(1, 12)
             p.iconst(8, -32)
             p.iconst(14, 0xFFFF0000 - (1 << 32))
+            p.ld(0, ST.STW_L)            # stage 2b: the weights (0 0 the mix; 1 -1 L; -1 1 R)
+            p.ld(2, ST.STW_R)
             for k in range(POLY_TAPS):
                 p.ldpost(5, 1)
                 p.iop(6, 5, "AND", 14)   # R on top
                 p.lsh(5, 5, 16)          # L on top
                 p.float_(5, 5, 8)
                 p.float_(6, 6, 8)
-                p.fop(5, 5, "+", 6)      # (L + R) / 2
+                p.fop(1, 5, "+", 6)      # (L + R) / 2
+                p.fop(5, 5, "*", 0)
+                p.fop(1, 1, "+", 5)
+                p.fop(6, 6, "*", 2)
+                p.fop(5, 1, "+", 6)
                 p.ldi(6, k, 3)
                 p.fop(5, 5, "*", 6)
                 p.fop(7, 7, "+", 5)
@@ -3055,6 +3070,7 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     recorder(p, L)
     probe(p, L)
     tdm_tx(p, L)
+    stereo_rblk_clear(p)
     p.iconst(0, 0)
     p.st(PP.MNM_SCRATCH + PP.SMP_I, 0)
     top = p.label("slot")
@@ -3101,13 +3117,15 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
         p.seti(2, 12)
         p.iconst(0, 0)
         vs(p, "on", 0)
-    G.around(p, L.C["t"], G.COST_SMP, PP.BUFFERS, lambda: voice(p, L),   # v0.27: if it fits in the frame
+    G.around(p, L.C["t"], G.COST_SMP, PP.BUFFERS, lambda: stereo_voice(p, L),   # v0.27: if it fits in the frame
              struck=G.STRUCK, stop=stop)
     p.jump("", nxt)
     if any(ty not in ours for ty in SM.TYPES):
         p.place(mute)
         silence(p, L)
+        stereo_free_t(p, L)
     p.place(other)                           # not a sample machine: its voice off
+    stereo_free_t(p, L)
     p.ld(9, L.C["t"])
     p.lsh(12, 9, 7)
     p.iconst(11, L.state)
@@ -3129,6 +3147,17 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.raw(".wr_smp..end:")
     p.raw("      .type wr_smp.,STT_FUNC;")
     return p.text()
+
+
+def run_stereo_voice(L: Layout, t: int, mtype: int, mem):
+    """stereo stage 2b: the model of stereo_voice for slot T (run mode)"""
+    p = Prog("run", mem=mem)
+    p.iconst(0, mtype)
+    p.st(L.C["type"], 0)
+    p.iconst(9, t)
+    p.st(L.C["t"], 9)
+    stereo_voice(p, L)
+    return p, mem
 
 
 def run_voice(L: Layout, read, t: int, mtype: int, mem=None):
@@ -3309,3 +3338,276 @@ def pvmix_run(L: Layout, mem) -> Prog:
     p = Prog("run", mem=mem)
     pvmix(p, L)
     return p
+
+
+# -- stereo stage 2b: a stereo voice rendered twice (docs/stereo-assessment.md) --------------
+from . import stereo as ST                    # noqa: E402
+
+VOICE_WORDS, RELATCH_WORDS = 32, 4
+
+
+def _addr(p: Prog, L: Layout, i: int, base: int, shift: int) -> None:
+    """I<i> = BASE + t << SHIFT. Clobbers R9, R11, R12."""
+    p.ld(9, L.C["t"])
+    p.lsh(12, 9, shift)
+    p.iconst(11, base)
+    p.iop(12, 11, "+", 12)
+    p.seti(i, 12)
+
+
+def _copy_words(p: Prog, n: int) -> None:
+    """N words from I1 on to I3 on (I1 I3 move on). Clobbers R0, R12."""
+    p.loop(ST.STCTR, n, lambda: (p.ldpost(0, 1), p.stpost(3, 0)))
+
+
+def _own(p: Prog, L: Layout, snap: int, back: bool) -> None:
+    """the voice's own words (its state, its decimator, its relatch words) to SNAP, or back
+    from it (BACK). Clobbers R0, R9, R11, R12, I1, I3."""
+    parts = ((L.state, 7, VOICE_WORDS), (L.dec, None, DEC_WORDS), (RELATCH, 4, RELATCH_WORDS))
+    at = snap
+    for base, shift, n in parts:
+        if shift is None:                         # the decimator: t x 48
+            p.ld(9, L.C["t"])
+            p.iconst(12, DEC_STRIDE)
+            p.mul_ssi(12, 9, 12)
+            p.iconst(11, base)
+            p.iop(12, 11, "+", 12)
+            p.seti(1 if not back else 3, 12)
+        else:
+            _addr(p, L, 1 if not back else 3, base, shift)
+        p.iconst(12, at)
+        p.seti(3 if not back else 1, 12)
+        _copy_words(p, n)
+        at += 4 * n
+
+
+def _dec_with(p: Prog, L: Layout, to_rdec: bool) -> None:
+    """the voice's decimator words to or from its slot's RDEC. Clobbers R0, R9, R11, R12, I1, I3."""
+    p.ld(9, L.C["t"])
+    p.iconst(12, DEC_STRIDE)
+    p.mul_ssi(12, 9, 12)
+    p.iconst(11, L.dec)
+    p.iop(12, 11, "+", 12)
+    p.seti(1 if to_rdec else 3, 12)
+    p.ld(9, ST.STSL)
+    p.iconst(12, DEC_STRIDE)
+    p.mul_ssi(12, 9, 12)
+    p.iconst(11, ST.RDEC)
+    p.iop(12, 11, "+", 12)
+    p.seti(3 if to_rdec else 1, 12)
+    _copy_words(p, DEC_WORDS)
+
+
+def _weights(p: Prog, wl: float, wr: float) -> None:
+    p.fconst(0, wl)
+    p.st(ST.STW_L, 0)
+    p.fconst(0, wr)
+    p.st(ST.STW_R, 0)
+
+
+def _slot_of_t(p: Prog, L: Layout) -> None:
+    """STSL = the stereo slot playing voice t, else -1. Clobbers R0, R1, R9, R12."""
+    p.iconst(0, -1)
+    p.st(ST.STSL, 0)
+    p.ld(9, L.C["t"])
+    for sl in range(ST.SLOTS):
+        def mine(sl=sl):
+            p.ld(1, ST.VOICE + 4 * sl)
+            p.if_(1, "EQ", 9, lambda: (p.iconst(0, sl), p.st(ST.STSL, 0)), kind="i")
+        p.ld(0, ST.laddr(sl, 0))
+        p.ifz(0, "NE", mine)
+
+
+def _assign(p: Prog, L: Layout) -> None:
+    """a free slot for voice t (STSL; -1 at the cap): its chain states and voice, R's
+    decimator from L's, ANY + 1. Clobbers R0..R2, R9, R11, R12, I1, I3."""
+    for sl in range(ST.SLOTS):                     # structured (the run model takes no jumps)
+        def take(sl=sl):
+            p.ld(9, L.C["t"])
+            _site, _tgt, base, stride = ST.STAGES[0]  # in use: the first stage's state (the
+            p.iconst(12, stride)                    # wrappers find the rest from VOICE)
+            p.mul_ssi(1, 9, 12)
+            p.iconst(12, base)
+            p.iop(1, 12, "+", 1)
+            p.st(ST.laddr(sl, 0), 1)
+            p.st(ST.VOICE + 4 * sl, 9)
+            p.iconst(0, sl)
+            p.st(ST.STSL, 0)
+            p.ld(0, ST.ANY)
+            p.iconst(12, 1)
+            p.iop(0, 12, "+", 0)
+            p.st(ST.ANY, 0)
+            p.iconst(12, ST.SNAP_PRE + 4 * VOICE_WORDS)   # R's decimator starts as L's did
+            p.seti(1, 12)
+            p.ld(9, ST.STSL)
+            p.iconst(12, DEC_STRIDE)
+            p.mul_ssi(12, 9, 12)
+            p.iconst(11, ST.RDEC)
+            p.iop(12, 11, "+", 12)
+            p.seti(3, 12)
+            _copy_words(p, DEC_WORDS)
+
+        def free_here(sl=sl):
+            p.ld(0, ST.STSL)
+            p.ifz(0, "LT", take)
+        p.ld(0, ST.laddr(sl, 0))
+        p.ifz(0, "EQ", free_here)
+
+
+def _free(p: Prog) -> None:
+    """slot STSL (>= 0) free: its chain states 0, ANY - 1. Clobbers R0, R1, R9, R12."""
+    p.ld(9, ST.STSL)
+    for sl in range(ST.SLOTS):
+        def clear(sl=sl):
+            p.iconst(0, 0)
+            p.st(ST.laddr(sl, 0), 0)
+            p.ld(0, ST.ANY)
+            p.iconst(12, 1)
+            p.iop(0, 0, "-", 12)
+            p.st(ST.ANY, 0)
+        p.iconst(1, sl)
+        p.if_(9, "EQ", 1, clear, kind="i")
+
+
+def stereo_rblk_clear(p: Prog) -> None:
+    """stereo: every slot's R block zeroed at the block's start, while any slot is in use, so
+    a voice the guard leaves out (its L block zeroed, ...guard.around) has a silent R too, not
+    its last block again. Clobbers R0, R12, I3."""
+    if not SM.STEREO:
+        return
+
+    def clear():
+        p.iconst(12, ST.RBLK)
+        p.seti(3, 12)
+        p.loop(ST.STCTR, ST.SLOTS * 32, lambda: (p.iconst(0, 0), p.stpost(3, 0)))
+    p.ld(0, ST.ANY)
+    p.ifz(0, "NE", clear)
+
+
+def stereo_free_t(p: Prog, L: Layout) -> None:
+    """voice t is no sample machine now: its stereo slot, if any, free"""
+    if not SM.STEREO:
+        return
+    _slot_of_t(p, L)
+    p.ld(0, ST.STSL)
+    p.ifz(0, "GE", lambda: _free(p))
+
+
+def stereo_voice(p: Prog, L: Layout) -> None:
+    """voice(), and for a stereo sample (format 2) with a slot (at most ST.SLOTS): L from the
+    left channel into the voice's block, then R from the right into RBLK[slot], from the same
+    starting words, R with its own decimator; then the voice's words as L's run left them.
+    Past the cap, or a mono sample: one run, the mix (stage 2a). A voice that stops playing a
+    stereo sample frees its slot."""
+    if not SM.STEREO:
+        voice(p, L)
+        return
+    C = L.C
+    _slot_of_t(p, L)
+    _own(p, L, ST.SNAP_PRE, back=False)
+    _weights(p, 0.0, 0.0)
+    p.iconst(0, 1)
+    p.st(ST.STMIX, 0)
+
+    def l_only():                                 # a slot already: L from the left channel
+        _weights(p, 1.0, -1.0)
+        p.iconst(0, 0)
+        p.st(ST.STMIX, 0)
+    p.ld(0, ST.STSL)
+    p.ifz(0, "GE", l_only)
+    p.iconst(0, 0)
+    p.st(ST.STPASS, 0)
+
+    def state_i2():
+        p.ld(9, C["t"])
+        p.lsh(12, 9, 7)
+        p.iconst(11, L.state)
+        p.iop(12, 11, "+", 12)
+        p.seti(2, 12)
+
+    def setp(k):
+        p.iconst(0, k)
+        p.st(ST.STPASS, 0)
+
+    def after_first():                            # pass 0 ran: what next (3, 4 or 5)
+        def stereo():
+            p.ld(0, ST.STSL)
+            p.ifz(0, "LT", lambda: _assign(p, L))
+            setp(3)                               # past the cap: the mix it read stands
+
+            def have():
+                setp(4)
+                p.ld(0, ST.STMIX)
+                p.ifz(0, "NE", lambda: setp(5))   # its first block read the mix: L again
+            p.ld(0, ST.STSL)
+            p.ifz(0, "GE", have)
+
+        def mono():
+            setp(3)
+            p.ld(0, ST.STSL)
+            p.ifz(0, "GE", lambda: _free(p))
+        v(p, 0, "fmt")
+        p.iconst(12, SM.FMT_I16S)
+        p.if_(0, "EQ", 12, stereo, mono, kind="i")
+
+    def r_done():                                 # pass 2 (R) ran
+        state_i2()
+        _dec_with(p, L, True)                     # R's decimator kept
+        _own(p, L, ST.SNAP_POST, back=True)       # the voice as L's run left it
+        p.iconst(0, 0)
+        p.st(ST.STBUF, 0)
+        setp(3)
+
+    def after():
+        state_i2()
+
+        def not_r():
+            p.ld(0, ST.STPASS)
+            p.ifz(0, "EQ", after_first)
+            p.ld(0, ST.STPASS)
+            p.iconst(12, 1)
+            p.if_(0, "EQ", 12, lambda: setp(4), kind="i")   # L again ran: R next
+            p.ld(0, ST.STPASS)
+            p.iconst(12, 5)
+
+            def again():
+                _own(p, L, ST.SNAP_PRE, back=True)
+                _weights(p, 1.0, -1.0)
+                setp(1)
+            p.if_(0, "EQ", 12, again, kind="i")
+            p.ld(0, ST.STPASS)
+            p.iconst(12, 4)
+
+            def r_setup():
+                _own(p, L, ST.SNAP_POST, back=False)  # L's run's words
+                _own(p, L, ST.SNAP_PRE, back=True)    # R starts where L did
+                _dec_with(p, L, False)                # with its own decimator
+                _weights(p, -1.0, 1.0)
+                p.ld(9, ST.STSL)
+                p.lsh(12, 9, 7)
+                p.iconst(11, ST.RBLK)
+                p.iop(12, 11, "+", 12)
+                p.st(ST.STBUF, 12)
+                setp(2)
+            p.if_(0, "EQ", 12, r_setup, kind="i")
+        p.ld(0, ST.STPASS)
+        p.iconst(12, 2)
+        p.if_(0, "EQ", 12, r_done, not_r, kind="i")
+
+    # one copy of voice(): at most three passes through it (L, L again, R)
+    top = p.label("stp")
+    p.place(top)
+    if p.run:
+        while True:
+            voice(p, L)
+            after()
+            if p.mem.get(ST.STPASS) == 3:
+                break
+    else:
+        voice(p, L)
+        after()
+        p.ld(0, ST.STPASS)
+        p.iconst(12, 3)
+        p.e("COMP(R0, R12);")
+        p.jump("NE", top)
+    _weights(p, 0.0, 0.0)

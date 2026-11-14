@@ -118,7 +118,7 @@ LABEL_CHUNK = b"ANZL"
 
 def label_text() -> str:
     from .modversion import mod_version
-    return f"MOD {mod_version()}"
+    return f"MOD {mod_version().upper()}"          # the 3 x 5 font has capitals only (0.54-T1)
 
 
 def label_pixels(text: str | None = None) -> set[tuple[int, int]]:

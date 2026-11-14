@@ -8,7 +8,8 @@ stores at the sample browser's top (csrc/sampler/smp_page.c, MOD_VERSION from th
 renderer's header). Elektron's own OS version string is never touched (Transfer and the
 updater read it).
 
-A build without the file, or with anything but DIGITS.DIGITS in it, fails.
+A build without the file, or with anything but DIGITS.DIGITS in it, fails. A test build
+(owner, 2026-11-14: CLAUDE.md, "Test builds") is DIGITS.DIGITS-tN, e.g. `0.54-t1`.
 """
 
 from __future__ import annotations
@@ -29,8 +30,9 @@ def mod_version() -> str:
     except (OSError, UnicodeDecodeError) as e:
         raise VersionError(f"{FILE}: the mod's version file cannot be read ({e}): the build needs it") from None
     v = text.strip()
-    if not re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}", v) or text not in (v, v + "\n"):
-        raise VersionError(f"{FILE}: {text!r} is not a version like 0.39 (one line, digits, a dot, digits)")
+    if not re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}(-t[0-9]{1,2})?", v) or text not in (v, v + "\n"):
+        raise VersionError(f"{FILE}: {text!r} is not a version like 0.39 or a test build's 0.54-t1 "
+                           "(one line, digits, a dot, digits)")
     return v
 
 

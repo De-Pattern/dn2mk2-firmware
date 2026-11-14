@@ -107,7 +107,7 @@ MD_DELAY_DDR = 0x82200000                    # 16 slots x core.PI_DELAY_STRIDE
 # the sample machines (v0.13, docs/sampler.md): code in L2 after PERC's span, voices and
 # scratch in L1 (Waverider's former loop room), the sample pool in DDR from 64 MB in
 SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200e3000 (v0.24; 0x200d4000 v0.17..v0.23, 0x200d0000 until v0.16)
-SMP_L2_SPAN = 0x6000                         # v0.28: 24 KB (the re-latch took the code past 19 KB; 20 KB v0.18..v0.27, 32 KB until v0.16)
+SMP_L2_SPAN = 0x7000                         # stereo: 28 KB, to the L2 window's end (0x200ea000, _check_l2); 24 KB v0.28..v0.53
 SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbf1800 (v0.24; 0xbea000 v0.17..v0.23)
 PVMIX_L2_LOAD = SMP_L2_LOAD + SMP_L2_SPAN - 0x400           # v0.25: pvmix.asm (wr_pvmix)
 PVMIX_SW = 0xB80000 + (PVMIX_L2_LOAD - 0x20000000) // 2
@@ -413,15 +413,16 @@ def stereo_object() -> bytes:
 
 
 def stereo_jumps() -> list[tuple[int, bytes, bytes]]:
-    """(call site sw, the stock CJUMP there, ours): each of the chain's seven stage calls,
-    pointed at its wrapper in stereo.asm"""
+    """(call site sw, the stock CJUMP there, ours): each of the chain's stage calls (ST.SITES),
+    pointed at its stage's wrapper in stereo.asm"""
     from ..sampler import stereo as ST
     spec = _code()
     out = []
     jumps = spec["stereo_jumps"]
-    if len(jumps) != len(ST.STAGES) + 3:
-        raise DspError("the stereo jumps are not the seven stage calls and the three hooks")
-    for (site, target, _b, _s), j in zip(ST.STAGES, jumps, strict=False):
+    if len(jumps) != len(ST.SITES) + 3:
+        raise DspError("the stereo jumps are not the stage calls and the three hooks")
+    for (site, k), j in zip(ST.SITES, jumps, strict=False):
+        target = ST.STAGES[k][1]
         stock = sharc_object.load_bytes(bytes.fromhex(f"180400{target:06x}"))
         ours = sharc_object.load_bytes(bytes.fromhex(j["object_parcels_be"]))
         if int(j["at_sw"], 16) != site or len(ours) != len(stock):
@@ -430,7 +431,7 @@ def stereo_jumps() -> list[tuple[int, bytes, bytes]]:
     # stage 4: the sum hook displaces one 48-bit load (the hook performs it)
     for (site, stock_hex), j in zip(((ST.MID_SITE, "010f804f0000"), (ST.SUM_PRE_SITE, "040f3a418e06"),
                                      (ST.SUM_POST_SITE, "120f250068b7")),
-                                    jumps[len(ST.STAGES):], strict=True):
+                                    jumps[len(ST.SITES):], strict=True):
         ours = sharc_object.load_bytes(bytes.fromhex(j["object_parcels_be"]))
         if int(j["at_sw"], 16) != site or len(ours) != 6:
             raise DspError(f"the stereo sum hook for sw {site:#x} is not one JUMP there")

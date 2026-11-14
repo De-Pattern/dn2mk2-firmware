@@ -72,6 +72,11 @@ from dnfw.perc import program as PP                             # noqa: E402
 from dnfw.sampler import live as SL                             # noqa: E402
 from dnfw.sampler import machines as SM                         # noqa: E402
 from dnfw.sampler import program as SP                          # noqa: E402
+from dnfw.sampler import stereo as ST                           # noqa: E402
+
+
+def s32w(x: int) -> int:
+    return x - (1 << 32) if x & 0x80000000 else x
 from dnfw.md import core as MDK                                 # noqa: E402
 from dnfw.waverider import frame as FR                         # noqa: E402
 from dnfw.waverider import voice as V                          # noqa: E402
@@ -273,12 +278,19 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                 ty = frame_word(r.state, FR.header_offset(FR.MACHINE, t))
                 if ty in SMP_RENDERED:
                     st = r.state
-                    p, mem = SP.run_voice(SMP_L, lambda a, st=st: m2.word(st, a) or 0, t, ty)
+                    if SM.STEREO:               # stereo 2b: the program's own path (L, then R)
+                        from dnfw.perc.dsl import Mem
+                        p, mem = SP.run_stereo_voice(SMP_L, t, ty, Mem(lambda a, st=st: m2.word(st, a) or 0))
+                        rsl = s32w(mem.get(ST.STSL))
+                    else:
+                        p, mem = SP.run_voice(SMP_L, lambda a, st=st: m2.word(st, a) or 0, t, ty)
+                        rsl = -1
                     buf = m2.word(st, PP.BUFFERS + 4 * t) or 0
                     model[t] = {"type": ty, "out": [mem.get(buf + 4 * k) for k in range(BLOCK)],
                                 "state": [mem.get(SMP_L.state + SP.STATE_STRIDE * t + 4 * k)
-                                          for k in range(SP.STATE_STRIDE // 4)],
-                                "steps": p.steps}
+                                          for k in range(SP.STATE_STRIDE // 4)]
+                                + ([mem.get(ST.RBLK + 4 * BLOCK * rsl + 4 * k) for k in range(BLOCK)] if rsl >= 0 else []),
+                                "rsl": rsl, "steps": p.steps}
             tap["smp_model"] = model
 
         def at_after_smp(r):
@@ -287,8 +299,10 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                 return
             tap["smp_dsp"] = {t: {"out": [m2.word(r.state, tap["bufs"][t] + 4 * k) or 0 for k in range(BLOCK)],
                                   "state": [m2.word(r.state, SMP_L.state + SP.STATE_STRIDE * t + 4 * k) or 0
-                                            for k in range(SP.STATE_STRIDE // 4)]}
-                              for t in tap.get("smp_model", {})}
+                                            for k in range(SP.STATE_STRIDE // 4)]
+                                  + ([m2.word(r.state, ST.RBLK + 4 * BLOCK * m["rsl"] + 4 * k) or 0 for k in range(BLOCK)]
+                                     if m["rsl"] >= 0 else [])}
+                              for t, m in tap.get("smp_model", {}).items()}
 
         def at_resume(r):
             tap["machine"] = [m2.floats(r.state, tap["bufs"][t], BLOCK) for t in range(16)]
@@ -349,6 +363,7 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                                "state_mismatches": sum(1 for x, y in zip(model[t]["state"], got.get(t, {}).get("state", [])) if x != y)
                                + (0 if t in got else SP.STATE_STRIDE // 4),
                                "out": [V.bits_f32(x) for x in got.get(t, {}).get("out", [])],
+                               "rout": [V.bits_f32(x) for x in got.get(t, {}).get("state", [])[SP.STATE_STRIDE // 4:]],
                                "model_steps": model[t]["steps"]} for t in model})
         instr += res[2]
         state = r
@@ -511,7 +526,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,stereo,link,rec,flexlevel,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -629,6 +644,15 @@ def main(argv=None):
             show(sss)
             print("     peaks:", sss["numbers"]["peaks"])
             del sss
+            gc.collect()
+
+        if "stereo" in steps and SM.STEREO:
+            print("\nstep 3st: stereo samples through stock's chain (stages 2b-4)")
+            sst = step_stereo(warm(), sound, machines)
+            results["3st_stereo"] = {k: v for k, v in sst.items() if k != "runs"}
+            show(sst)
+            print("     ", {k: v for k, v in sst["numbers"].items() if k != "exact"})
+            del sst
             gc.collect()
 
         if "smp" in steps:
@@ -1842,6 +1866,11 @@ def smp_series(run, t) -> list[float]:
     return [x for blk in run["smp"] if t in blk for x in blk[t]["out"]]
 
 
+def smp_rseries(run, t) -> list[float]:
+    """stereo 2b: voice T's R block, block after block (32 zeros where it had no slot: no R)"""
+    return [x for blk in run["smp"] if t in blk for x in (blk[t].get("rout") or [0.0] * BLOCK)]
+
+
 def smp_exact(run) -> tuple[int, int, int]:
     n = o = st = 0
     for blk in run["smp"]:
@@ -1850,6 +1879,118 @@ def smp_exact(run) -> tuple[int, int, int]:
             o += v["out_mismatches"]
             st += v["state_mismatches"]
     return n, o, st
+
+
+def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
+    """stereo (docs/stereo-assessment.md, stages 2b-4), end to end through stock's chain: KICK
+    as an int16 mono sample, as a stereo sample with R = L, with R silent, and with R = -L/2,
+    and each channel alone as mono, on ONESHOT, with the sound's parameters moving every
+    block (indices 66..92 and 95..99 swept, TUNE stepping), the same frames in every run. Checks: every
+    run bit-exact to the model (R's block included); R = L renders L and R each bit for bit
+    the mono sample, and every track buffer after the voices-into-tracks sum (both halves of
+    all 16 tracks) and the main mix are bit for bit the mono run's, every block; R silent
+    leaves every L half the mono run's while track 0's R half differs (the negative: R's
+    path is live); R = -L/2 puts the mono R sample's block in R's slot."""
+    ONE = SM.TYPE_OF["ONESHOT"]
+    kpcm = [max(-32767, min(32767, round(x * 32767))) for x in SL.test_samples()[0]]
+    rate_w = struct.unpack("<I", struct.pack("<f", SL.test_rates()[0]))[0]
+    at = dsp.SMP_POOL_DDR + 0x100000
+
+    def mono(pcm):
+        pcm = pcm + [0] * (len(pcm) & 1)
+        return [(pcm[k] & 0xFFFF) | (pcm[k + 1] & 0xFFFF) << 16 for k in range(0, len(pcm), 2)]
+
+    def st(lp, rp):
+        return [(a & 0xFFFF) | (b & 0xFFFF) << 16 for a, b in zip(lp, rp)]
+
+    base = {**machines.get(1, {}), **sound}
+
+    def moving(b):                          # the sound's indices 66..92, 95..99 moving about their
+        w = {}                              # defaults (+-0x0c00), TUNE stepping
+        for i in [*range(66, 93), *range(95, 100)]:
+            if i in base:
+                d = ((i * 7 + b * 3) % 7 - 3) * int(os.environ.get("ST_D", "0x200"), 0)
+                w[i] = max(0, min(0x7F00, base[i] + d)) & 0xFF00
+        return {**w, **smp_words({SM.TUNE_REC: 60 + 3 * (b % 5)})}
+
+    def fb_of(cf):
+        def fb(b):
+            f = base_frame(sound, machines, t0=ONE, overrides=moving(b), trigger=b == 1)
+            f.header(FR.FILTER, 0, FR.FILTER_TO_DSP[cf])
+            return f.to_bytes()
+        return fb
+
+    def run(words, fmt, cf=0):
+        fb = fb_of(cf)
+        tb, mix = [], []
+        done = []
+
+        def poke(r):
+            if not done:
+                for k, w in enumerate(words):
+                    m2.poke(r.state, at + 4 * k, w)
+                done.append(1)
+            for k, w in enumerate((at, len(kpcm), rate_w, fmt)):
+                m2.poke(r.state, dsp.SMP_POOL_DDR + 8 + 4 * k, w)
+        hooks = {dsp.PERC_SW: poke,
+                 ST.SUM_POST_SITE + 3: lambda r: tb.append([m2.word(r.state, ST.TRACK_BUF + 4 * i) or 0
+                                                            for i in range(16 * 64)])}
+        r = run_blocks(init, fb, blocks, extra_hooks=hooks)
+        r["odd"] = (m2.word(r["state"].state, ST.ODD) or 0) if r.get("state") is not None else None
+        r.pop("state", None)
+        r["tb"] = tb
+        return r
+    rpcm = [-(x // 2) for x in kpcm]
+    runs = {"mono": run(mono(kpcm), SM.FMT_I16), "mono_r": run(mono(rpcm), SM.FMT_I16),
+            "same": run(st(kpcm, kpcm), SM.FMT_I16S), "lonly": run(st(kpcm, [0] * len(kpcm)), SM.FMT_I16S),
+            "half": run(st(kpcm, rpcm), SM.FMT_I16S)}
+    # every filter type (FR.FILTER_NAMES), R = L against mono: the stereo pass, or for the comb
+    # filters (0xb81526, not wrapped) the fallback to mono, leaves every track buffer as mono's
+    for cf in range(1, len(FR.FILTER_NAMES)):
+        runs[f"mono_f{cf}"] = run(mono(kpcm), SM.FMT_I16, cf)
+        runs[f"same_f{cf}"] = run(st(kpcm, kpcm), SM.FMT_I16S, cf)
+    ok = all(r["ok"] for r in runs.values())
+    exact = {k: smp_exact(r) for k, r in runs.items() if r["ok"]}
+    m, sm, lo, hf = runs["mono"], runs["same"], runs["lonly"], runs["half"]
+    pairs = [("mono", "same")] + [(f"mono_f{cf}", f"same_f{cf}") for cf in range(1, len(FR.FILTER_NAMES))]
+    lh = lambda tb: [w[t * 64 + i] for w in tb for t in range(16) for i in range(32)]        # noqa: E731
+    rh0 = lambda tb: [w[32 + i] for w in tb for i in range(32)]                               # noqa: E731
+    n = {"exact": exact, "tb_blocks": {k: len(r.get("tb", [])) for k, r in runs.items()},
+         "peak_mono": V.peak(smp_series(m, 0)) if m["ok"] else None,
+         "peak_r_half": V.peak(smp_rseries(hf, 0)) if hf["ok"] else None,
+         "same_tb_words_differing": sum(1 for a, b in zip(sm.get("tb", []), m.get("tb", [])) for x, y in zip(a, b) if x != y),
+         "same_l_vs_mono": smp_series(sm, 0) == smp_series(m, 0) if ok else None,
+         "same_r_vs_mono": smp_rseries(sm, 0) == smp_series(m, 0) if ok else None,
+         "lonly_r_half_words_differing": sum(1 for a, b in zip(rh0(lo.get("tb", [])), rh0(m.get("tb", []))) if a != b),
+         "odd_by_run": {k: r.get("odd") for k, r in runs.items()},
+         "track0_peak_after_sum": {k: max((abs(x) for blk in r.get("buffers", [])[1:] for x in blk[0]
+                                             if x == x and abs(x) < 1e6), default=0.0) for k, r in runs.items()},
+         "filters_tb_words_differing": {b: sum(1 for x, y in zip(runs[b].get("tb", []), runs[a].get("tb", []))
+                                               for p_, q in zip(x, y) if p_ != q) for a, b in pairs}}
+    checks = {
+        "stereo: every run returns every block, every sample track bit-exact to the model (R's block included)":
+            ok and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for v in exact.values()),
+        "stereo: R = L renders L and R each bit for bit the mono sample, which sounds (peak > 0.05)":
+            ok and n["peak_mono"] > 0.05 and n["same_l_vs_mono"] and n["same_r_vs_mono"]
+            and len(smp_rseries(sm, 0)) == len(smp_series(m, 0)),
+        "stereo: R = L leaves every track buffer after the sum (16 tracks, L and R halves) and the "
+        "main mix bit for bit the mono run's, every block, with the parameters moving":
+            ok and len(sm["tb"]) == len(m["tb"]) == blocks and n["same_tb_words_differing"] == 0
+            and sm["buffer_bits"] == m["buffer_bits"],
+        "stereo: R = L, every filter type (the comb filters by the fallback to mono), random sounds moving: "
+        "every track buffer after the sum and the main mix bit for bit mono's (track 0 sounding, > 0.0005), every block; "
+        "an unrecognised change of L's block (ODD) only on the comb filters":
+            ok and all(n["track0_peak_after_sum"][a] > 0.0005 for a, _b in pairs)
+            and all(len(runs[b]["tb"]) == blocks and runs[b]["tb"] == runs[a]["tb"]
+                       and runs[b]["buffer_bits"] == runs[a]["buffer_bits"] for a, b in pairs)
+            and all(not runs[b]["odd"] for a, b in pairs if "Comb" not in FR.FILTER_NAMES[int(b[-1]) if b[-1].isdigit() else 0]),
+        "stereo: R silent leaves every track's L half the mono run's; track 0's R half differs (R's path is live)":
+            ok and lh(lo["tb"]) == lh(m["tb"]) and n["lonly_r_half_words_differing"] > 0,
+        "stereo: R = -L/2 renders R's slot block bit for bit the mono -L/2 sample (sounds, > 0.02)":
+            ok and n["peak_r_half"] > 0.02 and smp_rseries(hf, 0) == smp_series(runs["mono_r"], 0)
+            and smp_series(hf, 0) == smp_series(m, 0),
+    }
+    return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
 
 
 def step_slicestatic(init, sound, machines, blocks) -> dict:
@@ -1967,17 +2108,22 @@ def step_smp(init, sound, machines, blocks) -> dict:
     # (and on a SLICE track, with the bad entry claiming slices: none is read; the review's case)
     runs["bad_slices"] = rb(init, frames(SM.TYPE_OF["SLICE"], smp_words({SM.SAMP_REC: 3, SM.SLICE_REC: 6})), blocks,
                             extra_hooks=bad_entry(0x80000000, 48000, 1 | 8 << 8))
-    # stereo stage 2a (docs/stereo-assessment.md): KICK as a stereo sample (format 2, int16 L R:
-    # L the kick, R -L/2) and as a float32 sample of (L + R) / 65536, each poked into the pool
-    # past the test sounds and given slot 0's entry: the DSP plays the stereo one as the float's
-    # mono mix, bit for bit (and bit-exact to the model, above)
+    # stereo stage 2b (docs/stereo-assessment.md): KICK as a stereo sample (format 2, int16 L R:
+    # L the kick, R -L/2), and each channel alone as an int16 mono sample, each poked into the
+    # pool past the test sounds and given slot 0's entry: the DSP renders L into the voice's
+    # block and R into its stereo slot's R block, each bit for bit the mono sample of that
+    # channel (and bit-exact to the model, above, R block included)
     kpcm = [max(-32767, min(32767, round(x * 32767))) for x in SL.test_samples()[0]]
-    st_at, mix_at = dsp.SMP_POOL_DDR + 0x100000, dsp.SMP_POOL_DDR + 0x180000
-    st_words = [(l & 0xFFFF) | ((-(l // 2)) & 0xFFFF) << 16 for l in kpcm]
-    mix_words = [struct.unpack("<I", struct.pack("<f", (l - l // 2) / 65536))[0] for l in kpcm]
+    rpcm = [-(l // 2) for l in kpcm]
+    st_at, l_at, r_at = dsp.SMP_POOL_DDR + 0x100000, dsp.SMP_POOL_DDR + 0x180000, dsp.SMP_POOL_DDR + 0x1C0000
+    st_words = [(l & 0xFFFF) | (r & 0xFFFF) << 16 for l, r in zip(kpcm, rpcm)]
+
+    def mono_words(pcm):
+        pcm = pcm + [0] * (len(pcm) & 1)
+        return [(pcm[k] & 0xFFFF) | (pcm[k + 1] & 0xFFFF) << 16 for k in range(0, len(pcm), 2)]
     rate_w = struct.unpack("<I", struct.pack("<f", SL.test_rates()[0]))[0]
 
-    def as_slot0(at, words, fmt):
+    def as_slot0(at, words, frames_n, fmt):
         done = []
 
         def poke(r):
@@ -1985,13 +2131,15 @@ def step_smp(init, sound, machines, blocks) -> dict:
                 for k, w in enumerate(words):
                     m2.poke(r.state, at + 4 * k, w)
                 done.append(1)
-            for k, w in enumerate((at, len(words), rate_w, fmt)):
+            for k, w in enumerate((at, frames_n, rate_w, fmt)):
                 m2.poke(r.state, dsp.SMP_POOL_DDR + 8 + 4 * k, w)
         return {dsp.PERC_SW: poke}
     runs["stereo"] = rb(init, frames(ONE, smp_words({SM.TUNE_REC: 67})), blocks,
-                        extra_hooks=as_slot0(st_at, st_words, SM.FMT_I16S))
-    runs["stereo_mix"] = rb(init, frames(ONE, smp_words({SM.TUNE_REC: 67})), blocks,
-                            extra_hooks=as_slot0(mix_at, mix_words, SM.FMT_F32))
+                        extra_hooks=as_slot0(st_at, st_words, len(kpcm), SM.FMT_I16S))
+    runs["stereo_l"] = rb(init, frames(ONE, smp_words({SM.TUNE_REC: 67})), blocks,
+                          extra_hooks=as_slot0(l_at, mono_words(kpcm), len(kpcm), SM.FMT_I16))
+    runs["stereo_r"] = rb(init, frames(ONE, smp_words({SM.TUNE_REC: 67})), blocks,
+                          extra_hooks=as_slot0(r_at, mono_words(rpcm), len(rpcm), SM.FMT_I16))
     runs["retrig"] = rb(init, frames(ONE, smp_words(), trig=(1, RETRIG)), blocks)
     runs["tops"] = rb(init, frames(GRID, smp_words({r: 127 for r in SM.RECORDS})), blocks)
     # v0.19, SLICE on BEAT's own sixteen slices: slice 3 and the next; NOTE, C1 + 5 (the sixth)
@@ -2101,10 +2249,12 @@ def step_smp(init, sound, machines, blocks) -> dict:
         "frames) plays as an empty slot: silent, finite, bit-exact (above)":
             all(runs[k]["ok"] and all(x == 0.0 for x in smp_series(runs[k], 0))
                 for k in ("bad_below", "bad_above", "bad_long", "bad_end", "bad_fmt", "bad_zero", "bad_slices")),
-        "stereo: a format-2 sample plays (L + R) / 2, bit for bit the float32 sample of its mix, and sounds":
-            runs["stereo"]["ok"] and runs["stereo_mix"]["ok"]
-            and V.peak(smp_series(runs["stereo"], 0)) > 0.05
-            and smp_series(runs["stereo"], 0) == smp_series(runs["stereo_mix"], 0),
+        "stereo: a format-2 sample renders L in the voice's block and R in its slot's R block, each bit for bit the int16 mono sample of that channel, and both sound":
+            runs["stereo"]["ok"] and runs["stereo_l"]["ok"] and runs["stereo_r"]["ok"]
+            and V.peak(smp_series(runs["stereo"], 0)) > 0.05 and V.peak(smp_rseries(runs["stereo"], 0)) > 0.02
+            and smp_series(runs["stereo"], 0) == smp_series(runs["stereo_l"], 0)
+            and smp_rseries(runs["stereo"], 0) == smp_series(runs["stereo_r"], 0)
+            and smp_series(runs["stereo"], 0) != smp_series(runs["stereo_r"], 0),
         "SAMP 0 (OFF), an empty slot and no trigger are silent":
             all(s and all(x == 0.0 for x in s) for s in (off, empty, silent)),
         "a second note restarts the sample": bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG]

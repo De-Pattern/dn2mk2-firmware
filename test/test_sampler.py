@@ -1153,3 +1153,50 @@ def test_stereo_format_2_plays_its_left_plus_right_halved_on_every_reader():
         SM.STEREO = 1
         importlib.reload(P)
         importlib.reload(SL)
+
+
+def test_stereo_2b_a_stereo_voice_renders_l_and_r_each_as_its_own_mono_sample():
+    """stereo stage 2b (dnfw.sampler.program.stereo_voice): a format-2 sample on a voice with a
+    stereo slot renders L into the voice's block and R into the slot's R block, each bit for bit
+    what an int16 mono sample of that channel alone renders (every reader: ONESHOT fast and
+    edge taps, REPITCH, STRETCH, WERP, GRID), block after block, with R's own decimator. The
+    slot is taken on the note's first block (rendered again as L), freed when the voice plays
+    a mono sample. The negative: the same stereo sample without the wrapper is the mix."""
+    from dnfw.sampler import stereo as ST
+    n = 6000
+    pairs = [(((k * 37) % 4001 - 2000) * 7, -(((k * 11) % 3001) - 1500) * 9) for k in range(n)]
+    st = [(l / 32768, r / 32768) for l, r in pairs]
+    left = [l / 32768 for l, _ in pairs]
+    right = [r / 32768 for _, r in pairs]
+
+    def run(sample, fmt, mtype, note, play, stereo, blocks=24):
+        h = SL.Harness(0, samples=[sample], rates=[1.0], fmts=[fmt])
+        h.stereo = stereo
+        h.defaults()
+        h.set(SM.PLAY_REC, play)
+        _tempo(h, 120)
+        out, rb, slots = [], [], []
+        for b in range(blocks):
+            out += h.block(mtype, note, b == 0)
+            rb += [struct.unpack("<f", struct.pack("<I", h.mem.get(ST.RBLK + 4 * k)))[0] for k in range(32)]
+            slots.append(h.mem.get(ST.laddr(0, 0)))
+        return out, rb, slots, h
+    bits = lambda xs: [struct.pack("<f", x) for x in xs]          # noqa: E731
+    for name, note, play in (("ONESHOT", 67.0, 127), ("ONESHOT", 55.0, 40), ("REPITCH", 60.0, 127),
+                             ("STRETCH", 60.0, 127), ("WERP", 60.0, 127), ("GRID", 60.0, 127)):
+        mt = SM.TYPE_OF[name]
+        lo, ro, slots, _h = run(st, SM.FMT_I16S, mt, note, play, True)
+        lm, *_ = run(left, SM.FMT_I16, mt, note, play, False)
+        rm, *_ = run(right, SM.FMT_I16, mt, note, play, False)
+        assert max(abs(x) for x in lm) > 0.01 and max(abs(x) for x in rm) > 0.01, name
+        assert bits(lo) == bits(lm), (name, "L")
+        assert bits(ro) == bits(rm), (name, "R")
+        assert all(slots), name                                  # the slot held every block
+    # a mono sample on the wrapper: one run, as voice() alone, no slot
+    mo, _, mslots, _ = run(left, SM.FMT_I16, SM.TYPE_OF["ONESHOT"], 60.0, 127, True)
+    mv, *_ = run(left, SM.FMT_I16, SM.TYPE_OF["ONESHOT"], 60.0, 127, False)
+    assert bits(mo) == bits(mv) and not any(mslots)
+    # the negative: without the wrapper a stereo sample is the mix, not L
+    mix, *_ = run(st, SM.FMT_I16S, SM.TYPE_OF["ONESHOT"], 60.0, 127, False)
+    lone, *_ = run(left, SM.FMT_I16, SM.TYPE_OF["ONESHOT"], 60.0, 127, False)
+    assert bits(mix) != bits(lone)

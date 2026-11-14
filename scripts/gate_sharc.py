@@ -34,7 +34,7 @@ def default_steps() -> list[str]:
 # chords 16, smp 17, mnm/frame 20, decode..guard 35, link..tdm 46), so a failing part shows
 # early (v0.45: ping dropped with PING; the part is stock alone); ship_gate stops at the first part that fails. Each part runs in its own process, so
 # the order changes nothing a part checks.
-GROUPS = (("wipe",), ("stock",), ("garbage",), ("stress",), ("chords",), ("smp",),
+GROUPS = (("wipe",), ("stock",), ("garbage",), ("stress",), ("chords",), ("smp",), ("stereo",),
           ("mnm", "frame"), ("decode", "map", "voice", "guard"), ("link", "rec", "mainrec", "pvmix", "tdm"),
           ("flexlevel",),         # v0.50: a FLEX take's level, unity and GAIN
           ("recwhole",))          # v0.39: whole takes with the link at work (about 70 min)

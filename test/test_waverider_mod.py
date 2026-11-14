@@ -373,7 +373,12 @@ def test_v039_the_mod_version_comes_from_VERSION_and_fails_when_bad(tmp_path, mo
     from dnfw import modversion as M
     v = M.mod_version()
     assert v == (M.FILE.read_text().strip()) and M.c_define() == f'#define MOD_VERSION "{v}"\n'
-    for bad in ("", "v0.39", "0.39 beta", "0.39\n\n", "1"):
+    for good in ("0.54-t1", "0.54-t12"):
+        f = tmp_path / "VERSION"
+        f.write_text(good + "\n")
+        monkeypatch.setattr(M, "FILE", f)
+        assert M.mod_version() == good
+    for bad in ("", "v0.39", "0.39 beta", "0.39\n\n", "1", "0.54-T1", "0.54-t", "0.54-beta"):
         f = tmp_path / "VERSION"
         f.write_text(bad)
         monkeypatch.setattr(M, "FILE", f)

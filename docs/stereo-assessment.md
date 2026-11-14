@@ -262,3 +262,46 @@ control), on the `stereo` branch; nothing merges to `main` until the owner says 
 5. **The cap.** At most N stereo voices a block (start N = 4; the load meter on the unit decides);
    past it a stereo voice plays L+R mono through one pass.
 6. **Recorder.** CHAN STEREO for IN and MAIN (and FLEX's takes), writing format 2.
+
+## Stage 2b built, and the R pass made general (2026-11-14)
+
+**2b, the render** (`dnfw.sampler.program.stereo_voice`). A format-2 sample on a voice with a
+stereo slot is read twice a block: L from the left channel into the voice's block, then R from
+the right into its slot's R block (`RBLK`), each bit for bit an int16 mono sample of that channel
+alone, R with its own decimator. The voice's own words are put back as L's run left them. One copy
+of `voice()` runs up to three passes (L, L again on a new note's first block, R), so the program
+stays inside its L2 room. Past the cap of four slots a stereo voice plays the mix (stage 2a). Each
+block starts with the slots' R blocks zeroed, so a voice the guard leaves out has a silent R too.
+
+**The runner's moving-parameter check found three gaps in the R pass**, now closed:
+
+1. *The body's +4 dB step* was caught only at 0x1cdb56's wrapper, which some sounds never call.
+2. *Five more stages* sit on the per-voice dispatch other filter types and modes take
+   (`scripts/sharc_stereo_calls.py`: every call of the body under random sounds and every filter
+   type): 0xb81a16, 0xb80f2e, 0xb806f5 (two sites), and second sites of 0x1cdb56 (between a x16
+   and a x1/16), 0xb81368 and 0xb8265b. All are wrapped now (`STAGES`, `EXTRA_SITES`).
+3. *Two of them reach past the voices' spacing* from R4 (0xb81a16 to +0x1fc, 0xb80f2e to +0x140;
+   `scripts/sharc_stereo_foot.py`), so each stage's state is copied by its measured size (`SIZES`).
+   R's call now runs on the voice's own state place (R's copy swapped in, L's put back after), so a
+   stage that reaches its state another way still sees R's.
+
+**One generic wrapper.** Each site jumps to a small stub (is this voice stereo? which slot?) that
+sets the stage's words (stride, size, offset, trampolines) and goes to one shared body. Between
+stages the body's own scalings of L's block are recognised, not copied: each wrapper after the
+first compares L's block on entry with what the last wrapper left (`LLAST`); unchanged, or that
+block times +4 dB, 16 or 1/16 bit for bit, and R's block gets the same. An all-zero L keeps the
+last answer. Anything else (the comb filters: 0xb81526 writes its own buffer, which the body then
+mixes into the block) is counted (`ODD`) and the voice falls back to mono for the rest of the block
+(`MONO`: R's block is L's), so it can never sound wrong, only narrower.
+
+**Runner checks** (`sharc_waverider_m5.py --steps stereo`, a gate part of its own): every run
+bit-exact to the model, R's block included; R = L renders each channel bit for bit the mono
+sample; R = L leaves all 16 tracks' buffers after the sum (both halves) and the main mix bit for
+bit the mono run's, every block, with the sound's parameters moving, on **every filter type**
+(the combs through the fallback); ODD only on a comb; R silent leaves every L half exact and
+changes track 0's R half (R's path is live); R = -L/2 renders R's block bit for bit the mono -L/2
+sample.
+
+**Known for the test build:** the comb filters play a stereo sample's L on both sides (the
+fallback); the sends (reverb, delay, chorus) take L only; that R reaches the right output is the
+hardware test.

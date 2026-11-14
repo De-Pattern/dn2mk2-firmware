@@ -253,7 +253,10 @@ class Harness:
                     self.mem.put(SM.TRK_BUF + SM.TRK_STRIDE * tk + 4 * k, bits(l[k]))
                     self.mem.put(SM.TRK_BUF + SM.TRK_STRIDE * tk + 0x80 + 4 * k, bits(r[k]))
             P.run_recorder(self.L, self.mem)
-        p, _ = P.run_voice(self.L, None, t, mtype, mem=self.mem)
+        if getattr(self, "stereo", False):           # stereo stage 2b: the voice through stereo_voice
+            p, _ = P.run_stereo_voice(self.L, t, mtype, self.mem)
+        else:
+            p, _ = P.run_voice(self.L, None, t, mtype, mem=self.mem)
         self.steps += p.steps
         return [flt(self.mem.get(BUF + 4 * k)) for k in range(32)]
 
