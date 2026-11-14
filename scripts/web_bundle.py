@@ -1,6 +1,9 @@
 """Bundle the build's Python for dn2mk2's in-browser patcher (tools/patcher).
 
-    python scripts/web_bundle.py BUILD.syx VERSION NAME OUTDIR
+    python scripts/web_bundle.py BUILD.syx VERSION NAME OUTDIR [--test]
+
+--test (owner, 2026-11-14): a test build, from a feature branch (e.g. stereo). Gated like any
+other; the patcher lists it apart, under TEST, never as the latest, with a warning.
 
 BUILD.syx must be a gated build (its .gate.json beside it, CLEARED, same sha256). This
 builds it again here from the stock files, noting every dnfw module and data file the
@@ -58,7 +61,8 @@ def isolated_rebuild(zbytes: bytes, version: str) -> str:
 
 
 def main() -> int:
-    build, version, name, outdir = sys.argv[1:5]
+    test = "--test" in sys.argv
+    build, version, name, outdir = [a for a in sys.argv[1:] if a != "--test"][:4]
     build = pathlib.Path(build)
     outdir = pathlib.Path(outdir)
     want = hashlib.sha256(build.read_bytes()).hexdigest()
@@ -115,7 +119,7 @@ def main() -> int:
         row_inputs.append("mnm")
     rows.insert(0, {"version": version, "name": name, "sha256": want, "zip": zname, "inputs": row_inputs,
                     "zip_sha256": hashlib.sha256(zbuf.getvalue()).hexdigest(),
-                    "file": f"DN2mod_v{version}_{name}_OS1.11.syx"})
+                    "file": f"DN2mod_v{version}_{name}_OS1.11.syx", **({"test": True} if test else {})})
     man.write_text(json.dumps(rows, indent=1) + "\n")
     print(f"{zname}: {len(files)} files, {len(zbuf.getvalue())} bytes; rebuild matches {want[:12]}")
     return 0

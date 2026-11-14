@@ -81,3 +81,10 @@ When a build prints `CLEARED TO FLASH`, in the same session:
    trigger (this session's git route cannot push tags). The workflow `discord-release.yml`
    makes the release and its tag from that file and posts it to Discord's #announcements as
    De-Pattern. Never attach firmware to a release.
+
+**Test builds (owner, 2026-11-14)**, from a feature branch (e.g. `stereo`): gated exactly
+like a release (`CLEARED TO FLASH` on that file). Versioned `X.Y-tN` (e.g. `0.54-t1`), named
+for the feature. Published to the `builds` branch under `test/vX.Y-tN-NAME/` and to the
+patcher with `web_bundle.py ... --test` (listed under TEST, never the latest, with a warning),
+with a section in the branch's own `FIRMWARE.md`. No `releases/` file on `main`: that would
+announce it. Its tests and known issues go to the owner with the build.
