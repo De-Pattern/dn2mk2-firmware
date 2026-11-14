@@ -227,6 +227,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)"),
        ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
        ("thres", "THRES on both processors (coupled)"),
+       ("stocknote", "a stock note through both processors (coupled)"),
        ("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)"),
        ("flexplay", "FLEX buffers played by a ONESHOT track, on both processors (coupled)"),
        ("mute", "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)"),
@@ -2496,6 +2497,22 @@ def main() -> int:
                           f"while armed, it starts without a new ARM")
         later("thres", "THRES on both processors (coupled)", "THRES on both processors (coupled)",
               [th_cmd, sorted(EMU_ENV.items())], th_body)
+
+        # No other step plays a note through both processors (a build that passed them played nothing on a unit): a
+        # held KEYBOARD note on stock track 2 (type 0), the ColdFire and the DSP together (emu_coupled_stocknote.py,
+        # the stock smoother modelled); its voice must sound
+        sn_js = work / "stocknote.json"
+        sn_cmd = [a.coupled_py, "-u", "scripts/emu_coupled_stocknote.py", "--build", a.build, "--stock", a.stock,
+                  "--snapshot", snap, "--json", sn_js]
+
+        def sn_body(tdir):
+            rc, out = run("stock note coupled", sn_cmd, logs, env=EMU_ENV, trace=tdir)
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            if rc != 0 or not last.startswith("PASS"):
+                return False, out[-900:]
+            return True, "a held note on stock track 2 sounds through the ColdFire and the DSP together"
+        later("stocknote", "a stock note through both processors (coupled)",
+              "a stock note through both processors (coupled)", [sn_cmd, sorted(EMU_ENV.items())], sn_body)
 
         # v0.49 FLEX on the coupled emulator (emu_coupled.py: the ColdFire and the DSP together): a
         # one-shot recorder trig on step 1 placed with [TRIG 1] on FLEX REC, PLAY, the DSP's take into
