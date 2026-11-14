@@ -1,5 +1,4 @@
-"""v0.42: the Monomachine machines re-coded must sound bit for bit as before (owner, 2026-11-06:
-"rewriting the MM machines while keeping them bit-exact"). This runs every machine in run mode
+"""The Monomachine machines re-coded must sound bit for bit as before. This runs every machine in run mode
 (dnfw.mnm.bench, the model the SHARC runner holds the DSP to, bit for bit) over the golden
 cases' notes and increments, and over variants of them whose knobs change mid-note at random
 (a fixed seed), and records each output's float words (sha256) and the instructions a block.
