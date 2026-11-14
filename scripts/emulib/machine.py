@@ -128,7 +128,7 @@ class Machine:
         try:
             self.uc.ctl_flush_tb()
         except AttributeError:
-            self.uc.ctl_remove_cache(0x40000000, 0x40400000)
+            self.uc.ctl_remove_cache(0x40000000, 0x40401000)
 
     # --- installing a build ------------------------------------------------
     def apply(self, runs):

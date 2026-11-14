@@ -27,29 +27,29 @@ typedef unsigned int u32;
 typedef unsigned char u8;
 
 #define GET_VALUE  ((int (*)(void *, u32, u8 *))0x4006538E)   /* (view, id, &flag) */
-#define SET_PIXEL  ((void (*)(void *, int, int, int))0x40113B90)  /* (canvas, x, y, on) */
-#define TEXT       ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011545C)
+#define SET_PIXEL  ((void (*)(void *, int, int, int))0x40113E70)  /* (canvas, x, y, on) */
+#define TEXT       ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011573C)
 #define PAGE_COUNT ((int (*)(void *))0x400173CA)
 #define PAGE_DOTS  ((void (*)(void *, void *, int, int, int))0x4006598A)
-#define IS_DIRTY   ((int (*)(void *))0x4011D2F4u)               /* screen: a redraw due? */
-#define SET_DIRTY  ((void (*)(void *))0x4011D2FEu)              /* screen: ask for one */
-#define FRAMES_NOW (*(volatile u32 *)0x4058E8D4u)               /* 1,500 a second */
+#define IS_DIRTY   ((int (*)(void *))0x4011D5D4u)               /* screen: a redraw due? */
+#define SET_DIRTY  ((void (*)(void *))0x4011D5DEu)              /* screen: ask for one */
+#define FRAMES_NOW (*(volatile u32 *)0x4058F8D4u)               /* 1,500 a second */
 #define REC_REDRAW 60u                                          /* the recorder's: 25 a second */
 #define PH_REDRAW 40u                                           /* v0.40: a playhead's, 37 a second at most */
-#define FONT       0x44507ED8u                                  /* the grid's label font */
+#define FONT       0x44508ED8u                                  /* the grid's label font */
 #define CENTRED    2                                            /* TEXT flag: x is the centre */
 
 /* a parameter record: +8 min, +12 max, +16 default (TUN1: 0x400, 0x7c00, 0x4000) */
-#define RECORD(id) ((const int *)(0x401F7F94u + 60u * (id)))
+#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))
 
-/* W2: the record's name pointers, as every stock reader takes them (0x401f7f94 +
+/* W2: the record's name pointers, as every stock reader takes them (0x401f83a4 +
  * 60 id, then +0x28 the long name, +0x30 the short one: getLongName 0x400365c8,
  * getShortName 0x400372da, and the eleven places that read +0x30 directly, among
- * them the LFO destination list's row label 0x40105b72) */
-#define NAME_LONG(id)  (*(const char **)(0x401F7F94u + 60u * (id) + 0x28u))
-#define NAME_SHORT(id) (*(const char **)(0x401F7F94u + 60u * (id) + 0x30u))
+ * them the LFO destination list's row label 0x40105e52) */
+#define NAME_LONG(id)  (*(const char **)(0x401F83A4u + 60u * (id) + 0x28u))
+#define NAME_SHORT(id) (*(const char **)(0x401F83A4u + 60u * (id) + 0x30u))
 #define KIT_POINTER (*(unsigned char *volatile *)0x800052A0u)
-#define UI_TRACK    (*(volatile u8 *)0x42431A6Cu)
+#define UI_TRACK    (*(volatile u8 *)0x42432A6Cu)
 
 /* the strips: four columns of 25 across x 22..121 */
 #define COL0  22
@@ -84,11 +84,11 @@ static int wr_active(void)
 }
 
 /* v0.22: the LFOs' destination list (0x4003951e) asks each of the track's 101 slots'
- * record for its modulation mask (0x400dc30e) and lists it if the LFO's bit is set. On a
+ * record for its modulation mask (0x400dc472) and lists it if the LFO's bit is set. On a
  * track of ours, a WaveTone record our machine does not use (its name made "-" by
  * wr_names) answers 0, and is left out of the list. Every other record, and every other
  * track, as stock. */
-#define STOCK_MASK ((u32 (*)(u32))0x400DC30Eu)
+#define STOCK_MASK ((u32 (*)(u32))0x400DC472u)
 u32 wr_lfo_mask(u32 rec)
 {
     if (rec >= 238u && rec <= 262u && wr_active()) {
@@ -166,9 +166,9 @@ static void wr_names(void)
     names_on = key;
 }
 
-/* v0.22: the UI loop's draw of its screen (0x4011d32a(screen, canvas), at 0x4002e4ca),
+/* v0.22: the UI loop's draw of its screen (0x4011d60a(screen, canvas), at 0x4002e4ca),
  * then, while it is up, the RECORDER over all of it (rec.c, smp_page.c) */
-#define SCREEN_DRAW ((void (*)(void *, void *))0x4011D32Au)
+#define SCREEN_DRAW ((void (*)(void *, void *))0x4011D60Au)
 void *wr_screen_obj __attribute__((section(".data"), aligned(4))) = 0;   /* v0.30: its views (rec.c) */
 u32 wr_draws __attribute__((section(".data"), aligned(4))) = 0;   /* v0.40: the screen's draws (smp_page.c) */
 void wr_screen(void *screen, void *canvas)
@@ -220,7 +220,7 @@ int wr_poll(void *screen)
     wr_names();
     /* the RECORDER's meter and state move: a redraw asked for as stock asks (the dirty
      * byte), 25 times a second. v0.15..v0.19 answered 1 here without setting the byte:
-     * the loop then pushed its other buffer undrawn (0x4011d32a draws only when the byte
+     * the loop then pushed its other buffer undrawn (0x4011d60a draws only when the byte
      * is set), and the page flashed between the last two screens it had (owner, v0.19) */
     static u32 rec_next __attribute__((section(".data"))) = 0;
     extern void slc_poll(void);
@@ -566,7 +566,7 @@ void wr_page_draw(void *view, void *canvas)
         if (smp_values_held() && id) {             /* v0.35: SYN held: the value (O14) */
             u8 fl;
             vb[0] = 0;
-            ((void (*)(int, char *))(*(void **)(0x401F7F94u + 60u * id + 0x34u)))(GET_VALUE(view, id, &fl), vb);
+            ((void (*)(int, char *))(*(void **)(0x401F83A4u + 60u * id + 0x34u)))(GET_VALUE(view, id, &fl), vb);
             vb[6] = 0;
             label = vb;
         }

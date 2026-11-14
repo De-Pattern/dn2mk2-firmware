@@ -14,7 +14,8 @@ metadata (5) and the Outbox 8 firmware (8) have no reason to change either.
 
 So, as rules:
 
-1. The input is stock Digitone II OS 1.11, by the hash of every section.
+1. The input is stock Digitone II OS 1.12, by the hash of every section
+   (1.11 until the port, docs/os112-port.md).
 2. The build has exactly stock's sections, in stock's order, with stock's
    product, version and build string (a different version string could make
    the device decide its bootstrap needs upgrading).
@@ -36,8 +37,8 @@ from .firmware.load import load
 from .firmware.verify import verify
 
 PRODUCT = 52                 # Digitone II
-VERSION = "1.11"
-BUILD = "0059"
+VERSION = "1.12"
+BUILD = "0062"
 
 # sha256 of each section's stored payload in Elektron's Digitone II OS 1.11
 # (file sha256 2af43e65e3d8390b41c9f66222620f8cce027d73ed87db00c80b440f628472e0).
@@ -50,6 +51,18 @@ STOCK_111 = {
     7: "5ff93df8747bdf9eb28acf50391fb484d6aa6782bfe969b2b3807a8412645660",
     8: "764f169834ac9ebcdbc1fd883e9f941be1eb43c2d57e4ff02e04685550838b06",
 }
+# The same for Elektron's Digitone II OS 1.12 (file sha256
+# 7e5b8a733d4ab1fdf7e5d22757f7d8eddaa3cbf71d0858874a791844c02ceb35), measured 2026-11-07:
+# sections 2, 4, 7 and 8 are 1.11's byte for byte; only 5 (metadata) and 3 (MAIN OS) differ.
+STOCK_112 = {
+    5: "22d60a9b383a6bbc378afd799e20ecae12b0e57fae970289ec8751de248df1ea",
+    2: "669d8c50e9dd028662538016817d841dfac74cf68b2662e7de41b3927bc3275e",
+    3: "091d3312d704229b0fb2177bd00e07637fcd0f99fc9c29dc26bd1bfb19eaf364",
+    4: "e0020c6b65357c2175d1939952924a010ab943364eade497d80b4c8afa65def4",
+    7: "5ff93df8747bdf9eb28acf50391fb484d6aa6782bfe969b2b3807a8412645660",
+    8: "764f169834ac9ebcdbc1fd883e9f941be1eb43c2d57e4ff02e04685550838b06",
+}
+STOCK = STOCK_112            # what this build targets
 ORDER = (5, 2, 3, 4, 7, 8)
 
 MAY_CHANGE = {3: "MAIN OS", 7: "DSP program"}
@@ -99,16 +112,16 @@ def _sha(b: bytes) -> str:
 
 
 def stock_checks(stock) -> list[Check]:
-    """Rule 1: the input is the stock 1.11 file, section by section."""
+    """Rule 1: the input is the stock file this build targets, section by section."""
     c = stock.container
-    out = [Check("input is Digitone II OS 1.11",
+    out = [Check(f"input is Digitone II OS {VERSION}",
                  c.product == PRODUCT and c.version == VERSION and c.build == BUILD,
                  f"product {c.product}, version {c.version}, build {c.build}")]
     ids = tuple(s.id for s in c.sections)
-    out.append(Check("input has stock 1.11's sections", ids == ORDER, f"{ids}"))
+    out.append(Check(f"input has stock {VERSION}'s sections", ids == ORDER, f"{ids}"))
     for s in c.sections:
-        want = STOCK_111.get(s.id)
-        out.append(Check(f"input section {s.id} is stock 1.11's",
+        want = STOCK.get(s.id)
+        out.append(Check(f"input section {s.id} is stock {VERSION}'s",
                          want is not None and _sha(s.raw_payload) == want,
                          _sha(s.raw_payload)[:16]))
     return out

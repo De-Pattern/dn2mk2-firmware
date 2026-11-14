@@ -21,7 +21,7 @@ is the take at the note's pitch, from its start: rate 2^((note-60+TUNE)/12) from
 cell and the frame's TUNE (the test's KEYBOARD key plays note 24, so 1/8), the take resampled at
 that rate from a lag of 0..32 frames, passing at correlation > 0.95 with a lag of at most 8.
 
-The stock smoother (0x400db12a) is modelled (install_smoother_model; --raw-smoother runs it as
+The stock smoother (0x400db28e) is modelled (install_smoother_model; --raw-smoother runs it as
 emulated): digikit's EMAC halves every fractional product, so emulated it leaves the DSP about 3%
 of each parameter (docs/ROADMAP.md item 11). Run raw, link 7 fails (measured 2026-11-11).
 
@@ -53,13 +53,13 @@ from emu_coupled import CF_FRAME, Coupled                       # noqa: E402
 from emu_coupled_recplay import best_match, chirp              # noqa: E402
 
 KIT, STRIDE = 0x800052A0, 1163
-SEQ_PATTERN, TRACK_CUR = 0x42C5A9A0, 0x42C5A984
+SEQ_PATTERN, TRACK_CUR = 0x42C5B9A0, 0x42C5B984
 PAT_LENGTH, PAT_LOCK_TABLE = 122196, 97872
 FLEX = 17
 T = 1                                    # the FLEX track (not 0: the voice table reads 0 for an idle voice)
 SLOT_RLEN, SLOT_SAMP, SLOT_SRC = 40, 43, 38
 SLOT_TRACK = 0x80005308
-KB_ON = 0x42431A9C                       # KEYBOARD's state (1 on; measured on stock, 2026-11-10)
+KB_ON = 0x42432A9C                       # KEYBOARD's state (1 on; measured on stock, 2026-11-10)
 
 
 STATE, SRC, OUT = 0x8000DE60, 0x80003AF0, 0x800068E4
@@ -68,7 +68,7 @@ SLOT_TUNE = 25
 
 
 def install_smoother_model(c):
-    """The stock smoother 0x400db12a as the instrument computes it (emu_slides.py's model, kept
+    """The stock smoother 0x400db28e as the instrument computes it (emu_slides.py's model, kept
     in step with it): its one-pole filter runs in the EMAC's fractional mode (the frame code
     sets MACSR = 0x20 before it), and digikit's EMAC halves every fractional product, so
     emulated the state decays to about half a frame. The routine's entry runs this instead:
@@ -99,7 +99,7 @@ def install_smoother_model(c):
         uc_.reg_write(K.UC_M68K_REG_A7, sp + 4)
         uc_.reg_write(K.UC_M68K_REG_D0, OUT)
         uc_.reg_write(K.UC_M68K_REG_PC, ret)
-    c.uc.hook_add(UC_HOOK_CODE, smoother, begin=0x400DB12A, end=0x400DB12A)
+    c.uc.hook_add(UC_HOOK_CODE, smoother, begin=0x400DB28E, end=0x400DB28E)
 
 
 def main() -> int:
@@ -124,7 +124,7 @@ def main() -> int:
     rep = {"setup": [], "links": {}, "numbers": {}, "break": a.brk}
     if not a.raw_smoother:
         install_smoother_model(c)
-        rep["setup"].append(("the stock smoother 0x400db12a modelled (emu_slides.py's model)",
+        rep["setup"].append(("the stock smoother 0x400db28e modelled (emu_slides.py's model)",
                              "digikit's EMAC halves every fractional product (0.5 x 0.5 = 0x10000000, "
                              "not 0x20000000), so emulated it decays every parameter to about 3% of its "
                              "value: TUNE, PLAY, LEN and LEV the DSP reads go wrong"))
@@ -155,7 +155,7 @@ def main() -> int:
         held(code, False)
     kit = c.long(KIT)
     snd = kit + 52 + STRIDE * T
-    owner = c.call(0x4018A97A)[0]
+    owner = c.call(0x4018AC5A)[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, T, FLEX, 1, 1)
     rep["setup"].append(("track 1 FLEX", "direct: smp_machine_commit (the UI's commit path)"))
     if a.pool:                                                   # v0.55: track 2 ONESHOT, from the start
@@ -465,7 +465,7 @@ def main() -> int:
         return set(c.panel.panel.lit(bytes(f[-1]))) if f else set()
 
     def aged():
-        c.poke(lay["smp_knob_at"], struct.pack(">I", (c.long(0x4058E8D4) - 3000) & 0xFFFFFFFF))
+        c.poke(lay["smp_knob_at"], struct.pack(">I", (c.long(0x4058F8D4) - 3000) & 0xFFFFFFFF))
         c.periods(6)
     tap(19)                                                      # GRID RECORD: a held trig takes locks
     held(25, True)

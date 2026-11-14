@@ -43,7 +43,7 @@ KIT, STRIDE = 0x800052A0, 1163
 FLEX = 17
 T, S = 1, 2                              # the FLEX track, its SRC's track (TRK3)
 SLOT_TRACK = 0x80005308
-KB_ON = 0x42431A9C
+KB_ON = 0x42432A9C
 FX_SRC, FX_MUTE = 0, 6
 SENDS = (86, 87, 88)
 
@@ -98,7 +98,7 @@ def main() -> int:
 
     kit = c.long(KIT)
     snd = kit + 52 + STRIDE * T
-    owner = c.call(0x4018A97A)[0]
+    owner = c.call(0x4018AC5A)[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, T, FLEX, 1, 1)
     c.periods(2)
     c.call(lay["fx_set"], T, FX_SRC, 2 + S)

@@ -6,7 +6,7 @@ instructions, a key held or not, the knob's rest counter emptied at its first st
 FREQ (FLTR, encoder E, record 36: stock's fine unipolar control; v0.49: at 24 phases of
 the turn against the timer wheel, LEADS) and once on the target on
 ONESHOT's SRC page (STRT E, LEN F, LOOP G, with fmt.c smp_fine's words). Every knob step
-0x4011336e is logged with its inputs (the bundle's delta, the knob's state) and its output
+0x4011364e is logged with its inputs (the bundle's delta, the knob's state) and its output
 (d0, the change it asks for). The timer wheel cuts the counts into bundles, so the two runs
 need not line up; what must hold: **every target step whose inputs a FREQ step also had
 asked for the same change**, most steps had such a twin, the value stays in 0..120.00 (held
@@ -64,7 +64,7 @@ def run(build, snapshot, out, extra):
 
 
 def inputs(st):
-    """A knob step's inputs, as stock's 0x4011336e reads them (disassembled, 2026-11-11): the
+    """A knob step's inputs, as stock's 0x4011364e reads them (disassembled, 2026-11-11): the
     bundle's delta, the state's acceleration (+8), remainder (+12) and whether its rest counter
     (+16) is above 24 (the guard's branch; below it the counter only gets 48 added). +0 is
     written from 0x40055b3a's tick and never read back here, +4 never touched, so neither is an

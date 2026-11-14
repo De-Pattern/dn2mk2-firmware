@@ -5,22 +5,22 @@ The DSP renders type 5 with our own code (section 7, `dnfw.waverider.dsp`). The
 ColdFire's job is smaller and is only this:
 
 1. **offer it** -- MACHINE SEL lists the machine types from a static list
-   (`{0, 2, 1, 3, 4}` at `0x401ddd58`, copied into a `std::vector` by
+   (`{0, 2, 1, 3, 4}` at `0x401de168`, copied into a `std::vector` by
    `0x4004d8b6`) and draws a divider wherever the group `0x40059274(type)`
    changes. The list gains a 5 before MIDI, and 5 (with 6, reserved for
    a second sample machine) is a group of its own, so it reads synths | WAVERIDER | MIDI;
-2. **name it** -- the three name accessors (`0x400dc332` long, `0x400dc358`
-   short, `0x400dc37e` the third column) are bounded at 4 and read 12-byte rows
-   at `0x401f77f4`. The 192 zero bytes after that table are a live 16-long
-   array (`0x400dc1fe`, `docs/machine-list.md`), so the table moves to a cave
+2. **name it** -- the three name accessors (`0x400dc496` long, `0x400dc4bc`
+   short, `0x400dc4e2` the third column) are bounded at 4 and read 12-byte rows
+   at `0x401f7c04`. The 192 zero bytes after that table are a live 16-long
+   array (`0x400dc362`, `docs/machine-list.md`), so the table moves to a cave
    with a sixth row, `Waverider` / `WVR`;
-3. **permit it** -- the per-type attribute rows at `0x401f7930` (a byte, then a
-   16-bit track mask) are read by the permission test `0x400dc19a(type, track)`
+3. **permit it** -- the per-type attribute rows at `0x401f7d40` (a byte, then a
+   16-bit track mask) are read by the permission test `0x400dc2fe(type, track)`
    that the machine setter `0x4004cc08` asks before it writes `sound+0xDE`, and
-   by two neighbours. Row 5 would be the 16-long table at `0x401f7944`, so these
+   by two neighbours. Row 5 would be the 16-long table at `0x401f7d54`, so these
    move too, with WaveTone's row as the sixth;
 4. **behave as WaveTone** -- the one place the sound's machine parameters are
-   resolved, `param_set_slot_to_id(slot, type, filter)` (`0x400dc02a`), sends
+   resolved, `param_set_slot_to_id(slot, type, filter)` (`0x400dc18e`), sends
    type 5 to WaveTone's forty machine slots. So the SYN pages are WaveTone's
    pages, WaveTone's defaults load when the machine is chosen, and the frame
    carries WaveTone's machine parameters -- `WAV1` (index 26) is Waverider's
@@ -68,56 +68,56 @@ PAGES_END = 0x4670F000                  # the pages assembly's room ends here (P
 MCHUNK_END = 0x46710000
 
 # -- 1. the MACHINE SEL list -------------------------------------------------------------
-LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
+LIST_STOCK_VA = 0x401DE168             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
 # PERC, RESONATOR, CZ after Swarmer; then the Digitakt II's sample machines in its own
 # order (v0.15: all five; v0.13 offered ONESHOT and GRID); then MIDI
 LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, 8, 9, 10, 11, 13, 12, *((_smpm.BOUNCE_TYPE,) if _smpm.BOUNCE_LISTED else ()), 4)   # v0.19: SLICE before GRID, the DT2's order; v0.44 BOUNCE after them (group 3: its own divider)
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
-LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
+LIST_END = 0x4004D900                   # pea 0x401de17c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
-LIST_BEGIN = 0x4004D90A                 # pea 0x401ddd58 -- the copy's start
+LIST_BEGIN = 0x4004D90A                 # pea 0x401de168 -- the copy's start
 
 GROUP_FN = 0x40059274                   # group(type): <0 or >4 -> 0, 0..3 -> 1, 4 -> 2
 GROUP_STOCK = bytes.fromhex("202f00046d147203b2806c0a123c0004b280670a600470014e7542004e7570024e75")
 
 # -- 2. the name table -------------------------------------------------------------------
-NAMES_STOCK_VA = 0x401F77F4             # 5 rows of {long, short, third}
+NAMES_STOCK_VA = 0x401F7C04             # 5 rows of {long, short, third}
 NAME_ROW = 12
 NAME_SITES = (                          # (bound site, base site, stock base, column)
-    (0x400DC332, 0x400DC342, "41f9", 0),     # long:  moveq #4 / lea table,%a0
-    (0x400DC358, 0x400DC36A, "0680", 4),     # short: moveq #4 / addil table+4,%d0
-    (0x400DC37E, 0x400DC390, "0680", 8),     # third: moveq #4 / addil table+8,%d0
+    (0x400DC496, 0x400DC4A6, "41f9", 0),     # long:  moveq #4 / lea table,%a0
+    (0x400DC4BC, 0x400DC4CE, "0680", 4),     # short: moveq #4 / addil table+4,%d0
+    (0x400DC4E2, 0x400DC4F4, "0680", 8),     # third: moveq #4 / addil table+8,%d0
 )
 
 # -- 3. the per-type attribute rows ------------------------------------------------------
-ATTR_STOCK_VA = 0x401F7930              # 5 rows of {byte, 0, u16 track mask}
+ATTR_STOCK_VA = 0x401F7D40              # 5 rows of {byte, 0, u16 track mask}
 ATTR_ROW = 4
-ATTR_BOUNDS = (0x400DC15C, 0x400DC19C)  # moveq #4 (byte getter), moveq #4 (permission)
-ATTR_BASES = ((0x400DC166, 0), (0x400DC180, 2), (0x400DC1B2, 2))   # lea site, column
+ATTR_BOUNDS = (0x400DC2C0, 0x400DC300)  # moveq #4 (byte getter), moveq #4 (permission)
+ATTR_BASES = ((0x400DC2CA, 0), (0x400DC2E4, 2), (0x400DC316, 2))   # lea site, column
 
 # -- 4. param_set_slot_to_id: type 5 resolves as WaveTone ---------------------------------
-SLOT_TO_ID = 0x400DC02A
-SLOT_HOOK = 0x400DC032                  # movel %sp@(12),%d0 ; moveal %sp@(16),%a1
+SLOT_TO_ID = 0x400DC18E
+SLOT_HOOK = 0x400DC196                  # movel %sp@(12),%d0 ; moveal %sp@(16),%a1
 SLOT_HOOK_STOCK = bytes.fromhex("202f000c226f0010")
-SLOT_RESUME = 0x400DC03A
+SLOT_RESUME = 0x400DC19E
 
-# -- 5. the stored-sound LOAD (0x400dd1ea) --------------------------------------------------
+# -- 5. the stored-sound LOAD (0x400dd34e) --------------------------------------------------
 # `d1 = (stored[244] + 1) & 0xff; keep the type if 6 > d1, else 0`. The bound is
 # a `moveq #6,%d2` reused for nothing else before the compare (the filter type
 # loads its own `moveq #7`). SAVE copies `sound+0xDE` to `stored+244` as it is.
-LOAD_BOUND = 0x400DD286
+LOAD_BOUND = 0x400DD3EA
 
 # the caves: clean runs from `dnfw cave scan` that no other mod writes, entered
 # 4 bytes in and left 4 bytes short, as arpmodes does (docs/memory-map.md).
-# (W5 to v0.5: DATA_CAVE 0x4028e958, CODE_CAVE 0x4029037c, NAME_CAVE 0x4028db24; now unused)
+# (W5 to v0.5: DATA_CAVE 0x4028ee98, CODE_CAVE 0x402908bc, NAME_CAVE 0x4028e064; now unused)
 
 # Read, never written: what the edits rely on.
 GUARDS = (
-    (0x400DC02A, "2f027264206f0008", "slot_to_id: saves d2, d1 = 100, a0 = slot"),
-    (0x400DC03A, "b288", "slot_to_id resumes with cmpl %a0,%d1"),
-    (0x400DC040, "7402", "... and overwrites d2 before it reads it"),
-    (0x4004CC42, "4eb9400dc19a", "the machine setter asks the permission test"),
+    (0x400DC18E, "2f027264206f0008", "slot_to_id: saves d2, d1 = 100, a0 = slot"),
+    (0x400DC19E, "b288", "slot_to_id resumes with cmpl %a0,%d1"),
+    (0x400DC1A4, "7402", "... and overwrites d2 before it reads it"),
+    (0x4004CC42, "4eb9400dc2fe", "the machine setter asks the permission test"),
     (0x4004CC94, "114200de", "... and writes the type byte at sound+0xDE"),
     (0x4002757C, "10280d8c", "the frame builder takes each track's type from its mirror"),
     (0x40027582, "37400092", "... and writes it at frame offset 148 + 2t"),
@@ -237,7 +237,7 @@ canon_arg:
 1:  moveq   #4,%d1
     rts
 
-| The page accessor 0x400c24ee(type, page): its `move.l %sp@(8),%d1 ; move.l
+| The page accessor 0x400c2652(type, page): its `move.l %sp@(8),%d1 ; move.l
 | %sp@(12),%d0` (after its own push of d2), now `jsr` here, with types {NEW_TYPE}..{TYPES_LAST}
 | read as {CLONE}. d2 holds its bound 4 and is left alone; it compares next.
 canon_page:
@@ -284,7 +284,7 @@ raw_track:
 
 | v0.35: MACHINE SEL's LEFT / RIGHT (0x4005ba9c..0x4005babc) switches the column (+424),
 | sets the cursor (+420) from the current type (+412 / +416, as if types were rows) and
-| redraws (jsr 0x4011c7ba) without the scroll-follow 0x4005a956 that UP / DOWN run. Stock's
+| redraws (jsr 0x4011ca9a) without the scroll-follow 0x4005a956 that UP / DOWN run. Stock's
 | lists fit the screen, so the top row (+428) was always 0; ours scrolls, so RIGHT from a
 | machine low in the SRC list kept a top row past the FLTR list's end: an empty FLTR
 | column (flupperich6l, v0.33). Here, from the redraw's jsr: the cursor on the first row
@@ -325,7 +325,7 @@ colsw:
     addq.l  #4,%sp
     movem.l %sp@,%d2-%d5/%a2
     lea     %sp@(20),%sp
-    jmp     0x4011c7ba
+    jmp     0x4011ca9a
 """
 SHIM_LABELS = ("slot_shim", "canon_arg", "canon_page", "canon_track", "raw_track", "colsw")
 
@@ -336,11 +336,11 @@ SHIM_LABELS = ("slot_shim", "canon_arg", "canon_page", "canon_track", "raw_track
 # shim that reads the type as WaveTone's and replays the push it displaced.
 VALID_SITE = 0x40036C24                 # mvs.b %a0@(222),%d3 ; move.l %d2,-(%sp)
 VALID_STOCK = bytes.fromhex("772800de2f02")
-VALID_NEXT = bytes.fromhex("4eb9400dbce8")   # jsr record page(param)
+VALID_NEXT = bytes.fromhex("4eb9400dbe4c")   # jsr record page(param)
 SHIMS2 = f"""
 | from {VALID_SITE:#010x} by jsr: the type byte into d3, {NEW_TYPE}..{TYPES_LAST} read as {CLONE}, then
 | the displaced `move.l %d2,-(%sp)` under the return address. a1 is free: the jsr
-| that follows (0x400dbce8) is a scratch-register call.
+| that follows (0x400dbe4c) is a scratch-register call.
 canon_valid:
     mvs.b   %a0@(222),%d3
     cmpi.l  #{NEW_TYPE},%d3
@@ -367,10 +367,10 @@ IDENTITY_SITES = (
     (0x4005A4AC, "47f9", "MACHINE SEL: the current machine's marker (lea into a3)"),
     (0x40071912, "4eb9", "the track's machine name, drawn from the long-name table"),
     (0x4002DB2C, "4eb9", "re-commit of the track's own machine type (0x40031880)"),
-    (0x400D5A72, "4eb9", "the track state message: machine type byte"),
-    (0x400D675E, "4eb9", "an incoming machine type, compared with the track's before commit"),
+    (0x400D5BD6, "4eb9", "the track state message: machine type byte"),
+    (0x400D68C2, "4eb9", "an incoming machine type, compared with the track's before commit"),
     # v0.22: TRK + CLEAR (0x40071e80, "CLEAR TRK %d PRESET") re-initialises the sound as
-    # the machine it reads here (0x4004d5f0 -> 0x400e7d4c: the type into +0xde, every slot's
+    # the machine it reads here (0x4004d5f0 -> 0x400e7eb0: the type into +0xde, every slot's
     # record through param_set_slot_to_id, which reads ours as WaveTone's); canonical, a
     # cleared PERC, sample or RESONATOR track became WaveTone (the owner's v0.21 report)
     (0x40071EB6, "4eb9", "TRK + CLEAR: the machine the cleared preset is made for"),
@@ -386,28 +386,28 @@ IDENTITY_SITES = (
 # wrote 5, and the view at once re-read 1 and marked WAVETONE; a second YES found
 # 1 != 5 and committed 5 again; reopening marked WAVETONE (hardware, 2026-09-27;
 # `out/fix-select/`, emulator). Three more re-commit the type they read: the track
-# swap `0x40041bca`, and the two "restore the old machine" paths `0x400a7f92` /
-# `0x400b15e8` -- each would turn a Waverider track into a WaveTone one for real.
+# swap `0x40041bca`, and the two "restore the old machine" paths `0x400a80f6` /
+# `0x400b174c` -- each would turn a Waverider track into a WaveTone one for real.
 # The rest ask "is it MIDI?" (compare 4), or hand the type to the SYN overview and
-# page accessors (0x400c248e, 0x400c24ee), which read 5 as WaveTone's rows already.
+# page accessors (0x400c25f2, 0x400c2652), which read 5 as WaveTone's rows already.
 # So the tail jump goes to raw_track, and all twelve see 5.
 MODEL_TRACK_TYPE_JMP = 0x40031394      # jmp 0x4004b7f2, the tail of 0x4003134e
 
-# -- 6. the per-machine UI tables (0x42432ad4, 0x42432b24): the SYN pages ---------------
+# -- 6. the per-machine UI tables (0x42433ad4, 0x42433b24): the SYN pages ---------------
 # `pages(type)`, `page(type, n)` and `overview(type)` read five-row tables built
 # at boot and fall back to an empty page above 4 -- which is what a type-5 track's
 # SYN page showed in the emulator before this. Type 5 reads WaveTone's rows.
 CANON_ARG_SITES = (
-    (0x400C248E, "overview descriptor(type): 0x42432b24 + 44 type"),
+    (0x400C25F2, "overview descriptor(type): 0x42433b24 + 44 type"),
 )
 # Milestone 7 (dnfw.waverider.pages): the page count and the page reader answer a
 # Waverider track with its own two pages, and the SYN page's label fetch gives it
 # its own labels. Everything else behaves as the M5 shims did.
-COUNT_SITE = 0x400C24D2                 # SYN page count(type): 0x42432ad4[type].count
+COUNT_SITE = 0x400C2636                 # SYN page count(type): 0x42433ad4[type].count
 LABEL_SITE = 0x40064622                 # the SYN page's jsr getShortName(this, id)
 LABEL_STOCK = bytes.fromhex("4eb9400372da")
 CANON_ARG_STOCK = bytes.fromhex("7204202f0004")
-PAGE_SITE = 0x400C24F2                  # 0x400c24ee: after `move.l %d2,-(%sp) ; moveq #4,%d2`
+PAGE_SITE = 0x400C2656                  # 0x400c2652: after `move.l %d2,-(%sp) ; moveq #4,%d2`
 PAGE_STOCK = bytes.fromhex("222f0008202f000c")
 # the SYN page draw (0x40018118), after the grid of a type-1 page: page id 7 (WaveTone's
 # OSC page) goes on to draw WaveTone's two oscillator icons at B and F from WAV1/TBL1
@@ -418,98 +418,98 @@ ICON_STOCK = bytes.fromhex("7007b083660000a2")
 # the grid 0x40017428 (a pc-relative jsr), pop them. wr_grid draws Waverider's own page.
 GRID_SITE = 0x40018214
 GRID_STOCK = bytes.fromhex("2f022f0a4ebaf20e508f")
-# the UI task's loop asks its screen `isDirty()` (0x4011d2f4, the byte at screen +32) once
-# a pass, and redraws every view on it when set (0x4011d32a). The stock UI sets it on a
+# the UI task's loop asks its screen `isDirty()` (0x4011d5d4, the byte at screen +32) once
+# a pass, and redraws every view on it when set (0x4011d60a). The stock UI sets it on a
 # change: at rest a shown page redraws once a second, and a modulation never redraws it
 # (instrument, modview1). wr_poll asks the same question, first setting the byte through
-# the stock 0x4011d2fe while a modulation marker on Waverider's page would move.
+# the stock 0x4011d5de while a modulation marker on Waverider's page would move.
 # v0.14, the sample link (csrc/sampler, docs/sampler.md): the SysEx router's hook (the USB
 # probe's site, docs/usbprobe.md). v0.14..v0.19 also hooked the frame builder (0x400276a2)
 # to put packets in the frame's words 2650..2681; those are the DSP's per-track routing,
 # so v0.20 leaves the frame builder stock (LINK_FEED_SITE is kept for the test that says so)
-LINK_RX_SITE = 0x4012169A               # lea 0x40207ae6,%a3: F0 00 20 3C, before the compare
-LINK_RX_STOCK = bytes.fromhex("47f940207ae6")
+LINK_RX_SITE = 0x4012197A               # lea 0x40207f9e,%a3: F0 00 20 3C, before the compare
+LINK_RX_STOCK = bytes.fromhex("47f940207f9e")
 LINK_FEED_SITE = 0x400276A2             # lea 0x40006c4a,%a2: the frame is built
 LINK_FEED_STOCK = bytes.fromhex("45f940006c4a")
-KEY_SLOT = 0x401D49A8                    # the parameter page view's key handler, in its vtable (v0.15)
+KEY_SLOT = 0x401D4DB8                    # the parameter page view's key handler, in its vtable (v0.15)
 KEY_STOCK = 0x40016480                   # stock's: code 2 cycles the pages, the rest to its base
 QUANT_SITE = 0x40037BE6                  # the setter's write: movea.l %d0,%a0 ; move.w %d3,14(%a0,%d2.l*2)
 QUANT_STOCK = bytes.fromhex("204031832a14")
-MUTE_SITE, MUTE_STOCK = 0x400275B0, "4eb940134490"   # v0.52: the frame ISR, after its voice loop: jsr 0x40134490 (a copy)
+MUTE_SITE, MUTE_STOCK = 0x400275B0, "4eb940134770"   # v0.52: the frame ISR, after its voice loop: jsr 0x40134770 (a copy)
 TDM_SITE = 0x40026098                    # the SSI ISR, its transmit fill done: move.l %fp,%d2 ; addi.l #-72,%d2 (v0.16)
 TDM_STOCK = bytes.fromhex("240e0682ffffffb8")
 # DIRECT JUMP (csrc/jump, docs/jump.md): the PTN view's single cue, the sequencer tick ISR's
 # queue test, arming, switch and per-track positions, and the PTN view's key handler
-JUMP_CUE_SITE = 0x400FA1DA               # jsr 0x400d93f0: the PTN view's one-pattern cue (0x400fa11e)
-JUMP_CUE_STOCK = bytes.fromhex("4eb9400d93f0")
+JUMP_CUE_SITE = 0x400FA3A6               # jsr 0x400d9554: the PTN view's one-pattern cue (0x400fa2ea)
+JUMP_CUE_STOCK = bytes.fromhex("4eb9400d9554")
 JUMP_ISR_SITES = (                       # (site, stock bytes, its symbol, the instruction)
-    (0x400DA406, "123942c5a91e", "jmp_tick", "move.b 0x42c5a91e,%d1: the tick's queue test (tick 2)"),
-    (0x400DA45A, "737942c5aab4", "jmp_arm", "mvs.w 0x42c5aab4,%d1: the change-length test before arming"),
-    (0x400DA6E6, "43f942c5a9c4", "jmp_switch", "lea 0x42c5a9c4,%a1: the switch's start step"),
-    (0x400DA8CC, "4879401f6b25", "jmp_tracks", "pea 0x401f6b25: the per-track positions' end"),
+    (0x400DA56A, "123942c5b91e", "jmp_tick", "move.b 0x42c5b91e,%d1: the tick's queue test (tick 2)"),
+    (0x400DA5BE, "737942c5bab4", "jmp_arm", "mvs.w 0x42c5bab4,%d1: the change-length test before arming"),
+    (0x400DA84A, "43f942c5b9c4", "jmp_switch", "lea 0x42c5b9c4,%a1: the switch's start step"),
+    (0x400DAA30, "4879401f6f35", "jmp_tracks", "pea 0x401f6f35: the per-track positions' end"),
 )
-JUMP_KEY_SLOT = 0x402008CC               # the PTN view's key handler, in its vtable
-JUMP_KEY_STOCK = 0x400FA6BE
+JUMP_KEY_SLOT = 0x40200CDC               # the PTN view's key handler, in its vtable
+JUMP_KEY_STOCK = 0x400FA88A
 JUMP_GUARDS = (                          # what the shims jump back to and rely on
-    (0x400DA40C, "7c027b01bc85", "jmp_tick resumes: moveq #2,%d6 ; mvs.b %d1,%d5 ; cmp.l %d5,%d6"),
-    (0x400DA416, "227942c5aac0", "the queue's path: movea.l 0x42c5aac0,%a1"),
-    (0x400DA460, "7e01", "jmp_arm's stock way resumes: moveq #1,%d7"),
-    (0x400DA4D2, "23c042c5a9a4", "stock's arming: move.l %d0,0x42c5a9a4 (the next pattern)"),
-    (0x400DA6EC, "4df942c5a9c8", "jmp_switch resumes: lea 0x42c5a9c8,%fp"),
-    (0x400DA6F8, "23d142c5a9bc", "... then 0x42c5a9bc = (a1): the start step"),
-    (0x400DA7CA, "1e350800", "the per-track positions read the mode from a5"),
-    (0x400DA81C, "264d", "... and the tracks from a5 (movea.l %a5,%a3)"),
-    (0x400DA904, "4bf942c5a9ea", "... until a5 is set again (lea 0x42c5a9ea,%a5)"),
-    (0x400DA8D2, "2f394028c1fc", "jmp_tracks resumes: move.l 0x4028c1fc,-(%sp)"),
-    (0x400FA1E0, "4fef001c", "the cue's caller pops its arguments"),
-    (0x400DA902, "42024bf942c5a9ea", "v0.40: jmp_arm's forced tick ends as stock's ticks past 2 (clr.b %d2 ; lea 0x42c5a9ea,%a5)"),
-    (0x400DA41C, "42b942c5aaac", "v0.40: stock's tick 2 clears the arming (why jmp_tick never takes tick 1)"),
-    (0x400DA52A, "4a01660003d4", "v0.40: ... and its ticks past 2 go to 0x400da902 (tst.b %d1 ; bne.w)"),
+    (0x400DA570, "7c027b01bc85", "jmp_tick resumes: moveq #2,%d6 ; mvs.b %d1,%d5 ; cmp.l %d5,%d6"),
+    (0x400DA57A, "227942c5bac0", "the queue's path: movea.l 0x42c5bac0,%a1"),
+    (0x400DA5C4, "7e01", "jmp_arm's stock way resumes: moveq #1,%d7"),
+    (0x400DA636, "23c042c5b9a4", "stock's arming: move.l %d0,0x42c5b9a4 (the next pattern)"),
+    (0x400DA850, "4df942c5b9c8", "jmp_switch resumes: lea 0x42c5b9c8,%fp"),
+    (0x400DA85C, "23d142c5b9bc", "... then 0x42c5b9bc = (a1): the start step"),
+    (0x400DA92E, "1e350800", "the per-track positions read the mode from a5"),
+    (0x400DA980, "264d", "... and the tracks from a5 (movea.l %a5,%a3)"),
+    (0x400DAA68, "4bf942c5b9ea", "... until a5 is set again (lea 0x42c5b9ea,%a5)"),
+    (0x400DAA36, "2f394028c73c", "jmp_tracks resumes: move.l 0x4028c73c,-(%sp)"),
+    (0x400FA3AC, "4fef001c", "the cue's caller pops its arguments"),
+    (0x400DAA66, "42024bf942c5b9ea", "v0.40: jmp_arm's forced tick ends as stock's ticks past 2 (clr.b %d2 ; lea 0x42c5b9ea,%a5)"),
+    (0x400DA580, "42b942c5baac", "v0.40: stock's tick 2 clears the arming (why jmp_tick never takes tick 1)"),
+    (0x400DA68E, "4a01660003d4", "v0.40: ... and its ticks past 2 go to 0x400daa66 (tst.b %d1 ; bne.w)"),
 )
 # v0.40, parameter slides' SLD/SLEN drawn as stock draws RTRG and LEN (csrc/slides/slide.c,
 # sl_draw_sld / sl_draw_slen): the stock routines called, and the cell routine's and LEN
 # widget's own calls whose arguments they copy
 SLIDE_DRAW_GUARDS = (
     (0x40036560, "4fefffec48d7007c", "slides: the widget routine (id, value, ..., canvas, x, y)"),
-    (0x400BC414, "4feffff4202f0014", "slides: RTRG's toggle widget (its sheet's frame value >> 8)"),
-    (0x40115668, "4e56ff44", "slides: the cell's label text routine"),
-    (0x40114842, "4fefffd4", "slides: the fill / invert routine (the p-lock look)"),
-    (0x40115E6C, "206f0004", "slides: the box font's set-up"),
-    (0x40115CE8, "206f0004", "slides: ... and its release"),
-    (0x40114626, "4fefffd4", "slides: the box's rectangle"),
-    (0x400CC2CE, "41f9402a0f48487940293c64", "slides: LEN's box: its table and font 0x40293c64"),
-    (0x400CC2EE, "2f04487940219c2d48780002486b0006486a00092f022f034eb94011545c",
+    (0x400BC578, "4feffff4202f0014", "slides: RTRG's toggle widget (its sheet's frame value >> 8)"),
+    (0x40115948, "4e56ff44", "slides: the cell's label text routine"),
+    (0x40114b22, "4fefffd4", "slides: the fill / invert routine (the p-lock look)"),
+    (0x4011614C, "206f0004", "slides: the box font's set-up"),
+    (0x40115FC8, "206f0004", "slides: ... and its release"),
+    (0x40114906, "4fefffd4", "slides: the box's rectangle"),
+    (0x400CC432, "41f9402a14884879402941a4", "slides: LEN's box: its table and font 0x402941a4"),
+    (0x400CC452, "2f0448794021a0e548780002486b0006486a00092f022f034eb94011573c",
      "slides: LEN's box text: centred (2) at (x + 9, y + 6)"),
-    (0x40064630, "487940219c2d4879402170b942a7487800012f0a486b00094879402917602f03",
-     "slides: the cell's label: font 0x40291760 at (x + 9, y), 'XXXX' wide"),
+    (0x40064630, "48794021a0e548794021757142a7487800012f0a486b0009487940291ca02f03",
+     "slides: the cell's label: font 0x40291ca0 at (x + 9, y), 'XXXX' wide"),
 )
 # v0.22, the RECORDER as a screen of its own (csrc/sampler/rec.c): the UI loop's queue
 # receive (every key and knob item passes it first), its draw of the screen (the recorder
 # over it), and the main key handler's FUNC + VOICE (stock: unison on/off) opening it
 UI_POP_SITE = 0x4002F17E                # jsr 0x40001928: the UI queue's receive, in the UI loop
 UI_POP_STOCK = bytes.fromhex("4eb940001928")
-SCREEN_SITE = 0x4002E4CA                # jsr 0x4011d32a(screen, canvas): the views drawn
-SCREEN_STOCK = bytes.fromhex("4eb94011d32a")
+SCREEN_SITE = 0x4002E4CA                # jsr 0x4011d60a(screen, canvas): the views drawn
+SCREEN_STOCK = bytes.fromhex("4eb94011d60a")
 # v0.45: the trig LEDs show recorder trigs while the BOUNCE REC panel is up (csrc/sampler/rec.c
-# bn_led_walk): the LED compose's walk of the views (0x4002c854's jsr 0x4011d3b2(screen))
+# bn_led_walk): the LED compose's walk of the views (0x4002c854's jsr 0x4011d692(screen))
 LED_SITE = 0x4002C880
-LED_STOCK = bytes.fromhex("4eb94011d3b2")
+LED_STOCK = bytes.fromhex("4eb94011d692")
 REC_COMBO_SITE = 0x4005F008             # the VOICE case's FUNC branch: push, jsr 0x40046bfe (unison)
 REC_COMBO_STOCK = bytes.fromhex("2f2a00a44eb940046bfe")
 REC_COMBO_EXIT = 0x4005FC50             # the handler's common exit (the key offered to the base)
-LFO_MASK_LEA = 0x40039570               # the LFO destination list's lea 0x400dc30e,%a2 (v0.22)
-LFO_MASK_STOCK = 0x400DC30E
+LFO_MASK_LEA = 0x40039570               # the LFO destination list's lea 0x400dc472,%a2 (v0.22)
+LFO_MASK_STOCK = 0x400DC472
 KB_REC_SITES = (0x40072D74, 0x40072DCA)    # v0.48: the RECORD key's jsr 0x40055cca (grid recording on?), both toggles
 KB_REC_STOCK = bytes.fromhex("4eb940055cca")
 KEYNOTES_SITE = 0x40058BE8              # v0.23: KeyboardView's jsr 0x40034460(kbd, &notes, key)
 KEYNOTES_STOCK = bytes.fromhex("4eb940034460")
-MACHSEL_COLSW_SITE = 0x4005BABE         # v0.35: MACHINE SEL's redraw after LEFT / RIGHT (jsr 0x4011c7ba)
-MACHSEL_COLSW_STOCK = bytes.fromhex("4eb94011c7ba")
+MACHSEL_COLSW_SITE = 0x4005BABE         # v0.35: MACHINE SEL's redraw after LEFT / RIGHT (jsr 0x4011ca9a)
+MACHSEL_COLSW_STOCK = bytes.fromhex("4eb94011ca9a")
 MACHSEL_COMMIT_SITE = 0x4005BBA0        # v0.30: MACHINE SEL's jsr 0x40031880 (commit(model, track, type, 1, 1))
 MACHSEL_COMMIT_STOCK = bytes.fromhex("4eb940031880")
-MODAPPLY_SITE = 0x40027196              # v0.25: the per-frame driver's jsr 0x400db22c (apply modulation)
-MODAPPLY_STOCK = bytes.fromhex("4eb9400db22c")
-POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
+MODAPPLY_SITE = 0x40027196              # v0.25: the per-frame driver's jsr 0x400db390 (apply modulation)
+MODAPPLY_STOCK = bytes.fromhex("4eb9400db390")
+POLL_SITE = 0x4002E464                  # jsr 0x4011d5d4 (isDirty), its argument the screen
 # v0.38: per-project pools (csrc/sampler/pools.c, hooks.S, docs/project-pools.md): the OS's
 # project LOAD 0x40042E6E (its entry, its success where it sets the slot, its exit) and NEW
 # 0x400428C0 (where it sets the slot), each a jmp to a cave that replays what it replaced
@@ -521,7 +521,7 @@ PJ_END_SITE = 0x40042EE6                # move.b %d4,%d0 ; movem.l (%sp),%d2-%d5
 PJ_END_STOCK = bytes.fromhex("10044cd7043c4fef0024")
 PJ_NEW_SITE = 0x40042AF0                # move.l 12(%fp),(%sp) ; move.l %a2,-(%sp) ; jsr 0x4003eb62
 PJ_NEW_STOCK = bytes.fromhex("2eae000c2f0a4ebac06a")
-POLL_STOCK = bytes.fromhex("4eb94011d2f4")
+POLL_STOCK = bytes.fromhex("4eb94011d5d4")
 
 
 def _cave_free(content: bytes, cave: tuple[int, int]) -> None:
@@ -623,9 +623,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
 
     # 3. the attribute rows
     for bound in ATTR_BOUNDS:
-        edit(bound, bytes([0x74 if bound == 0x400DC19C else 0x72, top]),
+        edit(bound, bytes([0x74 if bound == 0x400DC300 else 0x72, top]),
              f"attribute rows: bound 4 -> {top}",
-             bytes.fromhex("7404" if bound == 0x400DC19C else "7204"))
+             bytes.fromhex("7404" if bound == 0x400DC300 else "7204"))
     for site, col in ATTR_BASES:
         _need(content, site, bytes.fromhex("41f9"), "the attribute accessor's lea")
         edit(site + 2, _long(layout["attributes"] + col), f"attribute rows: the {n_rows}-row copy",
@@ -661,7 +661,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "WaveTone's page-3 grid", bytes.fromhex(pages.ID9_STOCK))
     edit(ICON_SITE, bytes.fromhex("4eb9") + _long(playout["wr_icons"]) + bytes.fromhex("4e71"),
          "the SYN page draw: no WaveTone oscillator icons on a Waverider track (M7)", ICON_STOCK)
-    _need(content, PAGE_SITE - 4, bytes.fromhex("2f027404"), "0x400c24ee's push of d2 and its bound")
+    _need(content, PAGE_SITE - 4, bytes.fromhex("2f027404"), "0x400c2652's push of d2 and its bound")
     _need(content, POLL_SITE - 2, bytes.fromhex("2f0a"), "the UI loop pushes the screen")
     _need(content, POLL_SITE + 6, bytes.fromhex("588f4a00"), "... and tests the answer's low byte")
     edit(POLL_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_poll"]),
@@ -669,7 +669,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "Waverider's page would move, then answers as stock", POLL_STOCK)
 
     # v0.22: the RECORDER's screen -- its keys and knobs, its draw, FUNC + VOICE
-    _need(content, UI_POP_SITE - 6, bytes.fromhex("48794059d214"), "the UI loop pushes its queue")
+    _need(content, UI_POP_SITE - 6, bytes.fromhex("48794059e214"), "the UI loop pushes its queue")
     _need(content, UI_POP_SITE + 6, bytes.fromhex("588f72292440"), "... then takes the item: moveq #41 ; movea d0,a2")
     edit(UI_POP_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_ui_pop"]),
          "the UI loop's queue receive: smp_ui_pop takes the recorder's keys and knobs while "
@@ -682,7 +682,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the LED compose's walk of the views: bn_led_walk claims the 16 trig LEDs for the "
          "page's recorder trigs while the BOUNCE REC panel is up, then stock's walk", LED_STOCK)
     _need(content, REC_COMBO_SITE - 4, bytes.fromhex("60000ff4"), "the VOICE case without FUNC ends just before")
-    _need(content, REC_COMBO_EXIT, bytes.fromhex("2f022f0a4eb94011c674"), "the key handler's common exit")
+    _need(content, REC_COMBO_EXIT, bytes.fromhex("2f022f0a4eb94011c954"), "the key handler's common exit")
     disp = REC_COMBO_EXIT - (REC_COMBO_SITE + 8)
     edit(REC_COMBO_SITE, bytes.fromhex("4eb9") + _long(csyms["rec_combo"]) + bytes.fromhex("6000")
          + disp.to_bytes(2, "big"),
@@ -718,15 +718,15 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # v0.25: modulation on SAMP steps through the loaded samples (link.c, smp_mod_apply)
     _need(content, MODAPPLY_SITE - 4, bytes.fromhex("2f002440"), "the driver pushes the mirror (move.l %d0,-(sp); movea.l %d0,%a2)")
     edit(MODAPPLY_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_mod_apply"]),
-         "the per-frame modulation apply: stock's 0x400db22c, then a sample machine's modulated SAMP "
+         "the per-frame modulation apply: stock's 0x400db390, then a sample machine's modulated SAMP "
          "moved through the loaded slots", MODAPPLY_STOCK)
 
     # v0.22: the LFOs' destination list leaves out the WaveTone records our machines do not use
-    _need(content, LFO_MASK_LEA, bytes.fromhex("45f9400dc30e"), "the destination list: lea 0x400dc30e,%a2")
+    _need(content, LFO_MASK_LEA, bytes.fromhex("45f9400dc472"), "the destination list: lea 0x400dc472,%a2")
     _need(content, LFO_MASK_LEA + 0x30, bytes.fromhex("4e92"), "... called once a slot (jsr %a2@)")
     edit(LFO_MASK_LEA + 2, _long(csyms["wr_lfo_mask"]),
          "the LFO destination list's mask lookup: wr_lfo_mask answers 0 for a record our "
-         "machine leaves unused (named -), stock's 0x400dc30e for everything else",
+         "machine leaves unused (named -), stock's 0x400dc472 for everything else",
          _long(LFO_MASK_STOCK))
 
     # v0.38: per-project pools: the four detours, entered by jmp (the stack as stock left it)
@@ -753,7 +753,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the SysEx router: the sample link's requests (F0 00 20 3C 7D 01) to smp_rx", LINK_RX_STOCK)
 
     # the fast link (v0.16): the SSI ISR, its transmit fill done, through smp_tdm_hook
-    _need(content, TDM_SITE + 8, bytes.fromhex("2f024eb94012a4e6"), "the ISR goes on: push d2 ; jsr 0x4012a4e6")
+    _need(content, TDM_SITE + 8, bytes.fromhex("2f024eb94012a7c6"), "the ISR goes on: push d2 ; jsr 0x4012a7c6")
     edit(TDM_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_tdm_hook"]) + bytes.fromhex("4e71"),
          "the SSI audio ISR after its transmit fill: smp_tdm writes the sample link's packet "
          "into TDM slots 8..15 and reads the DSP's from slots 14..15", TDM_STOCK)
@@ -772,7 +772,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
              f"DIRECT JUMP, the sequencer tick: {what} -> {sym}, which replays it", bytes.fromhex(stock_hex))
     edit(JUMP_KEY_SLOT, _long(csyms["jmp_key"]),
          "DIRECT JUMP: the PTN view's key handler (vtable): PTN held + YES / NO sets it on / off; "
-         "everything else to stock's 0x400fa6be", _long(JUMP_KEY_STOCK))
+         "everything else to stock's 0x400fa88a", _long(JUMP_KEY_STOCK))
 
     # the RECORDER page's YES (v0.15): the parameter page's key handler through smp_key,
     # which takes YES on that page and hands everything else to stock's
@@ -817,7 +817,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          bytes.fromhex(SL.PRE_STOCK))
     _need(content, SL.PRE_SITE + 6, bytes.fromhex("49ec05ee670e"), "... then lea 1518(%a4),%a4 ; beq.s")
     edit(SL.APPLY_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_apply"]) + bytes.fromhex("4e71"),
-         "slides: the lock applier 0x400db092 through sl_apply (stock's, then the trig's slide)",
+         "slides: the lock applier 0x400db1f6 through sl_apply (stock's, then the trig's slide)",
          bytes.fromhex(SL.APPLY_STOCK))
     # v0.52 MUTE SRC (rectrig.c ms_frame): the frame ISR's first copy after its voice loop (the
     # loop that writes each voice's LEVEL, slots and routing into the frame, 0x400274fa..0x4002759e)

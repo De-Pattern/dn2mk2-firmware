@@ -11,13 +11,13 @@ v0.44's BOUNCE froze the unit at power-on whenever the working project held a BO
 its box, and its label lookup walked absolute address 0x000000EE (pages.py wr_label). This is
 that power-on: `boot400M` (stock's boot, before the UI's views are built) with the build
 installed as scripts/emu_install_snapshot.py does, so MACHINE SEL's rows are the build's own;
-at the UI's first draw (0x4011d32a, the kit loaded) track t is given `--types[t % n]` -- the
+at the UI's first draw (0x4011d60a, the kit loaded) track t is given `--types[t % n]` -- the
 active track (1) the first -- as a project holding those machines would load; then the boot
 runs on to `--save-at`, where the machine is saved for scripts/emu_machine_sweep.py.
 
 Fails on: any read below 0x40000000 by code that is not stock's (the unit has no RAM there:
 the emulator's zero page let v0.44 draw; stock itself reads one byte at 0 at boot, at
-0x400cecf2, and is allowed), the firmware's EXCEPTION reporter, the kit never set, or no
+0x400cee56, and is allowed), the firmware's EXCEPTION reporter, the kit never set, or no
 frame composed after it was.
 """
 
@@ -36,8 +36,8 @@ sys.path.insert(0, str(HERE.parent / "src"))
 sys.path.insert(0, str(HERE))
 
 KIT, SOUND_TYPE = 0x800052A0, 0xDE
-REDRAW = 0x4011D32A
-REPORTER = 0x4011EA6A
+REDRAW = 0x4011D60A
+REPORTER = 0x4011ED4A
 
 
 def differences(stock: bytes, image: bytes, base: int = 0x40000400):
@@ -104,7 +104,7 @@ def main() -> int:
             sp = uc.reg_read(K.UC_M68K_REG_A7)
             words = struct.unpack(">32I", bytes(uc.mem_read(sp, 128)))
             st["low"].append({"address": f"{address:#010x}", "pc": f"{pc:#010x}",
-                              "callers": [f"{v:#010x}" for v in words if 0x40000400 <= v < 0x40220000][:6],
+                              "callers": [f"{v:#010x}" for v in words if 0x40000400 <= v < 0x4022053f][:6],
                               "after_poke": st["poked"] is not None})
 
     def reporter(uc, address, size, user):
@@ -138,13 +138,13 @@ def main() -> int:
         uc.hook_add(UC_HOOK_CODE, redraw, begin=REDRAW, end=REDRAW)
         uc.hook_add(UC_HOOK_CODE, frame, begin=profile.panel_diff, end=profile.panel_diff)
         print(f"install: {len(runs)} run(s), {len(copies)} run-time copies; types {types}", flush=True)
-        # guirun's terminal-loop detector is Digitakt II's address (0x4012d2fa), ordinary code on
+        # guirun's terminal-loop detector is Digitakt II's address (0x4012d5da), ordinary code on
         # DN2 1.11, where it ends a healthy boot at ~63M (docs/emulator.md, "Port 3"): registered
         # only where the instruction there is the spin itself (bra.s to itself, 60 fe)
         hook_at = out[5]
 
         def at(addr, cb, *rest, **kw):
-            if addr == 0x4012D2FA and bytes(uc.mem_read(addr, 2)) != b"\x60\xfe":
+            if addr == 0x4012D5DA and bytes(uc.mem_read(addr, 2)) != b"\x60\xfe":
                 return None
             return hook_at(addr, cb, *rest, **kw)
         return (*out[:5], at, *out[6:])

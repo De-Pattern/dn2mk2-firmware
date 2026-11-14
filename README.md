@@ -98,11 +98,11 @@ a voice.
 
 ## Install
 
-You need a Digitone II on **OS 1.11**, Chrome or Edge, a USB cable, Elektron Transfer,
+You need a Digitone II on **OS 1.12**, Chrome or Edge, a USB cable, Elektron Transfer,
 and your own copies of these Elektron OS files (the patcher asks for them; nothing of
 Elektron's is published here):
 
-- Digitone II OS 1.11 (the one it patches)
+- Digitone II OS 1.12 (the one it patches)
 - Digitakt II OS 1.17 (the sample engine's tables)
 - Machinedrum UW OS 1.63 (PERC's machines)
 - Monomachine SFX-6/60 OS 1.32B, Elektron's `Elektron_SFX6-60_OS1.32B.syx` (the Monomachine machines)
@@ -110,7 +110,7 @@ Elektron's is published here):
 Then:
 
 1. **Back up** your projects, presets and samples with Transfer.
-2. **Prove recovery once** with stock 1.11 over a DIN MIDI cable
+2. **Prove recovery once** with stock 1.12 over a DIN MIDI cable
    ([Going back, and recovery](#going-back-and-recovery)). Until this has worked once,
    flash nothing modified.
 3. Open the **[DN2 Mod Patcher](https://de-pattern.github.io/dn2mk2/patcher.html)**, pick a
@@ -128,10 +128,10 @@ USB CONFIG set to USB MIDI or Overbridge, Transfer closed).
 
 ## Going back, and recovery
 
-- **Back to stock**: send Elektron's own `Digitone_II_OS1.11.syx` with Transfer, as any
+- **Back to stock**: send Elektron's own `Digitone_II_OS1.12.syx` with Transfer, as any
   update.
 - **If it will not boot**: hold [FUNC] while powering on, press [TRIG 4], and send stock
-  1.11 with Transfer's *Legacy OS upgrade mode* over a **5-pin DIN MIDI cable** to the
+  1.12 with Transfer's *Legacy OS upgrade mode* over a **5-pin DIN MIDI cable** to the
   Digitone's MIDI IN (USB does not work in this mode). It takes about 12 minutes; do not
   interrupt it. The mod never touches the bootstrap that runs this, and the build tool
   refuses any file that would.
@@ -142,9 +142,9 @@ USB CONFIG set to USB MIDI or Overbridge, Transfer closed).
 
 ## Compatibility
 
-- **Digitone II OS 1.11 only.** Every address is measured on 1.11; the tools refuse any
-  other file. A unit on 1.10 updates to stock 1.11 first; one on 1.12 goes back to 1.11
-  (`docs/SAFETY.md`).
+- **Digitone II OS 1.12 only** (versions before OS 1.12 support are 1.11's). Every address
+  is measured on 1.12 (`docs/os112-port.md`); the tools refuse any other file. A unit on
+  1.11 updates to stock 1.12 first; one on 1.10 goes through stock 1.11 (`docs/SAFETY.md`).
 - Projects, presets and kits are stock's formats. Projects that use the mod's machines need
   the mod to play those tracks; back them up before going back to stock.
 - Your samples live in a region of the +Drive stock never uses; stock firmware ignores it.
@@ -179,7 +179,7 @@ The patcher only saves a file whose sha256 is the cleared build's. What remains 
 until it is on hardware is said in each version's notes.
 
 Building it yourself: Python 3.11+, `pip install -e .`, then
-`dnfw mods apply Digitone_II_OS1.11.syx --mod waverider -o build.syx` (the other OS files in
+`dnfw mods apply Digitone_II_OS1.12.syx --mod waverider -o build.syx` (the other OS files in
 `00_Resources/`). The gates need [digikit](https://github.com/m-dwyer/digikit) and
 [selache](https://github.com/js216/selache) (`docs/SAFETY.md`, `docs/emulator.md`).
 

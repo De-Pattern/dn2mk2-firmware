@@ -15,7 +15,7 @@ from __future__ import annotations
 import struct
 
 BASE = 0x40000400
-PARAM_TABLE, PARAM_RECORDS, PARAM_BYTES = 0x401F7F94, 321, 60
+PARAM_TABLE, PARAM_RECORDS, PARAM_BYTES = 0x401F83A4, 321, 60
 
 ID_SLD, ID_SLEN = 200, 201              # stored lock ids (stock: 0..106; arp p-locks 107..129)
 RAM_SLD, RAM_SLEN = 0x50, 0x51          # RAM header byte 0 (kept inside 0..100, like a slot)
@@ -32,12 +32,12 @@ SLEN_DEFAULT = 4                        # 1 step: a slide trig with no SLEN lock
 
 # Hooked stock sites (Digitone II 1.11), each with the bytes it replaces.
 PRE_SITE, PRE_STOCK = 0x40026BAC, "284220280040"            # a note's voice: movea.l %d2,%a4 ; move.l 64(%a0),%d0
-APPLY_SITE, APPLY_STOCK = 0x400DB092, "4fefffd4202f0030"    # lock applier (voice, list, mirror)
-SMOOTH_SITE, SMOOTH_STOCK = 0x4002717E, "4eb9400db12a"      # frame ISR: jsr 0x400db12a (the smoother)
-BUILD_SITE, BUILD_STOCK = 0x400D85E8, "4fefffe87065"        # lock-list builder (track, list, table, ., step)
+APPLY_SITE, APPLY_STOCK = 0x400DB1F6, "4fefffd4202f0030"    # lock applier (voice, list, mirror)
+SMOOTH_SITE, SMOOTH_STOCK = 0x4002717E, "4eb9400db28e"      # frame ISR: jsr 0x400db28e (the smoother)
+BUILD_SITE, BUILD_STOCK = 0x400D874C, "4fefffe87065"        # lock-list builder (track, list, table, ., step)
 CLEAR_SITE, CLEAR_STOCK = 0x4003D14E, "4fefffd848d73cfc"    # clear a step's locks (model, track, step)
-LOAD_SITE, LOAD_STOCK = 0x400DE51E, "4fefffe048d73c3c"      # pattern lock table: stored -> RAM
-SAVE_SITE, SAVE_STOCK = 0x400DE718, "4fefffe448d73c1c"      # pattern lock table: RAM -> stored
+LOAD_SITE, LOAD_STOCK = 0x400DE682, "4fefffe048d73c3c"      # pattern lock table: stored -> RAM
+SAVE_SITE, SAVE_STOCK = 0x400DE87C, "4fefffe448d73c1c"      # pattern lock table: RAM -> stored
 
 # v0.40: copy and paste carry SLD/SLEN (the arp p-locks' sites, scripts/build_arp_plocks.py):
 # (site, the stock bytes, the hook's label). Each is a jsr, nops to the stock length.
@@ -50,7 +50,7 @@ PASTE_SITES = (
     (0x40052948, "79338801223c0001799c", "sl_paste_d"),      # track paste's UNDO
     (0x40053F48, "2f122f2b003c", "sl_copy_hook"),            # trig copy: an entry appended
     (0x40055440, "71ab000449faf24a", "sl_paste_hook"),       # trig paste: an entry written
-    (0x400E752C, "73280001b481", "sl_clr_cmp"),              # track clear: a record's track
+    (0x400E7690, "73280001b481", "sl_clr_cmp"),              # track clear: a record's track
 )
 
 # v0.41 (ROADMAP 3, the owner 2026-11-03): slides on our machines' own controls. Only a control
@@ -120,7 +120,7 @@ def md_midnote_measure(names=None, blocks: int = 40, at: int = 4) -> dict[str, s
     return out
 
 
-DEST_SLOTS = (4, 12, 20)                # LFO DEST: copied unsmoothed by 0x400db12a; never slid
+DEST_SLOTS = (4, 12, 20)                # LFO DEST: copied unsmoothed by 0x400db28e; never slid
 SHARED_PAGES = (0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0D, 0x0E, 0x0F, 0x1A, 0x1B, 0x1C)
 MACHINE_PAGES = (0x00, 0x01, 0x02, 0x03)    # FM TONE, WAVETONE, FM DRUM, SWARMER (types 0..3)
 SPAN_MIN = 0x2000                       # at least 32 of the panel's steps: continuous

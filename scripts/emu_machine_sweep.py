@@ -18,7 +18,7 @@ track the label lookup (pages.py wr_label) indexed past the Monomachine's label 
 walked absolute address 0x000000EE as a table. The emulator maps low memory as zero RAM, so
 there the walk met a 0 at once and the page drew; the unit has no RAM there, and hung. So here
 **any read below 0x40000000 by code that is not stock's** (our chunks, an edited stock site)
-fails, with its PC and callers (stock's one boot-time byte read at 0x400cecf2 is stock's); so
+fails, with its PC and callers (stock's one boot-time byte read at 0x400cee56 is stock's); so
 does the firmware's EXCEPTION reporter, and a page or menu that does not change the screen.
 
 - **tracks** (`--mod-types`): each track whose machine is one of ours made active ([TRK] +
@@ -47,9 +47,9 @@ FUNC, SRC, FLTR = (2, 0), (0, 1), (0, 2)    # codes 17, 2, 3
 TRK, TRIG1 = (1, 7), 25                     # [TRK] code 16; [TRIG 1..16] codes 25..40
 KIT = 0x800052A0                            # the live kit; sound t at + 52 + 1163 t
 SOUND_TYPE = 0xDE
-ACTIVE = 0x42431A6C                         # the UI's active track (byte)
-REDRAW = 0x4011D32A                         # the UI loop's draw of every view on its screen
-REPORTER = 0x4011EA6A                       # the firmware's EXCEPTION reporter
+ACTIVE = 0x42432A6C                         # the UI's active track (byte)
+REDRAW = 0x4011D60A                         # the UI loop's draw of every view on its screen
+REPORTER = 0x4011ED4A                       # the firmware's EXCEPTION reporter
 LOW_END = 0x3FFFFFFF                        # below DDR: nothing of ours may read here
 
 
@@ -87,7 +87,7 @@ class Run:
         if len(self.low) < 8:
             sp = uc.reg_read(self.K.UC_M68K_REG_A7)
             words = struct.unpack(">32I", bytes(uc.mem_read(sp, 128)))
-            callers = [f"{v:#010x}" for v in words if 0x40000400 <= v < 0x40220000][:6]
+            callers = [f"{v:#010x}" for v in words if 0x40000400 <= v < 0x4022053f][:6]
             self.low.append({"address": f"{address:#010x}", "pc": f"{pc:#010x}", "callers": callers,
                              "step": self.step})
 

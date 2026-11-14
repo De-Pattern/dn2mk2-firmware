@@ -38,14 +38,14 @@ from emulib.machine import Machine                             # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 STATE, SRC, OUT = 0x8000DE60, 0x80003AF0, 0x800068E4
-OWNER, VSOUND, FRAMES = 0x80005308, 0x800052A8, 0x4058E8D4
+OWNER, VSOUND, FRAMES = 0x80005308, 0x800052A8, 0x4058F8D4
 TEMPO_AT = 0x80005E60 + 216
 KIT, SOUND_STRIDE = 0x800052A0, 1163
 SYNC = 0x4002549C                       # (sound, voice): the sound into the voice's mirror block
-UNDO = 0x400DAF44                       # (voice, mirror, sound): the locked slots back to the sound
-BITMAP_CLEAR = 0x400DB052               # (voice)
-BUILD, APPLY = 0x400D85E8, 0x400DB092
-LOAD, SAVE, CLEAR = 0x400DE51E, 0x400DE718, 0x4003D14E
+UNDO = 0x400DB0A8                       # (voice, mirror, sound): the locked slots back to the sound
+BITMAP_CLEAR = 0x400DB1B6               # (voice)
+BUILD, APPLY = 0x400D874C, 0x400DB1F6
+LOAD, SAVE, CLEAR = 0x400DE682, 0x400DE87C, 0x4003D14E
 REC, RECS, INDEX, COUNTS, TABLE_BYTES = 258, 80, 20640, 22256, 22256 + 2048
 LIST_BYTES = 20 + 202 * 8
 FREQ, FDBK = 67, 31                     # FILTER FREQ (shared), FM TONE's FEEDBACK (a machine param)
@@ -168,12 +168,12 @@ def samp_lock_checks(machine, call, frame, trig, table, snd, lay, put16, put32):
     frame()
     # v0.45: smp_mod_apply first sets SAMP to the sound's (or the lock's) value -- a slot never
     # glides -- and then runs the stock apply, which adds the modulation: so the offset goes in
-    # where the stock apply adds it (on entry to 0x400DB22C, LFOs off here), not before the call
+    # where the stock apply adds it (on entry to 0x400DB390, LFOs off here), not before the call
     from unicorn import UC_HOOK_CODE                       # noqa: PLC0415
 
     def lfo_adds(uc_, ad, sz, us):
         put16(OUT + 2 * idx(V, SAMP_SLOT), machine.word(OUT + 2 * idx(V, SAMP_SLOT)) + (43 << 8))
-    h = machine.uc.hook_add(UC_HOOK_CODE, lfo_adds, begin=0x400DB22C, end=0x400DB22C)
+    h = machine.uc.hook_add(UC_HOOK_CODE, lfo_adds, begin=0x400DB390, end=0x400DB390)
     try:
         call(lay["smp_mod_apply"], OUT)
     finally:
@@ -380,7 +380,7 @@ def main() -> int:
         trace.append((tag, rows))
         return rows
 
-    # The stock smoother 0x400db12a as the instrument computes it. Its one-pole filter is in
+    # The stock smoother 0x400db28e as the instrument computes it. Its one-pole filter is in
     # the EMAC's fractional mode (the ISR sets MACSR = 0x20), and digikit's EMAC halves every
     # fractional product (measured: 0.5 x 0.5 gives 0x10000000, not 0x20000000), so under the
     # emulator the state decays to about half a frame. With `model` on, the routine's entry runs
@@ -411,7 +411,7 @@ def main() -> int:
         uc_.reg_write(K.UC_M68K_REG_A7, sp + 4)
         uc_.reg_write(K.UC_M68K_REG_D0, OUT)
         uc_.reg_write(K.UC_M68K_REG_PC, ret)
-    uc.hook_add(UC_HOOK_CODE, smoother, begin=0x400DB12A, end=0x400DB12A)
+    uc.hook_add(UC_HOOK_CODE, smoother, begin=0x400DB28E, end=0x400DB28E)
 
     f0 = machine.long(FRAMES)
     isr_frames = machine.long(FRAMES)
@@ -853,7 +853,7 @@ def main() -> int:
         panel.settle(10_000_000)
         panel.tap(key(25))                                      # a trig on step 1
         panel.settle(10_000_000)
-        P = machine.long(0x42C5A9A0)                            # the pattern: step flags u16 at +2 step (track 1)
+        P = machine.long(0x42C5B9A0)                            # the pattern: step flags u16 at +2 step (track 1)
         flags0 = machine.word(P)
         panel.hold(key(25), 5_000_000)
         panel.settle(10_000_000)

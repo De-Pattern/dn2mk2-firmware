@@ -3,12 +3,12 @@ against stock's own fine controls through this path; docs/display-path.md has th
 
 A stock 1.11 snapshot (the v0.14 build's edits put back to stock), the FLTR page, then an input
 sequence of detents on one encoder, each followed by GAP instructions of the UI running. Every
-stage the input passes is hooked and logged with the 120 Hz tick (0x466758b0) and the
+stage the input passes is hooked and logged with the 120 Hz tick (0x466768b0) and the
 instruction count:
 
   1. feed:      the bytes panelin puts into the panel UART's ring (its produced count)
-  2. driver:    0x4011fc2c(encoder index, delta), the per-detent record handler, its entry
-                and what it leaves in the accumulator (0x445a0dc4[i]) and pending mask (0x445a0dec)
+  2. driver:    0x4011ff0c(encoder index, delta), the per-detent record handler, its entry
+                and what it leaves in the accumulator (0x445a1dc4[i]) and pending mask (0x445a1dec)
   3. queue:     queue_send (0x40001896) of an encoder record (type 1): its code and delta
   4. receive:   queue_receive (0x40001928) returning into the main loop (0x4002f184)
   5. setter:    the parameter setter 0x40037b74 (sound, slot, value)
@@ -18,7 +18,7 @@ What it established (v0.48, stock 1.11, every run from the same snapshot identic
 nothing is lost before the parameter's own knob step. Every detent reaches the driver,
 the panel task flushes the sum every 4 timer-wheel ticks (PIT2, 60 Hz: 15 records a
 second, clamped to +/-30), and each record reaches the page as one encoder event. The
-knob step 0x4011336e then holds a per-encoder rest counter (+16 of its state: +1 every
+knob step 0x4011364e then holds a per-encoder rest counter (+16 of its state: +1 every
 knob-timer tick up to 48, about 1.6 s to fill). While it is above 24 a move is taken
 out of it (3 x |delta|, floor 0) instead of moving the value: stock's own guard against
 a knob nudged after it has been left alone. So from rest the first records do nothing,
@@ -49,13 +49,13 @@ sys.path.insert(0, str(HERE))
 from emulib import bounded                                      # noqa: E402
 
 SNAP = str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap")
-TICK = 0x466758B0
-ACC, PENDING, LAST = 0x445A0DC4, 0x445A0DEC, 0x445A0D9C
-DRIVER, QSEND, QRECV, SETTER = 0x4011FC2C, 0x40001896, 0x40001928, 0x40037B74
+TICK = 0x466768B0
+ACC, PENDING, LAST = 0x445A1DC4, 0x445A1DEC, 0x445A1D9C
+DRIVER, QSEND, QRECV, SETTER = 0x4011FF0C, 0x40001896, 0x40001928, 0x40037B74
 KIT = 0x800052A0
-# The page's knob state (0x4011336e's a2, 20 bytes an encoder: +0 timeout, +8 acceleration,
+# The page's knob state (0x4011364e's a2, 20 bytes an encoder: +0 timeout, +8 acceleration,
 # +12 remainder, +16 rest counter), as the FLTR page of this snapshot places it.
-STATE = 0x447BEE94 + 32
+STATE = 0x447BFE94 + 32
 
 
 def main() -> int:
@@ -188,7 +188,7 @@ def main() -> int:
         hooks.append(uc.hook_add(UC_HOOK_MEM_WRITE, on_w, begin=wa, end=wa + wl - 1))
     panel.settle(5_000_000)
     if a.machine is not None:
-        owner = guest(m, 0x4018A97A)
+        owner = guest(m, 0x4018AC5A)
         guest(m, 0x40031880, owner + 0xF4, 0, a.machine, 1, 1)
         panel.settle(5_000_000)
     rec_ids = [int(x, 0) for x in a.records.split(",") if x]
@@ -196,8 +196,8 @@ def main() -> int:
     def records():
         out_ = {}
         for i in rec_ids:
-            r = struct.unpack(">15i", bytes(m.read(0x401F7F94 + 60 * i, 60)))
-            t = struct.unpack(">4I", bytes(m.read(0x4243325C + 68 * i + 4, 16)))
+            r = struct.unpack(">15i", bytes(m.read(0x401F83A4 + 60 * i, 60)))
+            t = struct.unpack(">4I", bytes(m.read(0x4243425C + 68 * i + 4, 16)))
             out_[i] = {"range": r[3], "default": r[4], "flag": r[5], "fmt": hex(r[13] & 0xFFFFFFFF),
                        "type": [hex(x) for x in t]}
         return out_
@@ -209,7 +209,7 @@ def main() -> int:
     for part in a.detents.split(","):
         d, n = part.split("*")
         plan += [int(d)] * int(n)
-    # the page's knob state: 0x4011336e's first argument (page + 148) + 32 + 20 x encoder.
+    # the page's knob state: 0x4011364e's first argument (page + 148) + 32 + 20 x encoder.
     # --rest is put there at the first knob step, before it runs (the page object is the
     # open page's; until then nothing but the knob timer touches the counter)
     state = STATE + 20 * a.enc
@@ -223,7 +223,7 @@ def main() -> int:
             uc_.mem_write(st_ + 16, struct.pack(">i", a.rest))
             primed["done"] = True
         log.append(("step", seqn["n"], now(), args(3)[2], before))
-    hooks.append(uc.hook_add(UC_HOOK_CODE, on_step, begin=0x4011336E, end=0x4011336E))
+    hooks.append(uc.hook_add(UC_HOOK_CODE, on_step, begin=0x4011364E, end=0x4011364E))
     if a.no_wheel:
         for src in getattr(panel.timers, "sources", (panel.timers,)):
             if hasattr(src, "channels") and 2 in src.channels and type(src).__name__ == "Pits":

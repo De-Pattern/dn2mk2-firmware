@@ -6,12 +6,12 @@ pattern cued with PTN + TRIG, ticked through stock's own sequencer ISR.
         --build out/jump-build --snapshot ../digikit/out/snapshots/dn2-1.11/ui800M-v014.snap \\
         --scenario on --variant pp [--stock] --json OUT
 
-The sequencer's timer ISR (0x400d987a, vector 121) does not fire by itself here (the timers
+The sequencer's timer ISR (0x400d99de, vector 121) does not fire by itself here (the timers
 are deferred), so the harness enters it as the interrupt would (an exception frame, its rte
 returns to a sentinel), four entries a tick at the snapshot's tempo; the UI runs between, as
 the panel drives it. Every entry's sequencer state is recorded: the playing pattern, the
 change counter, the tick, each track's current and next step, and a digest of the whole
-sequencer block (0x42c5a900..0x42c5ab00, 0x446483d0..0x446484c4).
+sequencer block (0x42c5b900..0x42c5bb00, 0x446493d0..0x446494c4).
 
 Two patterns are set up in RAM first (`--variant`): pp, A01 16 steps and A02 12, both per
 pattern at 1x; pt, A02 per track (master 16; tracks 16, 5, 7, 3, then 16); odd, A01 12 steps
@@ -25,7 +25,7 @@ steps since) wrapped by its new length. Scenarios:
 - `on`: PTN + YES first (the message, the setting, the sector written), then as `off`.
 - `ref`: A02 cued while stopped, then PLAY: stock playing A02 from PLAY, the control for
   where the jump must land.
-- `pc`: the setting on, A02 cued through the sequencer's cue routine directly (0x400d93f0,
+- `pc`: the setting on, A02 cued through the sequencer's cue routine directly (0x400d9554,
   as program changes, chains and songs cue): stock's timing.
 - `persist`: PTN + YES, then a power-on (the setting's RAM back to its boot values; the UI
   reads the sector); PTN + NO, a power-on again.
@@ -64,15 +64,15 @@ from emulib.panel import NO, YES, Panel                 # noqa: E402
 
 PLAY, PTN = (2, 3), (2, 6)
 TRIG = [(3 + k // 8, k % 8) for k in range(16)]         # codes 25..40
-SEQ_ISR, SEQ_VECTOR = 0x400D987A, 121
-CUE = 0x400D93F0
+SEQ_ISR, SEQ_VECTOR = 0x400D99DE, 121
+CUE = 0x400D9554
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
-P0, PSTRIDE = 0x4121898C, 122478                         # pattern n at P0 + n * PSTRIDE (0x400fa17c)
-K0, KSTRIDE = 0x4210C08C, 23921                          # its kit
+P0, PSTRIDE = 0x4121998C, 122478                         # pattern n at P0 + n * PSTRIDE (0x400fa348)
+K0, KSTRIDE = 0x4210D08C, 23921                          # its kit
 LEN, MODE, SCALE, TRK, TLEN = 122196, 122201, 122202, 1701, 1164
-FAULT_REPORTER = 0x4011EA6A
-BLK_READ, BLK_WRITE = 0x4012C59A, 0x4012C780
-BLK_READY, BLK_SECTORS = 0x4461B68C, 0x4461B6B0
+FAULT_REPORTER = 0x4011ED4A
+BLK_READ, BLK_WRITE = 0x4012C87A, 0x4012CA60
+BLK_READY, BLK_SECTORS = 0x4461C68C, 0x4461C6B0
 SET_SECTOR = 0x6FF000
 CALLS_A_TICK = 4                                         # ISR entries a tick here (measured)
 CUE_STEP, END_STEP = 3, 36
@@ -207,13 +207,13 @@ def main() -> int:
     trace = []
 
     def pat_index():
-        return (u32(0x42C5A9A0) - P0) // PSTRIDE
+        return (u32(0x42C5B9A0) - P0) // PSTRIDE
 
     def record(tag=""):
-        block = m.read(0x42C5A900, 0x200) + m.read(0x446483D0, 0xF4)
-        row = {"n": len(trace), "tag": tag, "pat": pat_index(), "a91c": u16(0x42C5A91C), "tick": u8(0x42C5A91E),
-               "t6": u32(0x42C5A9D0) * 6 + u32(0x42C5A9D4),
-               "cur": list(m.read(0x42C5A984, 16)), "next": list(m.read(0x42C5A964, 16)),
+        block = m.read(0x42C5B900, 0x200) + m.read(0x446493D0, 0xF4)
+        row = {"n": len(trace), "tag": tag, "pat": pat_index(), "a91c": u16(0x42C5B91C), "tick": u8(0x42C5B91E),
+               "t6": u32(0x42C5B9D0) * 6 + u32(0x42C5B9D4),
+               "cur": list(m.read(0x42C5B984, 16)), "next": list(m.read(0x42C5B964, 16)),
                "digest": hashlib.sha256(block).hexdigest()[:16]}
         trace.append(row)
         return row
@@ -226,7 +226,7 @@ def main() -> int:
             record(tag)
 
     def global_step():
-        return u32(0x42C5A9D0)
+        return u32(0x42C5B9D0)
 
     out = {"scenario": a.scenario, "variant": a.variant, "stock": a.stock}
 
@@ -292,11 +292,11 @@ def main() -> int:
     ticks(3)
     cue_at = len(trace)
     out["cue_global_step"] = global_step()
-    out["cue_tick"] = u8(0x42C5A91E)
+    out["cue_tick"] = u8(0x42C5B91E)
     if a.scenario in ("off", "on"):
         cue_a02()
     elif a.scenario == "pc":
-        entry = struct.pack(">IIhhh2xib3x", A02, K0 + KSTRIDE, -1, -1, 0, -1, -1)   # as 0x400fa11e builds it
+        entry = struct.pack(">IIhhh2xib3x", A02, K0 + KSTRIDE, -1, -1, 0, -1, -1)   # as 0x400fa2ea builds it
         buf = STACK_TOP + 0x2000
         m.write(buf, entry[:24])
         guest(CUE, buf, 1)
@@ -357,7 +357,7 @@ def rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with
         m.write(pat + SCALE, bytes([sc]))
 
     def pat_index():
-        v = u32(0x42C5A9A0)
+        v = u32(0x42C5B9A0)
         return (v - P0) // PSTRIDE if v >= P0 else -1
     count = [0]
 

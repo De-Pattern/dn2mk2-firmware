@@ -39,9 +39,24 @@ from emulib import bounded                                      # noqa: E402
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 CF_FRAME = 0x80005E60                   # the frame as the ColdFire builds it (16-bit BE)
 CF_REPLY_TAIL = 0x80005E40              # the SPI reply's tail: the DSP's status, 16 BE halfwords
-CF_TDM_TX, CF_TDM_RX = 0x4E6E0100, 0x4E6DF100
+CF_TDM_TX, CF_TDM_RX = 0x4E6E0100, 0x4E6DF100   # (1.11's; 1.12's from the tree's link.c, below)
+
+
+def _tdm_pages() -> tuple[int, int]:
+    """The ColdFire's TDM transmit and receive pages as this tree's link.c has them (TDM_TX, TDM_RX): 1.12 moved
+    them 0x8000 up (0x4E6E8100, 0x4E6E7100). With 1.11's on 1.12, neither side's packets reach the other."""
+    import re
+    src = (ROOT / "csrc/sampler/link.c").read_text()
+    tx = re.search(r"#define TDM_TX\(h\) \(\(volatile u32 \*\)\((0x[0-9A-Fa-f]+)u", src)
+    rx = re.search(r"#define TDM_RX\(h\) \(\(volatile u32 \*\)\((0x[0-9A-Fa-f]+)u", src)
+    if not (tx and rx):
+        return CF_TDM_TX, CF_TDM_RX
+    return int(tx.group(1), 16), int(rx.group(1), 16)
+
+
+CF_TDM_TX, CF_TDM_RX = _tdm_pages()
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
-SEQ_ISR, SEQ_VECTOR = 0x400D987A, 121   # the sequencer's timer ISR (emu_jump.py, emu_waverider_menu.py)
+SEQ_ISR, SEQ_VECTOR = 0x400D99DE, 121   # the sequencer's timer ISR (emu_jump.py, emu_waverider_menu.py)
 SEQ_ENTRIES_A_STEP = 24                 # 4 entries a tick, 6 ticks a sixteenth (measured, emu_jump.py)
 UI_SLICE = 1_000_000                    # ColdFire instructions a period between ISRs (the UI loop's pass needs about this here)
 # v0.48, the timing-faithful mode (docs/coupled-emulator.md): on the unit the audio ISR takes
@@ -50,8 +65,8 @@ UI_SLICE = 1_000_000                    # ColdFire instructions a period between
 # the UI's slice and the timers count (the fast stepper's blocks x per_block)
 ISR_SHARE_STOPPED = 0.56
 AUDIO_HZ = 1500
-TICK = 0x466758B0                       # the panel task's 60 Hz tick (the timer wheel's, every PIT2)
-IDLE_SPIN = 0x400CF0E2                  # the idle task's bra.s * (docs/coldfire-tasks.md)
+TICK = 0x466768B0                       # the panel task's 60 Hz tick (the timer wheel's, every PIT2)
+IDLE_SPIN = 0x400CF246                  # the idle task's bra.s * (docs/coldfire-tasks.md)
 
 
 def _bits(x: float) -> int:
@@ -434,7 +449,7 @@ class Coupled:
         def on_spin(uc_, ad, sz, us):
             spins["n"] += 1
         h = self.uc.hook_add(UC_HOOK_CODE, on_spin, begin=IDLE_SPIN, end=IDLE_SPIN)
-        t0, f0 = self.long(TICK), self.long(0x4058E8D4)
+        t0, f0 = self.long(TICK), self.long(0x4058F8D4)
         fired0 = dict(self.panel.timers.fired)
         ui0, isr0 = self.ui_units, len(self.isr_units)
         self.periods(n, label=f"timing report ({self.timing})")
@@ -445,7 +460,7 @@ class Coupled:
         ui = self.ui_units - ui0
         out = {"mode": self.timing, "periods": n, "audio_s": n / AUDIO_HZ,
                "tick_60hz": self.long(TICK) - t0, "tick_want": round(60 * n / AUDIO_HZ, 1),
-               "frames": self.long(0x4058E8D4) - f0, "timers_fired": fired,
+               "frames": self.long(0x4058F8D4) - f0, "timers_fired": fired,
                "isr_units_median": sorted(isr)[len(isr) // 2] if isr else None,
                "ui_units_a_period": ui / n, "frame_units": self.frame_units,
                "idle_spin_share_of_ui": (spins["n"] * per / ui) if ui else None}

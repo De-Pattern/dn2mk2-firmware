@@ -21,16 +21,16 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-#define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90)
-#define LABEL_FONT 0x40291760u
-#define LABEL_TEXT ((void (*)(void *, u32, int, int, int, int, const char *, const char *, ...))0x40115668u)
+#define SET_PIXEL ((void (*)(void *, int, int, int))0x40113E70)
+#define LABEL_FONT 0x40291ca0u
+#define LABEL_TEXT ((void (*)(void *, u32, int, int, int, int, const char *, const char *, ...))0x40115948u)
 #define LABEL(c, x, y, fmt, ...) LABEL_TEXT((c), LABEL_FONT, (x), (y), 1, 0, 0, fmt, __VA_ARGS__)
-#define FRAMES (*(volatile u32 *)0x4058E8D4u)
+#define FRAMES (*(volatile u32 *)0x4058F8D4u)
 #define KIT (*(volatile u32 *)0x800052A0u)
-#define ACTIVE_TRACK (*(volatile u8 *)0x42431A6Cu)
+#define ACTIVE_TRACK (*(volatile u8 *)0x42432A6Cu)
 #define SOUND(t) (KIT + 52u + 1163u * (u32)(t))
 #define SLICE_TYPE 13                           /* dnfw.sampler.machines.TYPE_OF["SLICE"] */
-#define RECORD(id) ((const int *)(0x401F7F94u + 60u * (id)))
+#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))
 /* a record's value in a sound: the u16 at 20 + 2 x its slot (record + 4), the value in the
  * high byte, offset by the record's low (record + 8); as stock's setter 0x40037b74 stores it
  * (its values object at sound + 6: SAMP, slot 43, at sound + 0x6a, seen in the emulator) */
@@ -165,7 +165,7 @@ static void secs(void *c, int x, int y, u32 f)
 
 /* -- v0.25: slices to the placed trigs, as the DT2's CREATE LINEAR / RANDOM LOCKS --------- */
 /* The stock's own lock calls on the active track (the knob-and-held-trig path's: its
- * parameter set's vtable at 0x401db7fc, +0x40, +0x44, +0x48): a lock's value is the raw
+ * parameter set's vtable at 0x401dbc0c, +0x40, +0x44, +0x48): a lock's value is the raw
  * value << 8, as setValue's; GET answers -1 for none. A track's trigs: its pattern track
  * (0x4003b2ea(0x4003efa8(owner), track)), its length (0x4004f896) and whether a step holds
  * a note trig (0x4004f0f4: a trig, and not a lock trig). Found in the emulator: a held
@@ -173,7 +173,7 @@ static void secs(void *c, int x, int y, u32 f)
 #define LOCK_GET ((int (*)(u32, u32, u32))0x40037C52u)            /* (this, id, step) */
 #define LOCK_SET ((u32 (*)(u32, u32, u32, u32))0x40037CB6u)       /* (this, id, value << 8, step) */
 #define LOCK_CLEAR ((u32 (*)(u32, u32, u32))0x40037D22u)          /* (this, id, step) */
-#define UI_OWNER ((u32 (*)(void))0x4018A97Au)
+#define UI_OWNER ((u32 (*)(void))0x4018AC5Au)
 #define PATTERN_OF ((u32 (*)(u32))0x4003EFA8u)
 #define PTRACK ((u32 (*)(u32, u32))0x4003B2EAu)
 #define PTRACK_LEN ((int (*)(u32))0x4004F896u)

@@ -48,8 +48,8 @@ and by anything else that can be drawn at build time. When present it wins over
 BOOT: the stamp runs the stock intro routine whole (so the source bitmap exists
 and the frame counter advances exactly as stock), then copies frame `n` into the
 source and blits it plainly over the panel -- the intro's own copy for frames
-0-4, `0x40114d94` then `0x401157fc`. The tunnel's output is simply overwritten.
-The routine is called through `0x4028c154` and nothing reads its result.
+0-4, `0x40115074` then `0x40115adc`. The tunnel's output is simply overwritten.
+The routine is called through `0x4028c694` and nothing reads its result.
 
 On 1.11 the intro routine's second argument is the intro's length: 175 frames
 under the emulator from `boot400M`.
@@ -59,7 +59,7 @@ under the emulator from `boot400M`.
 In a `CODE` chunk at `LOAD_VA`, copied up by the platform loader. Not at
 `0x46700000`: lfo4 keeps its LFO state arrays there, and a stamp placed there
 was overwritten on the instrument (V04 at `0x46700000`, 2026-09-30). Until
-2026-09-30 it sat in the 896-byte cave at `0x402dfa1c` behind a boot stub of its
+2026-09-30 it sat in the 896-byte cave at `0x402dff5c` behind a boot stub of its
 own; LFO4 uses that cave too, and the start-up hook was the boot screen's alone,
 so the two could not be combined. The stamp itself is unchanged: it was always
 position-independent but for the absolute addresses below.
@@ -79,11 +79,11 @@ sys.path.insert(0, str(HERE))
 from dnfw.patch.assemble import assemble, available
 
 # --- the 1.11 sites, each checked against stock bytes when the mod applies ---
-INTRO_VA = 0x400D3886
+INTRO_VA = 0x400D39EA
 INTRO_STOCK = "4fefffc448d77cfc"             # lea -60(sp),sp ; moveml
-RESUME_VA = 0x400D388E
-SOURCE_DATA_PTR = 0x42C4567C + 16            # the intro's source Bitmap data pointer
-AREA_VA = 0x4030B980                         # where appended data starts
+RESUME_VA = 0x400D39F2
+SOURCE_DATA_PTR = 0x42C4667C + 16            # the intro's source Bitmap data pointer
+AREA_VA = 0x4030C980                         # where appended data starts
 RUNTIME_VA = 0x46710000                      # where the boot hook copies it
 LOAD_VA = 0x46708000                         # the stamp's CODE chunk, above lfo4's LFO state
 CODE_CAP = 0x8000                            # up to the data window at RUNTIME_VA
@@ -93,9 +93,9 @@ ANIM = b"ANIM"
 ANIZ = b"ANIZ"                               # v0.37: an animation as frame-to-frame changes (dnfw.bootanim)
 ANIZ_MAGIC = b"ANZ1"                         # the decoder's state is set up
 ANZL = b"ANZL"                               # v0.39: a label ORed over the animation's last frame (the mod's version)
-SOURCE_OBJ = 0x42C4567C                      # the intro's source Bitmap
-CLEAR_BITMAP = 0x40114D94                    # (bitmap, 0, 1): what the intro calls first
-BLIT = 0x401157FC                            # (dst, src, 0, 0, 0): its plain copy, frames 0-4
+SOURCE_OBJ = 0x42C4667C                      # the intro's source Bitmap
+CLEAR_BITMAP = 0x40115074                    # (bitmap, 0, 1): what the intro calls first
+BLIT = 0x40115ADC                            # (dst, src, 0, 0, 0): its plain copy, frames 0-4
 WORDS = 256
 
 SOURCE = f"""
@@ -333,7 +333,7 @@ def generate() -> dict:
     if len(code) > CODE_CAP:
         raise SystemExit(f"code {len(code)} B does not fit below the data window")
     return {
-        "os": "Digitone II 1.11",
+        "os": "Digitone II 1.12",
         "load": LOAD_VA, "code": code.hex(), "stamp": addrs["stamp"],
         "aniz_show": addrs["aniz_show"], "zst": addrs["zst"], "aniz_drawn": addrs["aniz_drawn"],
         "anzl_chunk": ANZL.decode(), "source_data_ptr": SOURCE_DATA_PTR,
@@ -341,7 +341,7 @@ def generate() -> dict:
         "area_va": AREA_VA, "runtime_va": RUNTIME_VA,
         "magic": MAGIC.decode(), "boot_chunk": BOOT.decode(), "anim_chunk": ANIM.decode(),
         "aniz_chunk": ANIZ.decode(), "words": WORDS,
-        "tunnel_x_va": 0x400D374E, "tunnel_y_va": 0x400D377E,
+        "tunnel_x_va": 0x400D38B2, "tunnel_y_va": 0x400D38E2,
     }
 
 

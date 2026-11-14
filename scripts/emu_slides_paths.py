@@ -39,15 +39,15 @@ from __future__ import annotations
 import struct
 
 REC, RECS, INDEX, STEPBITS = 258, 80, 20640, 22256
-PATTERN_PTR, PATTERN_BYTES, TABLE_AT = 0x42C5A9A0, 122478, 97872
+PATTERN_PTR, PATTERN_BYTES, TABLE_AT = 0x42C5B9A0, 122478, 97872
 SITES = {"page paste": 0x40053246, "page undo": 0x40052634, "track paste": 0x4005389C,
          "track undo": 0x40052948, "shift": 0x40051158, "autocopy": 0x40050CCE,
          "trig paste": 0x40055440}
 SHIFT, AUTOCOPY = 0x40050DC2, 0x40050B4E
-APP, TRACK_CTX = 0x4018A97A, 0x4003EFDE
+APP, TRACK_CTX = 0x4018AC5A, 0x4003EFDE
 CUR_A, CUR_B = 0x4003EFA8, 0x4003B394  # the app -> the pattern's settings (the autocopy wrapper's)
 GET_LEN, SET_LEN = 0x4003A692, 0x4003A6C2                     # its length (pattern mode)
-SAVE = 0x400DE718                       # the lock table, RAM -> stored (sl_save in the build)
+SAVE = 0x400DE87C                       # the lock table, RAM -> stored (sl_save in the build)
 SET_LOCK = 0x4003CEEE                   # (model, track, step, slot, value): a knob's p-lock
 SRC, OUT, KIT, SOUND_STRIDE = 0x80003AF0, 0x800068E4, 0x800052A0, 1163
 FUNC, RECORD, PLAY, STOP, PAGE, NO, LEFT, RIGHT = 17, 19, 20, 21, 22, 12, 13, 15
@@ -158,7 +158,7 @@ class Paths:
     def clear_track(self):
         """FUNC + PLAY until the track has no lock record left: a second FUNC + PLAY right after a
         clear (or a paste) is its UNDO (0x40052824, measured), so one press may restore instead.
-        Stock's clear (0x400e745c) frees a record by its header and leaves its values (its value
+        Stock's clear (0x400e75c0) frees a record by its header and leaves its values (its value
         loop strides 260 bytes over 258-byte records), and stock's setter 0x4003ceee takes a free
         record as it finds it, so a fresh lock could inherit a freed record's values; the freed
         records are reset to 0xffff here, so what a check reads is what the paste wrote"""
