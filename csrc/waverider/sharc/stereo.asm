@@ -56,10 +56,11 @@ wr_st_c0.:
       DM(0x200ac134) = R13;
       DM(0x200ac138) = R14;
       DM(0x200ac13c) = R15;
-      DM(0x200ac140) = I1;
-      DM(0x200ac144) = I3;
-      DM(0x200ac148) = I4;
-      DM(0x200ac14c) = ASTAT;
+      DM(0x200ac140) = I0;
+      DM(0x200ac144) = I1;
+      DM(0x200ac148) = I3;
+      DM(0x200ac14c) = I4;
+      DM(0x200ac150) = ASTAT;
       I1 = R4;                          // PRE = L's state
       R0 = 0x200ac200;
       I3 = R0;
@@ -69,7 +70,7 @@ wr_st_pre0.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4a82;                   // -> wr_st_pre0.
+      IF NE JUMP 0xbd4a85;                   // -> wr_st_pre0.
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 2;
       R13 = 0x200ac090;
@@ -77,7 +78,7 @@ wr_st_pre0.:
       I1 = R13;
       R0 = DM(0, I1);
       R0 = PASS R0;
-      IF EQ JUMP 0xbd4ab3;                   // -> wr_st_nodup0.
+      IF EQ JUMP 0xbd4ab6;                   // -> wr_st_nodup0.
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 7;
       R13 = 0x200ac400;
@@ -91,7 +92,7 @@ wr_st_dup0.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4aad;                   // -> wr_st_dup0.
+      IF NE JUMP 0xbd4ab0;                   // -> wr_st_dup0.
 .GLOBAL wr_st_nodup0.;
 wr_st_nodup0.:
       R0 = DM(0x200ac100);
@@ -110,10 +111,11 @@ wr_st_nodup0.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -129,7 +131,7 @@ wr_st_nodup0.:
       DM(I7, M7) = R2;
       CJUMP 0xb8251b (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd4b0a;                 // return address - 1: wr_st_l0. - 1
+      DM(I7, M7) = 0xbd4b10;                 // return address - 1: wr_st_l0. - 1
 .GLOBAL wr_st_l0.;
 wr_st_l0.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -149,10 +151,11 @@ wr_st_l0.:
       DM(0x200ac1b4) = R13;
       DM(0x200ac1b8) = R14;
       DM(0x200ac1bc) = R15;
-      DM(0x200ac1c0) = I1;
-      DM(0x200ac1c4) = I3;
-      DM(0x200ac1c8) = I4;
-      DM(0x200ac1cc) = ASTAT;
+      DM(0x200ac1c0) = I0;
+      DM(0x200ac1c4) = I1;
+      DM(0x200ac1c8) = I3;
+      DM(0x200ac1cc) = I4;
+      DM(0x200ac1d0) = ASTAT;
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac800;
@@ -171,16 +174,16 @@ wr_st_sync0.:
       R0 = DM(I4, M6);                  // PRE
       R1 = DM(I3, M6);                  // LPOST
       COMP(R0, R1);
-      IF EQ JUMP 0xbd4b73;                   // -> wr_st_keep0.
+      IF EQ JUMP 0xbd4b7c;                   // -> wr_st_keep0.
       DM(I1, M6) = R0;                  // changed by another: follow L
-      JUMP 0xbd4b74;                         // -> wr_st_next0.
+      JUMP 0xbd4b7d;                         // -> wr_st_next0.
 .GLOBAL wr_st_keep0.;
 wr_st_keep0.:
       R2 = DM(I1, M6);                  // R's own: kept (the read moves I1 on)
 .GLOBAL wr_st_next0.;
 wr_st_next0.:
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4b69;                   // -> wr_st_sync0.
+      IF NE JUMP 0xbd4b72;                   // -> wr_st_sync0.
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ad800;
@@ -194,7 +197,7 @@ wr_st_post0.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4b8b;                   // -> wr_st_post0.
+      IF NE JUMP 0xbd4b94;                   // -> wr_st_post0.
       R0 = DM(0x200ac130);              // L's block
       I1 = R0;
       R0 = 0x200ac300;
@@ -205,7 +208,7 @@ wr_st_snap0.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4b9d;                   // -> wr_st_snap0.
+      IF NE JUMP 0xbd4ba6;                   // -> wr_st_snap0.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -222,10 +225,11 @@ wr_st_snap0.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac800;
@@ -239,9 +243,10 @@ wr_st_snap0.:
       I3 = R13;
       R12 = PASS R13;                   // R's block
       R8 = PASS R13;
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -257,7 +262,7 @@ wr_st_snap0.:
       DM(I7, M7) = R2;
       CJUMP 0xb8251b (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd4c1e;                 // return address - 1: wr_st_r0. - 1
+      DM(I7, M7) = 0xbd4c2d;                 // return address - 1: wr_st_r0. - 1
 .GLOBAL wr_st_r0.;
 wr_st_r0.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -277,10 +282,11 @@ wr_st_r0.:
       R13 = DM(0x200ac1b4);
       R14 = DM(0x200ac1b8);
       R15 = DM(0x200ac1bc);
-      I1 = DM(0x200ac1c0);
-      I3 = DM(0x200ac1c4);
-      I4 = DM(0x200ac1c8);
-      ASTAT = DM(0x200ac1cc);
+      I0 = DM(0x200ac1c0);
+      I1 = DM(0x200ac1c4);
+      I3 = DM(0x200ac1c8);
+      I4 = DM(0x200ac1cc);
+      ASTAT = DM(0x200ac1d0);
       I12 = DM(-1, I6);                 // back to the body: the stage's own return
       JUMP (M14, I12) (DB);
       I7 = I6;
@@ -293,33 +299,33 @@ wr_st_t1.:
       IF EQ JUMP 0x1cdb56;              // none: the stage, as stock
       R0 = DM(0x200ac014);              // slot 0's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd4c8c;                   // -> wr_st_s1_0.
+      IF EQ JUMP 0xbd4c9e;                   // -> wr_st_s1_0.
       R0 = DM(0x200ac030);              // slot 1's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd4c91;                   // -> wr_st_s1_1.
+      IF EQ JUMP 0xbd4ca3;                   // -> wr_st_s1_1.
       R0 = DM(0x200ac04c);              // slot 2's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd4c96;                   // -> wr_st_s1_2.
+      IF EQ JUMP 0xbd4ca8;                   // -> wr_st_s1_2.
       R0 = DM(0x200ac068);              // slot 3's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd4c9b;                   // -> wr_st_s1_3.
+      IF EQ JUMP 0xbd4cad;                   // -> wr_st_s1_3.
       JUMP 0x1cdb56;                    // a mono voice: the stage, as stock
 .GLOBAL wr_st_s1_0.;
 wr_st_s1_0.:
       R1 = 0;
-      JUMP 0xbd4ca0;                         // -> wr_st_c1.
+      JUMP 0xbd4cb2;                         // -> wr_st_c1.
 .GLOBAL wr_st_s1_1.;
 wr_st_s1_1.:
       R1 = 1;
-      JUMP 0xbd4ca0;                         // -> wr_st_c1.
+      JUMP 0xbd4cb2;                         // -> wr_st_c1.
 .GLOBAL wr_st_s1_2.;
 wr_st_s1_2.:
       R1 = 2;
-      JUMP 0xbd4ca0;                         // -> wr_st_c1.
+      JUMP 0xbd4cb2;                         // -> wr_st_c1.
 .GLOBAL wr_st_s1_3.;
 wr_st_s1_3.:
       R1 = 3;
-      JUMP 0xbd4ca0;                         // -> wr_st_c1.
+      JUMP 0xbd4cb2;                         // -> wr_st_c1.
 .GLOBAL wr_st_c1.;
 wr_st_c1.:
       DM(0x200ac0b4) = R1;
@@ -339,10 +345,11 @@ wr_st_c1.:
       DM(0x200ac134) = R13;
       DM(0x200ac138) = R14;
       DM(0x200ac13c) = R15;
-      DM(0x200ac140) = I1;
-      DM(0x200ac144) = I3;
-      DM(0x200ac148) = I4;
-      DM(0x200ac14c) = ASTAT;
+      DM(0x200ac140) = I0;
+      DM(0x200ac144) = I1;
+      DM(0x200ac148) = I3;
+      DM(0x200ac14c) = I4;
+      DM(0x200ac150) = ASTAT;
       I1 = R4;                          // PRE = L's state
       R0 = 0x200ac200;
       I3 = R0;
@@ -352,7 +359,7 @@ wr_st_pre1.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4ce8;                   // -> wr_st_pre1.
+      IF NE JUMP 0xbd4cfd;                   // -> wr_st_pre1.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -369,10 +376,11 @@ wr_st_pre1.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -388,7 +396,7 @@ wr_st_pre1.:
       DM(I7, M7) = R2;
       CJUMP 0x1cdb56 (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd4d45;                 // return address - 1: wr_st_l1. - 1
+      DM(I7, M7) = 0xbd4d5d;                 // return address - 1: wr_st_l1. - 1
 .GLOBAL wr_st_l1.;
 wr_st_l1.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -408,10 +416,11 @@ wr_st_l1.:
       DM(0x200ac1b4) = R13;
       DM(0x200ac1b8) = R14;
       DM(0x200ac1bc) = R15;
-      DM(0x200ac1c0) = I1;
-      DM(0x200ac1c4) = I3;
-      DM(0x200ac1c8) = I4;
-      DM(0x200ac1cc) = ASTAT;
+      DM(0x200ac1c0) = I0;
+      DM(0x200ac1c4) = I1;
+      DM(0x200ac1c8) = I3;
+      DM(0x200ac1cc) = I4;
+      DM(0x200ac1d0) = ASTAT;
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac814;
@@ -430,16 +439,16 @@ wr_st_sync1.:
       R0 = DM(I4, M6);                  // PRE
       R1 = DM(I3, M6);                  // LPOST
       COMP(R0, R1);
-      IF EQ JUMP 0xbd4dae;                   // -> wr_st_keep1.
+      IF EQ JUMP 0xbd4dc9;                   // -> wr_st_keep1.
       DM(I1, M6) = R0;                  // changed by another: follow L
-      JUMP 0xbd4daf;                         // -> wr_st_next1.
+      JUMP 0xbd4dca;                         // -> wr_st_next1.
 .GLOBAL wr_st_keep1.;
 wr_st_keep1.:
       R2 = DM(I1, M6);                  // R's own: kept (the read moves I1 on)
 .GLOBAL wr_st_next1.;
 wr_st_next1.:
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4da4;                   // -> wr_st_sync1.
+      IF NE JUMP 0xbd4dbf;                   // -> wr_st_sync1.
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ad814;
@@ -453,7 +462,7 @@ wr_st_post1.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4dc6;                   // -> wr_st_post1.
+      IF NE JUMP 0xbd4de1;                   // -> wr_st_post1.
       R3 = 0;                           // bit 0: unchanged, bit 1: stepped
       R0 = DM(0x200ac130);              // L's block (R12 as called)
       I1 = R0;
@@ -465,9 +474,9 @@ wr_st_same1.:
       R0 = DM(I1, M6);
       R1 = DM(I3, M6);
       COMP(R0, R1);
-      IF NE JUMP 0xbd4de6;                   // -> wr_st_ns1.
+      IF NE JUMP 0xbd4e01;                   // -> wr_st_ns1.
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4dda;                   // -> wr_st_same1.
+      IF NE JUMP 0xbd4df5;                   // -> wr_st_same1.
       R3 = 1;
 .GLOBAL wr_st_ns1.;
 wr_st_ns1.:
@@ -483,9 +492,9 @@ wr_st_step1.:
       R1 = DM(I3, M6);
       F1 = F1 * F2;                     // the step's own order: sample x constant
       COMP(R0, R1);
-      IF NE JUMP 0xbd4e03;                   // -> wr_st_nx1.
+      IF NE JUMP 0xbd4e1e;                   // -> wr_st_nx1.
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4df5;                   // -> wr_st_step1.
+      IF NE JUMP 0xbd4e10;                   // -> wr_st_step1.
       R0 = 2;
       R3 = R3 OR R0;
 .GLOBAL wr_st_nx1.;
@@ -497,20 +506,20 @@ wr_st_nx1.:
       I1 = R13;
       R0 = 1;
       COMP(R3, R0);
-      IF NE JUMP 0xbd4e19;                   // -> wr_st_g11.
+      IF NE JUMP 0xbd4e34;                   // -> wr_st_g11.
       R0 = 0;
       DM(0, I1) = R0;                   // unchanged: no step
 .GLOBAL wr_st_g11.;
 wr_st_g11.:
       R0 = 2;
       COMP(R3, R0);
-      IF NE JUMP 0xbd4e23;                   // -> wr_st_g21.
+      IF NE JUMP 0xbd4e3e;                   // -> wr_st_g21.
       R0 = 1;
       DM(0, I1) = R0;                   // stepped
 .GLOBAL wr_st_g21.;
 wr_st_g21.:
       R3 = PASS R3;
-      IF NE JUMP 0xbd4e30;                   // -> wr_st_g31.
+      IF NE JUMP 0xbd4e4b;                   // -> wr_st_g31.
       R0 = DM(0x200ac0c0);              // neither: counted
       R1 = 1;
       R0 = R0 + R1;
@@ -519,7 +528,7 @@ wr_st_g21.:
 wr_st_g31.:
       R0 = DM(0, I1);
       R0 = PASS R0;
-      IF EQ JUMP 0xbd4e4f;                   // -> wr_st_g41.
+      IF EQ JUMP 0xbd4e6a;                   // -> wr_st_g41.
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 7;
       R13 = 0x200ac400;
@@ -533,7 +542,7 @@ wr_st_mul1.:
       F0 = F0 * F2;
       DM(I3, M6) = F0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4e47;                   // -> wr_st_mul1.
+      IF NE JUMP 0xbd4e62;                   // -> wr_st_mul1.
 .GLOBAL wr_st_g41.;
 wr_st_g41.:
       R0 = DM(0x200ac100);
@@ -552,10 +561,11 @@ wr_st_g41.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac814;
@@ -569,9 +579,10 @@ wr_st_g41.:
       I3 = R13;
       R12 = PASS R13;                   // R's block
       R8 = PASS R13;
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -587,7 +598,7 @@ wr_st_g41.:
       DM(I7, M7) = R2;
       CJUMP 0x1cdb56 (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd4eca;                 // return address - 1: wr_st_r1. - 1
+      DM(I7, M7) = 0xbd4eeb;                 // return address - 1: wr_st_r1. - 1
 .GLOBAL wr_st_r1.;
 wr_st_r1.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -607,10 +618,11 @@ wr_st_r1.:
       R13 = DM(0x200ac1b4);
       R14 = DM(0x200ac1b8);
       R15 = DM(0x200ac1bc);
-      I1 = DM(0x200ac1c0);
-      I3 = DM(0x200ac1c4);
-      I4 = DM(0x200ac1c8);
-      ASTAT = DM(0x200ac1cc);
+      I0 = DM(0x200ac1c0);
+      I1 = DM(0x200ac1c4);
+      I3 = DM(0x200ac1c8);
+      I4 = DM(0x200ac1cc);
+      ASTAT = DM(0x200ac1d0);
       I12 = DM(-1, I6);                 // back to the body: the stage's own return
       JUMP (M14, I12) (DB);
       I7 = I6;
@@ -623,33 +635,33 @@ wr_st_t2.:
       IF EQ JUMP 0xb80c39;              // none: the stage, as stock
       R0 = DM(0x200ac018);              // slot 0's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd4f38;                   // -> wr_st_s2_0.
+      IF EQ JUMP 0xbd4f5c;                   // -> wr_st_s2_0.
       R0 = DM(0x200ac034);              // slot 1's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd4f3d;                   // -> wr_st_s2_1.
+      IF EQ JUMP 0xbd4f61;                   // -> wr_st_s2_1.
       R0 = DM(0x200ac050);              // slot 2's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd4f42;                   // -> wr_st_s2_2.
+      IF EQ JUMP 0xbd4f66;                   // -> wr_st_s2_2.
       R0 = DM(0x200ac06c);              // slot 3's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd4f47;                   // -> wr_st_s2_3.
+      IF EQ JUMP 0xbd4f6b;                   // -> wr_st_s2_3.
       JUMP 0xb80c39;                    // a mono voice: the stage, as stock
 .GLOBAL wr_st_s2_0.;
 wr_st_s2_0.:
       R1 = 0;
-      JUMP 0xbd4f4c;                         // -> wr_st_c2.
+      JUMP 0xbd4f70;                         // -> wr_st_c2.
 .GLOBAL wr_st_s2_1.;
 wr_st_s2_1.:
       R1 = 1;
-      JUMP 0xbd4f4c;                         // -> wr_st_c2.
+      JUMP 0xbd4f70;                         // -> wr_st_c2.
 .GLOBAL wr_st_s2_2.;
 wr_st_s2_2.:
       R1 = 2;
-      JUMP 0xbd4f4c;                         // -> wr_st_c2.
+      JUMP 0xbd4f70;                         // -> wr_st_c2.
 .GLOBAL wr_st_s2_3.;
 wr_st_s2_3.:
       R1 = 3;
-      JUMP 0xbd4f4c;                         // -> wr_st_c2.
+      JUMP 0xbd4f70;                         // -> wr_st_c2.
 .GLOBAL wr_st_c2.;
 wr_st_c2.:
       DM(0x200ac0b4) = R1;
@@ -669,10 +681,11 @@ wr_st_c2.:
       DM(0x200ac134) = R13;
       DM(0x200ac138) = R14;
       DM(0x200ac13c) = R15;
-      DM(0x200ac140) = I1;
-      DM(0x200ac144) = I3;
-      DM(0x200ac148) = I4;
-      DM(0x200ac14c) = ASTAT;
+      DM(0x200ac140) = I0;
+      DM(0x200ac144) = I1;
+      DM(0x200ac148) = I3;
+      DM(0x200ac14c) = I4;
+      DM(0x200ac150) = ASTAT;
       I1 = R4;                          // PRE = L's state
       R0 = 0x200ac200;
       I3 = R0;
@@ -682,7 +695,7 @@ wr_st_pre2.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd4f94;                   // -> wr_st_pre2.
+      IF NE JUMP 0xbd4fbb;                   // -> wr_st_pre2.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -699,10 +712,11 @@ wr_st_pre2.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -718,7 +732,7 @@ wr_st_pre2.:
       DM(I7, M7) = R2;
       CJUMP 0xb80c39 (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd4ff1;                 // return address - 1: wr_st_l2. - 1
+      DM(I7, M7) = 0xbd501b;                 // return address - 1: wr_st_l2. - 1
 .GLOBAL wr_st_l2.;
 wr_st_l2.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -738,10 +752,11 @@ wr_st_l2.:
       DM(0x200ac1b4) = R13;
       DM(0x200ac1b8) = R14;
       DM(0x200ac1bc) = R15;
-      DM(0x200ac1c0) = I1;
-      DM(0x200ac1c4) = I3;
-      DM(0x200ac1c8) = I4;
-      DM(0x200ac1cc) = ASTAT;
+      DM(0x200ac1c0) = I0;
+      DM(0x200ac1c4) = I1;
+      DM(0x200ac1c8) = I3;
+      DM(0x200ac1cc) = I4;
+      DM(0x200ac1d0) = ASTAT;
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac874;
@@ -760,16 +775,16 @@ wr_st_sync2.:
       R0 = DM(I4, M6);                  // PRE
       R1 = DM(I3, M6);                  // LPOST
       COMP(R0, R1);
-      IF EQ JUMP 0xbd505a;                   // -> wr_st_keep2.
+      IF EQ JUMP 0xbd5087;                   // -> wr_st_keep2.
       DM(I1, M6) = R0;                  // changed by another: follow L
-      JUMP 0xbd505b;                         // -> wr_st_next2.
+      JUMP 0xbd5088;                         // -> wr_st_next2.
 .GLOBAL wr_st_keep2.;
 wr_st_keep2.:
       R2 = DM(I1, M6);                  // R's own: kept (the read moves I1 on)
 .GLOBAL wr_st_next2.;
 wr_st_next2.:
       R15 = R15 - 1;
-      IF NE JUMP 0xbd5050;                   // -> wr_st_sync2.
+      IF NE JUMP 0xbd507d;                   // -> wr_st_sync2.
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ad874;
@@ -783,7 +798,7 @@ wr_st_post2.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd5072;                   // -> wr_st_post2.
+      IF NE JUMP 0xbd509f;                   // -> wr_st_post2.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -800,10 +815,11 @@ wr_st_post2.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac874;
@@ -817,9 +833,10 @@ wr_st_post2.:
       I3 = R13;
       R12 = PASS R13;                   // R's block
       R8 = PASS R13;
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -835,7 +852,7 @@ wr_st_post2.:
       DM(I7, M7) = R2;
       CJUMP 0xb80c39 (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd50f3;                 // return address - 1: wr_st_r2. - 1
+      DM(I7, M7) = 0xbd5126;                 // return address - 1: wr_st_r2. - 1
 .GLOBAL wr_st_r2.;
 wr_st_r2.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -855,10 +872,11 @@ wr_st_r2.:
       R13 = DM(0x200ac1b4);
       R14 = DM(0x200ac1b8);
       R15 = DM(0x200ac1bc);
-      I1 = DM(0x200ac1c0);
-      I3 = DM(0x200ac1c4);
-      I4 = DM(0x200ac1c8);
-      ASTAT = DM(0x200ac1cc);
+      I0 = DM(0x200ac1c0);
+      I1 = DM(0x200ac1c4);
+      I3 = DM(0x200ac1c8);
+      I4 = DM(0x200ac1cc);
+      ASTAT = DM(0x200ac1d0);
       I12 = DM(-1, I6);                 // back to the body: the stage's own return
       JUMP (M14, I12) (DB);
       I7 = I6;
@@ -871,33 +889,33 @@ wr_st_t3.:
       IF EQ JUMP 0xb8265b;              // none: the stage, as stock
       R0 = DM(0x200ac01c);              // slot 0's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd5161;                   // -> wr_st_s3_0.
+      IF EQ JUMP 0xbd5197;                   // -> wr_st_s3_0.
       R0 = DM(0x200ac038);              // slot 1's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd5166;                   // -> wr_st_s3_1.
+      IF EQ JUMP 0xbd519c;                   // -> wr_st_s3_1.
       R0 = DM(0x200ac054);              // slot 2's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd516b;                   // -> wr_st_s3_2.
+      IF EQ JUMP 0xbd51a1;                   // -> wr_st_s3_2.
       R0 = DM(0x200ac070);              // slot 3's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd5170;                   // -> wr_st_s3_3.
+      IF EQ JUMP 0xbd51a6;                   // -> wr_st_s3_3.
       JUMP 0xb8265b;                    // a mono voice: the stage, as stock
 .GLOBAL wr_st_s3_0.;
 wr_st_s3_0.:
       R1 = 0;
-      JUMP 0xbd5175;                         // -> wr_st_c3.
+      JUMP 0xbd51ab;                         // -> wr_st_c3.
 .GLOBAL wr_st_s3_1.;
 wr_st_s3_1.:
       R1 = 1;
-      JUMP 0xbd5175;                         // -> wr_st_c3.
+      JUMP 0xbd51ab;                         // -> wr_st_c3.
 .GLOBAL wr_st_s3_2.;
 wr_st_s3_2.:
       R1 = 2;
-      JUMP 0xbd5175;                         // -> wr_st_c3.
+      JUMP 0xbd51ab;                         // -> wr_st_c3.
 .GLOBAL wr_st_s3_3.;
 wr_st_s3_3.:
       R1 = 3;
-      JUMP 0xbd5175;                         // -> wr_st_c3.
+      JUMP 0xbd51ab;                         // -> wr_st_c3.
 .GLOBAL wr_st_c3.;
 wr_st_c3.:
       DM(0x200ac0b4) = R1;
@@ -917,10 +935,11 @@ wr_st_c3.:
       DM(0x200ac134) = R13;
       DM(0x200ac138) = R14;
       DM(0x200ac13c) = R15;
-      DM(0x200ac140) = I1;
-      DM(0x200ac144) = I3;
-      DM(0x200ac148) = I4;
-      DM(0x200ac14c) = ASTAT;
+      DM(0x200ac140) = I0;
+      DM(0x200ac144) = I1;
+      DM(0x200ac148) = I3;
+      DM(0x200ac14c) = I4;
+      DM(0x200ac150) = ASTAT;
       I1 = R4;                          // PRE = L's state
       R0 = 0x200ac200;
       I3 = R0;
@@ -930,7 +949,7 @@ wr_st_pre3.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd51bd;                   // -> wr_st_pre3.
+      IF NE JUMP 0xbd51f6;                   // -> wr_st_pre3.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -947,10 +966,11 @@ wr_st_pre3.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -966,7 +986,7 @@ wr_st_pre3.:
       DM(I7, M7) = R2;
       CJUMP 0xb8265b (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd521a;                 // return address - 1: wr_st_l3. - 1
+      DM(I7, M7) = 0xbd5256;                 // return address - 1: wr_st_l3. - 1
 .GLOBAL wr_st_l3.;
 wr_st_l3.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -986,10 +1006,11 @@ wr_st_l3.:
       DM(0x200ac1b4) = R13;
       DM(0x200ac1b8) = R14;
       DM(0x200ac1bc) = R15;
-      DM(0x200ac1c0) = I1;
-      DM(0x200ac1c4) = I3;
-      DM(0x200ac1c8) = I4;
-      DM(0x200ac1cc) = ASTAT;
+      DM(0x200ac1c0) = I0;
+      DM(0x200ac1c4) = I1;
+      DM(0x200ac1c8) = I3;
+      DM(0x200ac1cc) = I4;
+      DM(0x200ac1d0) = ASTAT;
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac8e4;
@@ -1008,16 +1029,16 @@ wr_st_sync3.:
       R0 = DM(I4, M6);                  // PRE
       R1 = DM(I3, M6);                  // LPOST
       COMP(R0, R1);
-      IF EQ JUMP 0xbd5283;                   // -> wr_st_keep3.
+      IF EQ JUMP 0xbd52c2;                   // -> wr_st_keep3.
       DM(I1, M6) = R0;                  // changed by another: follow L
-      JUMP 0xbd5284;                         // -> wr_st_next3.
+      JUMP 0xbd52c3;                         // -> wr_st_next3.
 .GLOBAL wr_st_keep3.;
 wr_st_keep3.:
       R2 = DM(I1, M6);                  // R's own: kept (the read moves I1 on)
 .GLOBAL wr_st_next3.;
 wr_st_next3.:
       R15 = R15 - 1;
-      IF NE JUMP 0xbd5279;                   // -> wr_st_sync3.
+      IF NE JUMP 0xbd52b8;                   // -> wr_st_sync3.
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ad8e4;
@@ -1031,7 +1052,7 @@ wr_st_post3.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd529b;                   // -> wr_st_post3.
+      IF NE JUMP 0xbd52da;                   // -> wr_st_post3.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -1048,10 +1069,11 @@ wr_st_post3.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac8e4;
@@ -1065,9 +1087,10 @@ wr_st_post3.:
       I3 = R13;
       R12 = PASS R13;                   // R's block
       R8 = PASS R13;
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -1083,7 +1106,7 @@ wr_st_post3.:
       DM(I7, M7) = R2;
       CJUMP 0xb8265b (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd531c;                 // return address - 1: wr_st_r3. - 1
+      DM(I7, M7) = 0xbd5361;                 // return address - 1: wr_st_r3. - 1
 .GLOBAL wr_st_r3.;
 wr_st_r3.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -1103,10 +1126,11 @@ wr_st_r3.:
       R13 = DM(0x200ac1b4);
       R14 = DM(0x200ac1b8);
       R15 = DM(0x200ac1bc);
-      I1 = DM(0x200ac1c0);
-      I3 = DM(0x200ac1c4);
-      I4 = DM(0x200ac1c8);
-      ASTAT = DM(0x200ac1cc);
+      I0 = DM(0x200ac1c0);
+      I1 = DM(0x200ac1c4);
+      I3 = DM(0x200ac1c8);
+      I4 = DM(0x200ac1cc);
+      ASTAT = DM(0x200ac1d0);
       I12 = DM(-1, I6);                 // back to the body: the stage's own return
       JUMP (M14, I12) (DB);
       I7 = I6;
@@ -1119,33 +1143,33 @@ wr_st_t4.:
       IF EQ JUMP 0xb81368;              // none: the stage, as stock
       R0 = DM(0x200ac020);              // slot 0's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd538a;                   // -> wr_st_s4_0.
+      IF EQ JUMP 0xbd53d2;                   // -> wr_st_s4_0.
       R0 = DM(0x200ac03c);              // slot 1's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd538f;                   // -> wr_st_s4_1.
+      IF EQ JUMP 0xbd53d7;                   // -> wr_st_s4_1.
       R0 = DM(0x200ac058);              // slot 2's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd5394;                   // -> wr_st_s4_2.
+      IF EQ JUMP 0xbd53dc;                   // -> wr_st_s4_2.
       R0 = DM(0x200ac074);              // slot 3's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd5399;                   // -> wr_st_s4_3.
+      IF EQ JUMP 0xbd53e1;                   // -> wr_st_s4_3.
       JUMP 0xb81368;                    // a mono voice: the stage, as stock
 .GLOBAL wr_st_s4_0.;
 wr_st_s4_0.:
       R1 = 0;
-      JUMP 0xbd539e;                         // -> wr_st_c4.
+      JUMP 0xbd53e6;                         // -> wr_st_c4.
 .GLOBAL wr_st_s4_1.;
 wr_st_s4_1.:
       R1 = 1;
-      JUMP 0xbd539e;                         // -> wr_st_c4.
+      JUMP 0xbd53e6;                         // -> wr_st_c4.
 .GLOBAL wr_st_s4_2.;
 wr_st_s4_2.:
       R1 = 2;
-      JUMP 0xbd539e;                         // -> wr_st_c4.
+      JUMP 0xbd53e6;                         // -> wr_st_c4.
 .GLOBAL wr_st_s4_3.;
 wr_st_s4_3.:
       R1 = 3;
-      JUMP 0xbd539e;                         // -> wr_st_c4.
+      JUMP 0xbd53e6;                         // -> wr_st_c4.
 .GLOBAL wr_st_c4.;
 wr_st_c4.:
       DM(0x200ac0b4) = R1;
@@ -1165,10 +1189,11 @@ wr_st_c4.:
       DM(0x200ac134) = R13;
       DM(0x200ac138) = R14;
       DM(0x200ac13c) = R15;
-      DM(0x200ac140) = I1;
-      DM(0x200ac144) = I3;
-      DM(0x200ac148) = I4;
-      DM(0x200ac14c) = ASTAT;
+      DM(0x200ac140) = I0;
+      DM(0x200ac144) = I1;
+      DM(0x200ac148) = I3;
+      DM(0x200ac14c) = I4;
+      DM(0x200ac150) = ASTAT;
       I1 = R4;                          // PRE = L's state
       R0 = 0x200ac200;
       I3 = R0;
@@ -1178,7 +1203,7 @@ wr_st_pre4.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd53e6;                   // -> wr_st_pre4.
+      IF NE JUMP 0xbd5431;                   // -> wr_st_pre4.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -1195,10 +1220,11 @@ wr_st_pre4.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -1214,7 +1240,7 @@ wr_st_pre4.:
       DM(I7, M7) = R2;
       CJUMP 0xb81368 (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd5443;                 // return address - 1: wr_st_l4. - 1
+      DM(I7, M7) = 0xbd5491;                 // return address - 1: wr_st_l4. - 1
 .GLOBAL wr_st_l4.;
 wr_st_l4.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -1234,10 +1260,11 @@ wr_st_l4.:
       DM(0x200ac1b4) = R13;
       DM(0x200ac1b8) = R14;
       DM(0x200ac1bc) = R15;
-      DM(0x200ac1c0) = I1;
-      DM(0x200ac1c4) = I3;
-      DM(0x200ac1c8) = I4;
-      DM(0x200ac1cc) = ASTAT;
+      DM(0x200ac1c0) = I0;
+      DM(0x200ac1c4) = I1;
+      DM(0x200ac1c8) = I3;
+      DM(0x200ac1cc) = I4;
+      DM(0x200ac1d0) = ASTAT;
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac8f8;
@@ -1256,16 +1283,16 @@ wr_st_sync4.:
       R0 = DM(I4, M6);                  // PRE
       R1 = DM(I3, M6);                  // LPOST
       COMP(R0, R1);
-      IF EQ JUMP 0xbd54ac;                   // -> wr_st_keep4.
+      IF EQ JUMP 0xbd54fd;                   // -> wr_st_keep4.
       DM(I1, M6) = R0;                  // changed by another: follow L
-      JUMP 0xbd54ad;                         // -> wr_st_next4.
+      JUMP 0xbd54fe;                         // -> wr_st_next4.
 .GLOBAL wr_st_keep4.;
 wr_st_keep4.:
       R2 = DM(I1, M6);                  // R's own: kept (the read moves I1 on)
 .GLOBAL wr_st_next4.;
 wr_st_next4.:
       R15 = R15 - 1;
-      IF NE JUMP 0xbd54a2;                   // -> wr_st_sync4.
+      IF NE JUMP 0xbd54f3;                   // -> wr_st_sync4.
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ad8f8;
@@ -1279,7 +1306,7 @@ wr_st_post4.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd54c4;                   // -> wr_st_post4.
+      IF NE JUMP 0xbd5515;                   // -> wr_st_post4.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -1296,10 +1323,11 @@ wr_st_post4.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac8f8;
@@ -1313,9 +1341,10 @@ wr_st_post4.:
       I3 = R13;
       R12 = PASS R13;                   // R's block
       R8 = PASS R13;
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -1331,7 +1360,7 @@ wr_st_post4.:
       DM(I7, M7) = R2;
       CJUMP 0xb81368 (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd5545;                 // return address - 1: wr_st_r4. - 1
+      DM(I7, M7) = 0xbd559c;                 // return address - 1: wr_st_r4. - 1
 .GLOBAL wr_st_r4.;
 wr_st_r4.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -1351,10 +1380,11 @@ wr_st_r4.:
       R13 = DM(0x200ac1b4);
       R14 = DM(0x200ac1b8);
       R15 = DM(0x200ac1bc);
-      I1 = DM(0x200ac1c0);
-      I3 = DM(0x200ac1c4);
-      I4 = DM(0x200ac1c8);
-      ASTAT = DM(0x200ac1cc);
+      I0 = DM(0x200ac1c0);
+      I1 = DM(0x200ac1c4);
+      I3 = DM(0x200ac1c8);
+      I4 = DM(0x200ac1cc);
+      ASTAT = DM(0x200ac1d0);
       I12 = DM(-1, I6);                 // back to the body: the stage's own return
       JUMP (M14, I12) (DB);
       I7 = I6;
@@ -1367,33 +1397,33 @@ wr_st_t5.:
       IF EQ JUMP 0xb82342;              // none: the stage, as stock
       R0 = DM(0x200ac024);              // slot 0's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd55b3;                   // -> wr_st_s5_0.
+      IF EQ JUMP 0xbd560d;                   // -> wr_st_s5_0.
       R0 = DM(0x200ac040);              // slot 1's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd55b8;                   // -> wr_st_s5_1.
+      IF EQ JUMP 0xbd5612;                   // -> wr_st_s5_1.
       R0 = DM(0x200ac05c);              // slot 2's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd55bd;                   // -> wr_st_s5_2.
+      IF EQ JUMP 0xbd5617;                   // -> wr_st_s5_2.
       R0 = DM(0x200ac078);              // slot 3's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd55c2;                   // -> wr_st_s5_3.
+      IF EQ JUMP 0xbd561c;                   // -> wr_st_s5_3.
       JUMP 0xb82342;                    // a mono voice: the stage, as stock
 .GLOBAL wr_st_s5_0.;
 wr_st_s5_0.:
       R1 = 0;
-      JUMP 0xbd55c7;                         // -> wr_st_c5.
+      JUMP 0xbd5621;                         // -> wr_st_c5.
 .GLOBAL wr_st_s5_1.;
 wr_st_s5_1.:
       R1 = 1;
-      JUMP 0xbd55c7;                         // -> wr_st_c5.
+      JUMP 0xbd5621;                         // -> wr_st_c5.
 .GLOBAL wr_st_s5_2.;
 wr_st_s5_2.:
       R1 = 2;
-      JUMP 0xbd55c7;                         // -> wr_st_c5.
+      JUMP 0xbd5621;                         // -> wr_st_c5.
 .GLOBAL wr_st_s5_3.;
 wr_st_s5_3.:
       R1 = 3;
-      JUMP 0xbd55c7;                         // -> wr_st_c5.
+      JUMP 0xbd5621;                         // -> wr_st_c5.
 .GLOBAL wr_st_c5.;
 wr_st_c5.:
       DM(0x200ac0b4) = R1;
@@ -1413,10 +1443,11 @@ wr_st_c5.:
       DM(0x200ac134) = R13;
       DM(0x200ac138) = R14;
       DM(0x200ac13c) = R15;
-      DM(0x200ac140) = I1;
-      DM(0x200ac144) = I3;
-      DM(0x200ac148) = I4;
-      DM(0x200ac14c) = ASTAT;
+      DM(0x200ac140) = I0;
+      DM(0x200ac144) = I1;
+      DM(0x200ac148) = I3;
+      DM(0x200ac14c) = I4;
+      DM(0x200ac150) = ASTAT;
       I1 = R4;                          // PRE = L's state
       R0 = 0x200ac200;
       I3 = R0;
@@ -1426,7 +1457,7 @@ wr_st_pre5.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd560f;                   // -> wr_st_pre5.
+      IF NE JUMP 0xbd566c;                   // -> wr_st_pre5.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -1443,10 +1474,11 @@ wr_st_pre5.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -1462,7 +1494,7 @@ wr_st_pre5.:
       DM(I7, M7) = R2;
       CJUMP 0xb82342 (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd566c;                 // return address - 1: wr_st_l5. - 1
+      DM(I7, M7) = 0xbd56cc;                 // return address - 1: wr_st_l5. - 1
 .GLOBAL wr_st_l5.;
 wr_st_l5.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -1482,10 +1514,11 @@ wr_st_l5.:
       DM(0x200ac1b4) = R13;
       DM(0x200ac1b8) = R14;
       DM(0x200ac1bc) = R15;
-      DM(0x200ac1c0) = I1;
-      DM(0x200ac1c4) = I3;
-      DM(0x200ac1c8) = I4;
-      DM(0x200ac1cc) = ASTAT;
+      DM(0x200ac1c0) = I0;
+      DM(0x200ac1c4) = I1;
+      DM(0x200ac1c8) = I3;
+      DM(0x200ac1cc) = I4;
+      DM(0x200ac1d0) = ASTAT;
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac918;
@@ -1504,16 +1537,16 @@ wr_st_sync5.:
       R0 = DM(I4, M6);                  // PRE
       R1 = DM(I3, M6);                  // LPOST
       COMP(R0, R1);
-      IF EQ JUMP 0xbd56d5;                   // -> wr_st_keep5.
+      IF EQ JUMP 0xbd5738;                   // -> wr_st_keep5.
       DM(I1, M6) = R0;                  // changed by another: follow L
-      JUMP 0xbd56d6;                         // -> wr_st_next5.
+      JUMP 0xbd5739;                         // -> wr_st_next5.
 .GLOBAL wr_st_keep5.;
 wr_st_keep5.:
       R2 = DM(I1, M6);                  // R's own: kept (the read moves I1 on)
 .GLOBAL wr_st_next5.;
 wr_st_next5.:
       R15 = R15 - 1;
-      IF NE JUMP 0xbd56cb;                   // -> wr_st_sync5.
+      IF NE JUMP 0xbd572e;                   // -> wr_st_sync5.
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ad918;
@@ -1527,7 +1560,7 @@ wr_st_post5.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd56ed;                   // -> wr_st_post5.
+      IF NE JUMP 0xbd5750;                   // -> wr_st_post5.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -1544,10 +1577,11 @@ wr_st_post5.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac918;
@@ -1561,9 +1595,10 @@ wr_st_post5.:
       I3 = R13;
       R12 = PASS R13;                   // R's block
       R8 = PASS R13;
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -1579,7 +1614,7 @@ wr_st_post5.:
       DM(I7, M7) = R2;
       CJUMP 0xb82342 (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd576e;                 // return address - 1: wr_st_r5. - 1
+      DM(I7, M7) = 0xbd57d7;                 // return address - 1: wr_st_r5. - 1
 .GLOBAL wr_st_r5.;
 wr_st_r5.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -1599,10 +1634,11 @@ wr_st_r5.:
       R13 = DM(0x200ac1b4);
       R14 = DM(0x200ac1b8);
       R15 = DM(0x200ac1bc);
-      I1 = DM(0x200ac1c0);
-      I3 = DM(0x200ac1c4);
-      I4 = DM(0x200ac1c8);
-      ASTAT = DM(0x200ac1cc);
+      I0 = DM(0x200ac1c0);
+      I1 = DM(0x200ac1c4);
+      I3 = DM(0x200ac1c8);
+      I4 = DM(0x200ac1cc);
+      ASTAT = DM(0x200ac1d0);
       I12 = DM(-1, I6);                 // back to the body: the stage's own return
       JUMP (M14, I12) (DB);
       I7 = I6;
@@ -1615,33 +1651,33 @@ wr_st_t6.:
       IF EQ JUMP 0xb80345;              // none: the stage, as stock
       R0 = DM(0x200ac028);              // slot 0's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd57dc;                   // -> wr_st_s6_0.
+      IF EQ JUMP 0xbd5848;                   // -> wr_st_s6_0.
       R0 = DM(0x200ac044);              // slot 1's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd57e1;                   // -> wr_st_s6_1.
+      IF EQ JUMP 0xbd584d;                   // -> wr_st_s6_1.
       R0 = DM(0x200ac060);              // slot 2's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd57e6;                   // -> wr_st_s6_2.
+      IF EQ JUMP 0xbd5852;                   // -> wr_st_s6_2.
       R0 = DM(0x200ac07c);              // slot 3's voice, this stage
       COMP(R4, R0);
-      IF EQ JUMP 0xbd57eb;                   // -> wr_st_s6_3.
+      IF EQ JUMP 0xbd5857;                   // -> wr_st_s6_3.
       JUMP 0xb80345;                    // a mono voice: the stage, as stock
 .GLOBAL wr_st_s6_0.;
 wr_st_s6_0.:
       R1 = 0;
-      JUMP 0xbd57f0;                         // -> wr_st_c6.
+      JUMP 0xbd585c;                         // -> wr_st_c6.
 .GLOBAL wr_st_s6_1.;
 wr_st_s6_1.:
       R1 = 1;
-      JUMP 0xbd57f0;                         // -> wr_st_c6.
+      JUMP 0xbd585c;                         // -> wr_st_c6.
 .GLOBAL wr_st_s6_2.;
 wr_st_s6_2.:
       R1 = 2;
-      JUMP 0xbd57f0;                         // -> wr_st_c6.
+      JUMP 0xbd585c;                         // -> wr_st_c6.
 .GLOBAL wr_st_s6_3.;
 wr_st_s6_3.:
       R1 = 3;
-      JUMP 0xbd57f0;                         // -> wr_st_c6.
+      JUMP 0xbd585c;                         // -> wr_st_c6.
 .GLOBAL wr_st_c6.;
 wr_st_c6.:
       DM(0x200ac0b4) = R1;
@@ -1661,10 +1697,11 @@ wr_st_c6.:
       DM(0x200ac134) = R13;
       DM(0x200ac138) = R14;
       DM(0x200ac13c) = R15;
-      DM(0x200ac140) = I1;
-      DM(0x200ac144) = I3;
-      DM(0x200ac148) = I4;
-      DM(0x200ac14c) = ASTAT;
+      DM(0x200ac140) = I0;
+      DM(0x200ac144) = I1;
+      DM(0x200ac148) = I3;
+      DM(0x200ac14c) = I4;
+      DM(0x200ac150) = ASTAT;
       I1 = R4;                          // PRE = L's state
       R0 = 0x200ac200;
       I3 = R0;
@@ -1674,7 +1711,7 @@ wr_st_pre6.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd5838;                   // -> wr_st_pre6.
+      IF NE JUMP 0xbd58a7;                   // -> wr_st_pre6.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -1691,10 +1728,11 @@ wr_st_pre6.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -1710,7 +1748,7 @@ wr_st_pre6.:
       DM(I7, M7) = R2;
       CJUMP 0xb80345 (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd5895;                 // return address - 1: wr_st_l6. - 1
+      DM(I7, M7) = 0xbd5907;                 // return address - 1: wr_st_l6. - 1
 .GLOBAL wr_st_l6.;
 wr_st_l6.:
       I7 = DM(0x200ac0b0);              // the copies off
@@ -1730,10 +1768,11 @@ wr_st_l6.:
       DM(0x200ac1b4) = R13;
       DM(0x200ac1b8) = R14;
       DM(0x200ac1bc) = R15;
-      DM(0x200ac1c0) = I1;
-      DM(0x200ac1c4) = I3;
-      DM(0x200ac1c8) = I4;
-      DM(0x200ac1cc) = ASTAT;
+      DM(0x200ac1c0) = I0;
+      DM(0x200ac1c4) = I1;
+      DM(0x200ac1c8) = I3;
+      DM(0x200ac1cc) = I4;
+      DM(0x200ac1d0) = ASTAT;
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac9e4;
@@ -1752,16 +1791,16 @@ wr_st_sync6.:
       R0 = DM(I4, M6);                  // PRE
       R1 = DM(I3, M6);                  // LPOST
       COMP(R0, R1);
-      IF EQ JUMP 0xbd58fe;                   // -> wr_st_keep6.
+      IF EQ JUMP 0xbd5973;                   // -> wr_st_keep6.
       DM(I1, M6) = R0;                  // changed by another: follow L
-      JUMP 0xbd58ff;                         // -> wr_st_next6.
+      JUMP 0xbd5974;                         // -> wr_st_next6.
 .GLOBAL wr_st_keep6.;
 wr_st_keep6.:
       R2 = DM(I1, M6);                  // R's own: kept (the read moves I1 on)
 .GLOBAL wr_st_next6.;
 wr_st_next6.:
       R15 = R15 - 1;
-      IF NE JUMP 0xbd58f4;                   // -> wr_st_sync6.
+      IF NE JUMP 0xbd5969;                   // -> wr_st_sync6.
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ad9e4;
@@ -1775,7 +1814,7 @@ wr_st_post6.:
       R0 = DM(I1, M6);
       DM(I3, M6) = R0;
       R15 = R15 - 1;
-      IF NE JUMP 0xbd5916;                   // -> wr_st_post6.
+      IF NE JUMP 0xbd598b;                   // -> wr_st_post6.
       R0 = DM(0x200ac100);
       R1 = DM(0x200ac104);
       R2 = DM(0x200ac108);
@@ -1792,10 +1831,11 @@ wr_st_post6.:
       R13 = DM(0x200ac134);
       R14 = DM(0x200ac138);
       R15 = DM(0x200ac13c);
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
-      ASTAT = DM(0x200ac14c);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
+      ASTAT = DM(0x200ac150);
       R12 = DM(0x200ac0b4);
       R12 = LSHIFT R12 BY 10;
       R13 = 0x200ac9e4;
@@ -1809,9 +1849,10 @@ wr_st_post6.:
       I3 = R13;
       R12 = PASS R13;                   // R's block
       R8 = PASS R13;
-      I1 = DM(0x200ac140);
-      I3 = DM(0x200ac144);
-      I4 = DM(0x200ac148);
+      I0 = DM(0x200ac140);
+      I1 = DM(0x200ac144);
+      I3 = DM(0x200ac148);
+      I4 = DM(0x200ac14c);
       DM(0x200ac0b0) = I7;
       R2 = DM(6, I6);
       DM(I7, M7) = R2;
@@ -1827,10 +1868,33 @@ wr_st_post6.:
       DM(I7, M7) = R2;
       CJUMP 0xb80345 (DB);
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0xbd5997;                 // return address - 1: wr_st_r6. - 1
+      DM(I7, M7) = 0xbd5a12;                 // return address - 1: wr_st_r6. - 1
 .GLOBAL wr_st_r6.;
 wr_st_r6.:
       I7 = DM(0x200ac0b0);              // the copies off
+      R0 = DM(0x200ac130);              // L's block (R12 as called)
+      I1 = R0;
+      R12 = DM(0x200ac0b4);
+      R12 = LSHIFT R12 BY 7;
+      R13 = 0x200ac600;
+      R13 = R13 + R12;
+      I3 = R13;
+      R15 = 32;
+.GLOBAL wr_st_lamp6.;
+wr_st_lamp6.:
+      R0 = DM(I1, M6);
+      DM(I3, M6) = R0;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5a29;                   // -> wr_st_lamp6.
+      R0 = DM(0x200ac130);
+      I1 = R0;
+      R0 = 0x3f800000;
+      R15 = 32;
+.GLOBAL wr_st_ones6.;
+wr_st_ones6.:
+      DM(I1, M6) = R0;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5a39;                   // -> wr_st_ones6.
       R0 = DM(0x200ac180);
       R1 = DM(0x200ac184);
       R2 = DM(0x200ac188);
@@ -1847,13 +1911,622 @@ wr_st_r6.:
       R13 = DM(0x200ac1b4);
       R14 = DM(0x200ac1b8);
       R15 = DM(0x200ac1bc);
-      I1 = DM(0x200ac1c0);
-      I3 = DM(0x200ac1c4);
-      I4 = DM(0x200ac1c8);
-      ASTAT = DM(0x200ac1cc);
+      I0 = DM(0x200ac1c0);
+      I1 = DM(0x200ac1c4);
+      I3 = DM(0x200ac1c8);
+      I4 = DM(0x200ac1cc);
+      ASTAT = DM(0x200ac1d0);
       I12 = DM(-1, I6);                 // back to the body: the stage's own return
       JUMP (M14, I12) (DB);
       I7 = I6;
       I6 = DM(0, I6);
+
+.GLOBAL wr_st_smid.;
+wr_st_smid.:
+      DM(0x200acb80) = R0;
+      DM(0x200acb84) = R1;
+      DM(0x200acb88) = R2;
+      DM(0x200acb8c) = R3;
+      DM(0x200acb90) = R4;
+      DM(0x200acb94) = R5;
+      DM(0x200acb98) = R6;
+      DM(0x200acb9c) = R7;
+      DM(0x200acba0) = R8;
+      DM(0x200acba4) = R9;
+      DM(0x200acba8) = R10;
+      DM(0x200acbac) = R11;
+      DM(0x200acbb0) = R12;
+      DM(0x200acbb4) = R13;
+      DM(0x200acbb8) = R14;
+      DM(0x200acbbc) = R15;
+      DM(0x200acbc0) = I0;
+      DM(0x200acbc4) = I1;
+      DM(0x200acbc8) = I3;
+      DM(0x200acbcc) = I4;
+      DM(0x200acbd0) = ASTAT;
+      R0 = DM(0x200ac000);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5b6f;                   // -> wr_st_smid_out.
+      R0 = DM(0x200ac010);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5af4;                   // -> wr_st_md_next0.
+      R14 = DM(0x200ac080);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // the voice's block
+      R0 = 0x200ae800;
+      I3 = R0;
+      R1 = 0x3f800000;
+      R15 = 32;
+.GLOBAL wr_st_md_s0.;
+wr_st_md_s0.:
+      R0 = DM(0, I4);
+      DM(I3, M6) = R0;
+      DM(I4, M6) = R1;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5aec;                   // -> wr_st_md_s0.
+.GLOBAL wr_st_md_next0.;
+wr_st_md_next0.:
+      R0 = DM(0x200ac02c);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5b1d;                   // -> wr_st_md_next1.
+      R14 = DM(0x200ac084);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // the voice's block
+      R0 = 0x200ae880;
+      I3 = R0;
+      R1 = 0x3f800000;
+      R15 = 32;
+.GLOBAL wr_st_md_s1.;
+wr_st_md_s1.:
+      R0 = DM(0, I4);
+      DM(I3, M6) = R0;
+      DM(I4, M6) = R1;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5b15;                   // -> wr_st_md_s1.
+.GLOBAL wr_st_md_next1.;
+wr_st_md_next1.:
+      R0 = DM(0x200ac048);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5b46;                   // -> wr_st_md_next2.
+      R14 = DM(0x200ac088);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // the voice's block
+      R0 = 0x200ae900;
+      I3 = R0;
+      R1 = 0x3f800000;
+      R15 = 32;
+.GLOBAL wr_st_md_s2.;
+wr_st_md_s2.:
+      R0 = DM(0, I4);
+      DM(I3, M6) = R0;
+      DM(I4, M6) = R1;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5b3e;                   // -> wr_st_md_s2.
+.GLOBAL wr_st_md_next2.;
+wr_st_md_next2.:
+      R0 = DM(0x200ac064);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5b6f;                   // -> wr_st_md_next3.
+      R14 = DM(0x200ac08c);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // the voice's block
+      R0 = 0x200ae980;
+      I3 = R0;
+      R1 = 0x3f800000;
+      R15 = 32;
+.GLOBAL wr_st_md_s3.;
+wr_st_md_s3.:
+      R0 = DM(0, I4);
+      DM(I3, M6) = R0;
+      DM(I4, M6) = R1;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5b67;                   // -> wr_st_md_s3.
+.GLOBAL wr_st_md_next3.;
+wr_st_md_next3.:
+.GLOBAL wr_st_smid_out.;
+wr_st_smid_out.:
+      R0 = DM(0x200acb80);
+      R1 = DM(0x200acb84);
+      R2 = DM(0x200acb88);
+      R3 = DM(0x200acb8c);
+      R4 = DM(0x200acb90);
+      R5 = DM(0x200acb94);
+      R6 = DM(0x200acb98);
+      R7 = DM(0x200acb9c);
+      R8 = DM(0x200acba0);
+      R9 = DM(0x200acba4);
+      R10 = DM(0x200acba8);
+      R11 = DM(0x200acbac);
+      R12 = DM(0x200acbb0);
+      R13 = DM(0x200acbb4);
+      R14 = DM(0x200acbb8);
+      R15 = DM(0x200acbbc);
+      I0 = DM(0x200acbc0);
+      I1 = DM(0x200acbc4);
+      I3 = DM(0x200acbc8);
+      I4 = DM(0x200acbcc);
+      ASTAT = DM(0x200acbd0);
+      R1 = 0x4f800000;                  // the displaced instruction
+      JUMP 0x1c9a3d;                    // on, as stock
+
+.GLOBAL wr_st_spre.;
+wr_st_spre.:
+      DM(0x200acb80) = R0;
+      DM(0x200acb84) = R1;
+      DM(0x200acb88) = R2;
+      DM(0x200acb8c) = R3;
+      DM(0x200acb90) = R4;
+      DM(0x200acb94) = R5;
+      DM(0x200acb98) = R6;
+      DM(0x200acb9c) = R7;
+      DM(0x200acba0) = R8;
+      DM(0x200acba4) = R9;
+      DM(0x200acba8) = R10;
+      DM(0x200acbac) = R11;
+      DM(0x200acbb0) = R12;
+      DM(0x200acbb4) = R13;
+      DM(0x200acbb8) = R14;
+      DM(0x200acbbc) = R15;
+      DM(0x200acbc0) = I0;
+      DM(0x200acbc4) = I1;
+      DM(0x200acbc8) = I3;
+      DM(0x200acbcc) = I4;
+      DM(0x200acbd0) = ASTAT;
+      R0 = DM(0x200ac000);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5cea;                   // -> wr_st_spre_out.
+      R0 = DM(0x200ac010);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5c36;                   // -> wr_st_pr_next0.
+      R14 = DM(0x200ac080);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // the voice's block: the ramps
+      R0 = 0x200ac600;
+      I1 = R0;                          // L as the amp left it
+      R0 = 0x200ac400;
+      I3 = R0;                          // R
+      R0 = 0x200ae800;
+      I0 = R0;                          // the first ramp
+      R15 = 32;
+.GLOBAL wr_st_pr_s0.;
+wr_st_pr_s0.:
+      F1 = DM(I0, M6);                  // r1
+      F2 = DM(0, I4);                   // r2 (the block, from 1.0)
+      F0 = DM(I1, M6);
+      F0 = F1 * F0;                     // stock's order: ramp x sample, r1 then r2
+      F0 = F2 * F0;
+      DM(I4, M6) = F0;
+      F0 = DM(0, I3);
+      F0 = F1 * F0;
+      F0 = F2 * F0;
+      DM(I3, M6) = F0;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5c22;                   // -> wr_st_pr_s0.
+.GLOBAL wr_st_pr_next0.;
+wr_st_pr_next0.:
+      R0 = DM(0x200ac02c);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5c72;                   // -> wr_st_pr_next1.
+      R14 = DM(0x200ac084);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // the voice's block: the ramps
+      R0 = 0x200ac680;
+      I1 = R0;                          // L as the amp left it
+      R0 = 0x200ac480;
+      I3 = R0;                          // R
+      R0 = 0x200ae880;
+      I0 = R0;                          // the first ramp
+      R15 = 32;
+.GLOBAL wr_st_pr_s1.;
+wr_st_pr_s1.:
+      F1 = DM(I0, M6);                  // r1
+      F2 = DM(0, I4);                   // r2 (the block, from 1.0)
+      F0 = DM(I1, M6);
+      F0 = F1 * F0;                     // stock's order: ramp x sample, r1 then r2
+      F0 = F2 * F0;
+      DM(I4, M6) = F0;
+      F0 = DM(0, I3);
+      F0 = F1 * F0;
+      F0 = F2 * F0;
+      DM(I3, M6) = F0;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5c5e;                   // -> wr_st_pr_s1.
+.GLOBAL wr_st_pr_next1.;
+wr_st_pr_next1.:
+      R0 = DM(0x200ac048);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5cae;                   // -> wr_st_pr_next2.
+      R14 = DM(0x200ac088);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // the voice's block: the ramps
+      R0 = 0x200ac700;
+      I1 = R0;                          // L as the amp left it
+      R0 = 0x200ac500;
+      I3 = R0;                          // R
+      R0 = 0x200ae900;
+      I0 = R0;                          // the first ramp
+      R15 = 32;
+.GLOBAL wr_st_pr_s2.;
+wr_st_pr_s2.:
+      F1 = DM(I0, M6);                  // r1
+      F2 = DM(0, I4);                   // r2 (the block, from 1.0)
+      F0 = DM(I1, M6);
+      F0 = F1 * F0;                     // stock's order: ramp x sample, r1 then r2
+      F0 = F2 * F0;
+      DM(I4, M6) = F0;
+      F0 = DM(0, I3);
+      F0 = F1 * F0;
+      F0 = F2 * F0;
+      DM(I3, M6) = F0;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5c9a;                   // -> wr_st_pr_s2.
+.GLOBAL wr_st_pr_next2.;
+wr_st_pr_next2.:
+      R0 = DM(0x200ac064);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5cea;                   // -> wr_st_pr_next3.
+      R14 = DM(0x200ac08c);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // the voice's block: the ramps
+      R0 = 0x200ac780;
+      I1 = R0;                          // L as the amp left it
+      R0 = 0x200ac580;
+      I3 = R0;                          // R
+      R0 = 0x200ae980;
+      I0 = R0;                          // the first ramp
+      R15 = 32;
+.GLOBAL wr_st_pr_s3.;
+wr_st_pr_s3.:
+      F1 = DM(I0, M6);                  // r1
+      F2 = DM(0, I4);                   // r2 (the block, from 1.0)
+      F0 = DM(I1, M6);
+      F0 = F1 * F0;                     // stock's order: ramp x sample, r1 then r2
+      F0 = F2 * F0;
+      DM(I4, M6) = F0;
+      F0 = DM(0, I3);
+      F0 = F1 * F0;
+      F0 = F2 * F0;
+      DM(I3, M6) = F0;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5cd6;                   // -> wr_st_pr_s3.
+.GLOBAL wr_st_pr_next3.;
+wr_st_pr_next3.:
+.GLOBAL wr_st_spre_out.;
+wr_st_spre_out.:
+      R0 = DM(0x200acb80);
+      R1 = DM(0x200acb84);
+      R2 = DM(0x200acb88);
+      R3 = DM(0x200acb8c);
+      R4 = DM(0x200acb90);
+      R5 = DM(0x200acb94);
+      R6 = DM(0x200acb98);
+      R7 = DM(0x200acb9c);
+      R8 = DM(0x200acba0);
+      R9 = DM(0x200acba4);
+      R10 = DM(0x200acba8);
+      R11 = DM(0x200acbac);
+      R12 = DM(0x200acbb0);
+      R13 = DM(0x200acbb4);
+      R14 = DM(0x200acbb8);
+      R15 = DM(0x200acbbc);
+      I0 = DM(0x200acbc0);
+      I1 = DM(0x200acbc4);
+      I3 = DM(0x200acbc8);
+      I4 = DM(0x200acbcc);
+      ASTAT = DM(0x200acbd0);
+      R4 = 0x413a068e;                  // the displaced instruction
+      JUMP 0x1c2515;                    // on to the sum, as stock
+
+.GLOBAL wr_st_spost.;
+wr_st_spost.:
+      DM(0x200acb80) = R0;
+      DM(0x200acb84) = R1;
+      DM(0x200acb88) = R2;
+      DM(0x200acb8c) = R3;
+      DM(0x200acb90) = R4;
+      DM(0x200acb94) = R5;
+      DM(0x200acb98) = R6;
+      DM(0x200acb9c) = R7;
+      DM(0x200acba0) = R8;
+      DM(0x200acba4) = R9;
+      DM(0x200acba8) = R10;
+      DM(0x200acbac) = R11;
+      DM(0x200acbb0) = R12;
+      DM(0x200acbb4) = R13;
+      DM(0x200acbb8) = R14;
+      DM(0x200acbbc) = R15;
+      DM(0x200acbc0) = I0;
+      DM(0x200acbc4) = I1;
+      DM(0x200acbc8) = I3;
+      DM(0x200acbcc) = I4;
+      DM(0x200acbd0) = ASTAT;
+      R0 = DM(0x200ac000);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5f05;                   // -> wr_st_spost_out.
+      R0 = DM(0x200ac010);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5dd9;                   // -> wr_st_sp_next0.
+      R14 = DM(0x200ac080);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // L: the voice's block
+      R0 = 0x200ac400;
+      I1 = R0;                          // R: the slot's block
+      R13 = 0x257898;
+      R13 = R13 + R12;
+      I3 = R13;
+      R0 = DM(0, I3);                   // the track word
+      R0 = R0 + R0;                     // x 2, its low 16 bits signed (stock: fext se)
+      R1 = 0xFFFF;
+      R0 = R0 AND R1;
+      R1 = 0x8000;
+      R1 = R0 AND R1;
+      IF EQ JUMP 0xbd5daa;                   // -> wr_st_sp_pos0.
+      R1 = 0x10000;
+      R0 = R0 - R1;
+.GLOBAL wr_st_sp_pos0.;
+wr_st_sp_pos0.:
+      R0 = LSHIFT R0 BY 7;
+      R13 = 0x259fe8;
+      R13 = R13 + R0;
+      I3 = R13;                         // its track's R half
+      R13 = 0x2578b8;
+      R13 = R13 + R12;
+      I0 = R13;
+      R0 = DM(0, I0);                   // the fade word
+      R1 = 0;
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5dc4;                   // -> wr_st_sp_flat0.
+      R1 = 0x3ec006c4;
+.GLOBAL wr_st_sp_flat0.;
+wr_st_sp_flat0.:
+      R2 = 0x413a068e;                  // F2: the gain, sample by sample
+      R15 = 32;
+.GLOBAL wr_st_sp_s0.;
+wr_st_sp_s0.:
+      F0 = DM(I1, M6);                  // R
+      F0 = F2 * F0;
+      F3 = DM(I4, M6);                  // L
+      F3 = F2 * F3;
+      F0 = F0 - F3;                     // g R - g L
+      F3 = DM(0, I3);
+      F3 = F3 + F0;
+      DM(I3, M6) = F3;
+      F2 = F2 - F1;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5dc9;                   // -> wr_st_sp_s0.
+.GLOBAL wr_st_sp_next0.;
+wr_st_sp_next0.:
+      R0 = DM(0x200ac02c);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5e3d;                   // -> wr_st_sp_next1.
+      R14 = DM(0x200ac084);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // L: the voice's block
+      R0 = 0x200ac480;
+      I1 = R0;                          // R: the slot's block
+      R13 = 0x257898;
+      R13 = R13 + R12;
+      I3 = R13;
+      R0 = DM(0, I3);                   // the track word
+      R0 = R0 + R0;                     // x 2, its low 16 bits signed (stock: fext se)
+      R1 = 0xFFFF;
+      R0 = R0 AND R1;
+      R1 = 0x8000;
+      R1 = R0 AND R1;
+      IF EQ JUMP 0xbd5e0e;                   // -> wr_st_sp_pos1.
+      R1 = 0x10000;
+      R0 = R0 - R1;
+.GLOBAL wr_st_sp_pos1.;
+wr_st_sp_pos1.:
+      R0 = LSHIFT R0 BY 7;
+      R13 = 0x259fe8;
+      R13 = R13 + R0;
+      I3 = R13;                         // its track's R half
+      R13 = 0x2578b8;
+      R13 = R13 + R12;
+      I0 = R13;
+      R0 = DM(0, I0);                   // the fade word
+      R1 = 0;
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5e28;                   // -> wr_st_sp_flat1.
+      R1 = 0x3ec006c4;
+.GLOBAL wr_st_sp_flat1.;
+wr_st_sp_flat1.:
+      R2 = 0x413a068e;                  // F2: the gain, sample by sample
+      R15 = 32;
+.GLOBAL wr_st_sp_s1.;
+wr_st_sp_s1.:
+      F0 = DM(I1, M6);                  // R
+      F0 = F2 * F0;
+      F3 = DM(I4, M6);                  // L
+      F3 = F2 * F3;
+      F0 = F0 - F3;                     // g R - g L
+      F3 = DM(0, I3);
+      F3 = F3 + F0;
+      DM(I3, M6) = F3;
+      F2 = F2 - F1;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5e2d;                   // -> wr_st_sp_s1.
+.GLOBAL wr_st_sp_next1.;
+wr_st_sp_next1.:
+      R0 = DM(0x200ac048);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5ea1;                   // -> wr_st_sp_next2.
+      R14 = DM(0x200ac088);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // L: the voice's block
+      R0 = 0x200ac500;
+      I1 = R0;                          // R: the slot's block
+      R13 = 0x257898;
+      R13 = R13 + R12;
+      I3 = R13;
+      R0 = DM(0, I3);                   // the track word
+      R0 = R0 + R0;                     // x 2, its low 16 bits signed (stock: fext se)
+      R1 = 0xFFFF;
+      R0 = R0 AND R1;
+      R1 = 0x8000;
+      R1 = R0 AND R1;
+      IF EQ JUMP 0xbd5e72;                   // -> wr_st_sp_pos2.
+      R1 = 0x10000;
+      R0 = R0 - R1;
+.GLOBAL wr_st_sp_pos2.;
+wr_st_sp_pos2.:
+      R0 = LSHIFT R0 BY 7;
+      R13 = 0x259fe8;
+      R13 = R13 + R0;
+      I3 = R13;                         // its track's R half
+      R13 = 0x2578b8;
+      R13 = R13 + R12;
+      I0 = R13;
+      R0 = DM(0, I0);                   // the fade word
+      R1 = 0;
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5e8c;                   // -> wr_st_sp_flat2.
+      R1 = 0x3ec006c4;
+.GLOBAL wr_st_sp_flat2.;
+wr_st_sp_flat2.:
+      R2 = 0x413a068e;                  // F2: the gain, sample by sample
+      R15 = 32;
+.GLOBAL wr_st_sp_s2.;
+wr_st_sp_s2.:
+      F0 = DM(I1, M6);                  // R
+      F0 = F2 * F0;
+      F3 = DM(I4, M6);                  // L
+      F3 = F2 * F3;
+      F0 = F0 - F3;                     // g R - g L
+      F3 = DM(0, I3);
+      F3 = F3 + F0;
+      DM(I3, M6) = F3;
+      F2 = F2 - F1;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5e91;                   // -> wr_st_sp_s2.
+.GLOBAL wr_st_sp_next2.;
+wr_st_sp_next2.:
+      R0 = DM(0x200ac064);
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5f05;                   // -> wr_st_sp_next3.
+      R14 = DM(0x200ac08c);             // the voice
+      R12 = LSHIFT R14 BY 2;
+      R13 = 0x257ea8;
+      R13 = R13 + R12;
+      I4 = R13;
+      R0 = DM(0, I4);
+      I4 = R0;                          // L: the voice's block
+      R0 = 0x200ac580;
+      I1 = R0;                          // R: the slot's block
+      R13 = 0x257898;
+      R13 = R13 + R12;
+      I3 = R13;
+      R0 = DM(0, I3);                   // the track word
+      R0 = R0 + R0;                     // x 2, its low 16 bits signed (stock: fext se)
+      R1 = 0xFFFF;
+      R0 = R0 AND R1;
+      R1 = 0x8000;
+      R1 = R0 AND R1;
+      IF EQ JUMP 0xbd5ed6;                   // -> wr_st_sp_pos3.
+      R1 = 0x10000;
+      R0 = R0 - R1;
+.GLOBAL wr_st_sp_pos3.;
+wr_st_sp_pos3.:
+      R0 = LSHIFT R0 BY 7;
+      R13 = 0x259fe8;
+      R13 = R13 + R0;
+      I3 = R13;                         // its track's R half
+      R13 = 0x2578b8;
+      R13 = R13 + R12;
+      I0 = R13;
+      R0 = DM(0, I0);                   // the fade word
+      R1 = 0;
+      R0 = PASS R0;
+      IF EQ JUMP 0xbd5ef0;                   // -> wr_st_sp_flat3.
+      R1 = 0x3ec006c4;
+.GLOBAL wr_st_sp_flat3.;
+wr_st_sp_flat3.:
+      R2 = 0x413a068e;                  // F2: the gain, sample by sample
+      R15 = 32;
+.GLOBAL wr_st_sp_s3.;
+wr_st_sp_s3.:
+      F0 = DM(I1, M6);                  // R
+      F0 = F2 * F0;
+      F3 = DM(I4, M6);                  // L
+      F3 = F2 * F3;
+      F0 = F0 - F3;                     // g R - g L
+      F3 = DM(0, I3);
+      F3 = F3 + F0;
+      DM(I3, M6) = F3;
+      F2 = F2 - F1;
+      R15 = R15 - 1;
+      IF NE JUMP 0xbd5ef5;                   // -> wr_st_sp_s3.
+.GLOBAL wr_st_sp_next3.;
+wr_st_sp_next3.:
+.GLOBAL wr_st_spost_out.;
+wr_st_spost_out.:
+      R0 = DM(0x200acb80);
+      R1 = DM(0x200acb84);
+      R2 = DM(0x200acb88);
+      R3 = DM(0x200acb8c);
+      R4 = DM(0x200acb90);
+      R5 = DM(0x200acb94);
+      R6 = DM(0x200acb98);
+      R7 = DM(0x200acb9c);
+      R8 = DM(0x200acba0);
+      R9 = DM(0x200acba4);
+      R10 = DM(0x200acba8);
+      R11 = DM(0x200acbac);
+      R12 = DM(0x200acbb0);
+      R13 = DM(0x200acbb4);
+      R14 = DM(0x200acbb8);
+      R15 = DM(0x200acbbc);
+      I0 = DM(0x200acbc0);
+      I1 = DM(0x200acbc4);
+      I3 = DM(0x200acbc8);
+      I4 = DM(0x200acbcc);
+      ASTAT = DM(0x200acbd0);
+      I2 = 0x25b768;                    // the displaced instruction
+      JUMP 0x1c255a;                    // on, as stock
 
 .wr_stereo..end:

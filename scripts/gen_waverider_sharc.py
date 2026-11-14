@@ -91,6 +91,9 @@ def main(argv=None) -> int:
             lab = RJ.labels((SHARC / "stereo.asm").read_text(encoding="utf-8"))
             sjumps = [one_jump(f"CJUMP {ST.CODE_SW + stereo['instruction_offsets'][lab[f'wr_st_t{k}']] // 2:#x} (DB);",
                                site, work) for k, (site, *_r) in enumerate(ST.STAGES)]
+            sjumps += [one_jump(f"JUMP {ST.CODE_SW + stereo['instruction_offsets'][lab[name]] // 2:#x};", site, work)
+                       for name, site in (("wr_st_smid", ST.MID_SITE), ("wr_st_spre", ST.SUM_PRE_SITE),
+                                          ("wr_st_spost", ST.SUM_POST_SITE))]
             pjump = one_jump(PVMIX_LINE, dsp.PVMIX_SITE_SW, work)
             ejump = one_jump(EMARK_LINE, dsp.CALL_SITE_SW, work)
             lptr = one_jump(LOOKUP_LINE, dsp.LOOKUP_SITE_SW, work)

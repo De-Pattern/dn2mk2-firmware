@@ -50,7 +50,7 @@ BLOCK = 32                       # samples a block
 CODE_L2 = 0x200A9400
 CODE_SW = 0xB80000 + (CODE_L2 - 0x20000000) // 2
 DATA_L2 = 0x200AC000
-DATA_BYTES = 0x2800
+DATA_BYTES = 0x3000
 
 ANY = DATA_L2 + 0x00             # stereo slots in use (0: every wrapper jumps straight on)
 LADDR = DATA_L2 + 0x10           # [slot][stage]: the voice's L state for that stage (0: free)
@@ -67,6 +67,10 @@ SAVE_OUT = DATA_L2 + 0x180       # the same, as L's call returned
 PRE = DATA_L2 + 0x200            # L's state for this stage before its call (0xcc bytes at most)
 SNAP = DATA_L2 + 0x300           # L's block after the first stage (the gain check)
 RBLK = DATA_L2 + 0x400           # [slot]: R's block, 32 float32
+LAMP = DATA_L2 + 0x600           # [slot]: L's block as the amp left it (the post-amp ramps, below)
+ONE = 0x3F800000                 # 1.0
+R1RAMP = DATA_L2 + 0x2800        # [slot]: the first post-amp ramp (from the hook between the two)
+MID_SITE, MID_STOCK = 0x1C9A3A, "R1 = 0x4f800000;"            # between the two ramp loops
 OFF = []                         # each stage's offset in a slot's state copy
 _o = 0
 for _s in STAGES:
@@ -76,12 +80,33 @@ STATE_BYTES = _o                 # 0x258: 150 words a voice
 RST = DATA_L2 + 0x800            # [slot]: R's state copies, 0x400 apart
 LPOST = DATA_L2 + 0x1800         # [slot]: what L's last call left
 SLOT_STRIDE = 0x400
+SAVE_SUM = DATA_L2 + 0xC00 - 0x80   # the sum hooks' register save (20 words; below RST)
+
+# stage 4: the voices into the tracks (sw 0x1c2512..0x1c2557, docs/stereo-assessment.md). Each
+# voice's block x a gain is added to both halves of its track's buffer (64 words a track: L half,
+# R half); the mixer takes them on. The gain: 11.6266 (0x413a068e) on the first sample, then
+# minus 0.37505 (0x3ec006c4) a sample when the voice's fade word is not zero (a fade out), else
+# flat. The hook after the sum turns a stereo voice's share of its track's R half from L into R.
+#
+# Between the amp and the sum the body runs two per-voice gain ramps on the blocks (sw 0x1c99ed and
+# 0x1c9a59: each sample x a value that moves by a step; a level ramp and a fade). They are not
+# copied: the amp's wrapper keeps L's block (LAMP) and fills it with 1.0, so the ramps leave their
+# own values in it. A hook between the two loops keeps the first ramp (R1RAMP) and fills the block
+# with 1.0 again; the hook before the sum makes L = r2 x (r1 x LAMP) and R = r2 x (r1 x R), stock's
+# own multiplies in its order.
+SUM_PRE_SITE, SUM_PRE_STOCK = 0x1C2512, "R4 = 0x413a068e;"     # the instruction before the sum
+SUM_POST_SITE, SUM_POST_STOCK = 0x1C2557, "I2 = 0x25b768;"     # the instruction after it
+TRACK_BUF = 0x259F68             # 16 tracks x 64 words
+VOICE_TRACK = 0x257898           # each voice's track word
+VOICE_FADE = 0x2578B8            # each voice's fade word
+VOICE_BLOCK = 0x257EA8           # each voice's block pointer
+SUM_GAIN, SUM_STEP = 0x413A068E, 0x3EC006C4
 
 assert STATE_BYTES <= SLOT_STRIDE and LPOST + SLOTS * SLOT_STRIDE <= DATA_L2 + DATA_BYTES
 assert SNAP + 4 * BLOCK <= RBLK and RBLK + SLOTS * 4 * BLOCK <= RST
 assert max(s[3] for s in STAGES) <= SNAP - PRE
 
-SAVED = [f"R{r}" for r in range(16)] + ["I1", "I3", "I4", "ASTAT"]
+SAVED = [f"R{r}" for r in range(16)] + ["I0", "I1", "I3", "I4", "ASTAT"]
 
 
 def laddr(slot: int, k: int) -> int:
@@ -235,17 +260,32 @@ def program() -> str:
         _rblk_to_i3(a)
         a.e("R12 = PASS R13;", "R's block")
         a.e("R8 = PASS R13;")
-        for r, at in (("I1", 16), ("I3", 17), ("I4", 18)):
+        for r, at in (("I0", 16), ("I1", 17), ("I3", 18), ("I4", 19)):
             a.e(f"{r} = DM({SAVE_IN + 4 * at:#x});")
         a.call_stage(t, f"wr_st_r{k}")
         a.label(f"wr_st_r{k}")
         a.e(f"I7 = DM({SAVE_I7:#x});", "the copies off")
+        if k == len(STAGES) - 1:                       # the amp: LAMP = L's block, L's block = 1.0
+            a.e(f"R0 = DM({SAVE_IN + 4 * 12:#x});", "L's block (R12 as called)")
+            a.e("I1 = R0;")
+            _slot_base(a, LAMP, 3, 7)
+            _copy(a, f"wr_st_lamp{k}", BLOCK)
+            a.e(f"R0 = DM({SAVE_IN + 4 * 12:#x});")
+            a.e("I1 = R0;")
+            a.e(f"R0 = {ONE:#x};")
+
+            def ones():
+                a.e("DM(I1, M6) = R0;")
+            _loop(a, f"wr_st_ones{k}", BLOCK, ones)
         a.restore(SAVE_OUT)
         a.e("I12 = DM(-1, I6);", "back to the body: the stage's own return")
         a.e("JUMP (M14, I12) (DB);")
         a.e("I7 = I6;")
         a.e("I6 = DM(0, I6);")
         a.lines.append("")
+    _mid_hook(a)
+    _pre_hook(a)
+    _sum_hooks(a)
     a.lines += [".wr_stereo..end:"]
     return "\n".join(a.lines) + "\n"
 
@@ -330,3 +370,161 @@ def _gain(a: _Asm, k: int) -> None:
         a.e("DM(I3, M6) = F0;")
     _loop(a, f"wr_st_mul{k}", BLOCK, mul)
     a.label(f"wr_st_g4{k}")
+
+
+def _voice_block_i4(a: _Asm, sl: int) -> None:
+    """I4 = slot SL's voice's block (stock's table). Clobbers R0, R12..R14."""
+    a.e(f"R14 = DM({VOICE + 4 * sl:#x});", "the voice")
+    a.e("R12 = LSHIFT R14 BY 2;")
+    a.e(f"R13 = {VOICE_BLOCK:#x};")
+    a.e("R13 = R13 + R12;")
+    a.e("I4 = R13;")
+    a.e("R0 = DM(0, I4);")
+    a.e("I4 = R0;", "the voice's block")
+
+
+def _mid_hook(a: _Asm) -> None:
+    """wr_st_smid, at MID_SITE (after the first post-amp ramp loop): each stereo voice's block
+    holds the first ramp (from 1.0): kept in R1RAMP, the block 1.0 again"""
+    a.label("wr_st_smid")
+    a.save(SAVE_SUM)
+    a.e(f"R0 = DM({ANY:#x});")
+    a.e("R0 = PASS R0;")
+    a.jump("EQ", "wr_st_smid_out")
+    for sl in range(SLOTS):
+        a.e(f"R0 = DM({laddr(sl, 0):#x});")
+        a.e("R0 = PASS R0;")
+        a.jump("EQ", f"wr_st_md_next{sl}")
+        _voice_block_i4(a, sl)
+        a.e(f"R0 = {R1RAMP + 4 * BLOCK * sl:#x};")
+        a.e("I3 = R0;")
+        a.e(f"R1 = {ONE:#x};")
+
+        def one():
+            a.e("R0 = DM(0, I4);")
+            a.e("DM(I3, M6) = R0;")
+            a.e("DM(I4, M6) = R1;")
+        _loop(a, f"wr_st_md_s{sl}", BLOCK, one)
+        a.label(f"wr_st_md_next{sl}")
+    a.label("wr_st_smid_out")
+    a.restore(SAVE_SUM)
+    a.e(MID_STOCK, "the displaced instruction")
+    a.jump_abs("", MID_SITE + 3, "on, as stock")
+    a.lines.append("")
+
+
+def _pre_hook(a: _Asm) -> None:
+    """wr_st_spre, at SUM_PRE_SITE: for each stereo slot in use, its voice's block holds the
+    post-amp ramps (from 1.0): L = ramp x LAMP, R = ramp x R."""
+    a.label("wr_st_spre")
+    a.save(SAVE_SUM)
+    a.e(f"R0 = DM({ANY:#x});")
+    a.e("R0 = PASS R0;")
+    a.jump("EQ", "wr_st_spre_out")
+    for sl in range(SLOTS):
+        a.e(f"R0 = DM({laddr(sl, 0):#x});")
+        a.e("R0 = PASS R0;")
+        a.jump("EQ", f"wr_st_pr_next{sl}")
+        a.e(f"R14 = DM({VOICE + 4 * sl:#x});", "the voice")
+        a.e("R12 = LSHIFT R14 BY 2;")
+        a.e(f"R13 = {VOICE_BLOCK:#x};")
+        a.e("R13 = R13 + R12;")
+        a.e("I4 = R13;")
+        a.e("R0 = DM(0, I4);")
+        a.e("I4 = R0;", "the voice's block: the ramps")
+        a.e(f"R0 = {LAMP + 4 * BLOCK * sl:#x};")
+        a.e("I1 = R0;", "L as the amp left it")
+        a.e(f"R0 = {RBLK + 4 * BLOCK * sl:#x};")
+        a.e("I3 = R0;", "R")
+        a.e(f"R0 = {R1RAMP + 4 * BLOCK * sl:#x};")
+        a.e("I0 = R0;", "the first ramp")
+
+        def one():
+            a.e("F1 = DM(I0, M6);", "r1")
+            a.e("F2 = DM(0, I4);", "r2 (the block, from 1.0)")
+            a.e("F0 = DM(I1, M6);")
+            a.e("F0 = F1 * F0;", "stock's order: ramp x sample, r1 then r2")
+            a.e("F0 = F2 * F0;")
+            a.e("DM(I4, M6) = F0;")
+            a.e("F0 = DM(0, I3);")
+            a.e("F0 = F1 * F0;")
+            a.e("F0 = F2 * F0;")
+            a.e("DM(I3, M6) = F0;")
+        _loop(a, f"wr_st_pr_s{sl}", BLOCK, one)
+        a.label(f"wr_st_pr_next{sl}")
+    a.label("wr_st_spre_out")
+    a.restore(SAVE_SUM)
+    a.e(SUM_PRE_STOCK, "the displaced instruction")
+    a.jump_abs("", SUM_PRE_SITE + 3, "on to the sum, as stock")
+    a.lines.append("")
+
+
+def _sum_hooks(a: _Asm) -> None:
+    """stage 4: wr_st_spost, at SUM_POST_SITE (just after stock's voices-into-tracks sum). For
+    each stereo slot in use, its voice's track's R half gets g x R - g x L added, sample by
+    sample: stock put g x L there, so it ends as g x R (to rounding). g is stock's gain for that
+    voice (SUM_GAIN, less SUM_STEP a sample while its fade word is set). Mono voices and the L
+    halves are never touched; with R == L every word added is exactly zero."""
+    a.label("wr_st_spost")
+    a.save(SAVE_SUM)
+    a.e(f"R0 = DM({ANY:#x});")
+    a.e("R0 = PASS R0;")
+    a.jump("EQ", "wr_st_spost_out")
+    for sl in range(SLOTS):
+        a.e(f"R0 = DM({laddr(sl, 0):#x});")
+        a.e("R0 = PASS R0;")
+        a.jump("EQ", f"wr_st_sp_next{sl}")
+        a.e(f"R14 = DM({VOICE + 4 * sl:#x});", "the voice")
+        a.e("R12 = LSHIFT R14 BY 2;")
+        a.e(f"R13 = {VOICE_BLOCK:#x};")
+        a.e("R13 = R13 + R12;")
+        a.e("I4 = R13;")
+        a.e("R0 = DM(0, I4);")
+        a.e("I4 = R0;", "L: the voice's block")
+        a.e(f"R0 = {RBLK + 4 * BLOCK * sl:#x};")
+        a.e("I1 = R0;", "R: the slot's block")
+        a.e(f"R13 = {VOICE_TRACK:#x};")
+        a.e("R13 = R13 + R12;")
+        a.e("I3 = R13;")
+        a.e("R0 = DM(0, I3);", "the track word")
+        a.e("R0 = R0 + R0;", "x 2, its low 16 bits signed (stock: fext se)")
+        a.e("R1 = 0xFFFF;")
+        a.e("R0 = R0 AND R1;")
+        a.e("R1 = 0x8000;")
+        a.e("R1 = R0 AND R1;")
+        a.jump("EQ", f"wr_st_sp_pos{sl}")
+        a.e("R1 = 0x10000;")
+        a.e("R0 = R0 - R1;")
+        a.label(f"wr_st_sp_pos{sl}")
+        a.e("R0 = LSHIFT R0 BY 7;")
+        a.e(f"R13 = {TRACK_BUF + 128:#x};")
+        a.e("R13 = R13 + R0;")
+        a.e("I3 = R13;", "its track's R half")
+        a.e(f"R13 = {VOICE_FADE:#x};")
+        a.e("R13 = R13 + R12;")
+        a.e("I0 = R13;")
+        a.e("R0 = DM(0, I0);", "the fade word")
+        a.e("R1 = 0;")
+        a.e("R0 = PASS R0;")
+        a.jump("EQ", f"wr_st_sp_flat{sl}")
+        a.e(f"R1 = {SUM_STEP:#x};")
+        a.label(f"wr_st_sp_flat{sl}")
+        a.e(f"R2 = {SUM_GAIN:#x};", "F2: the gain, sample by sample")
+
+        def one():
+            a.e("F0 = DM(I1, M6);", "R")
+            a.e("F0 = F2 * F0;")
+            a.e("F3 = DM(I4, M6);", "L")
+            a.e("F3 = F2 * F3;")
+            a.e("F0 = F0 - F3;", "g R - g L")
+            a.e("F3 = DM(0, I3);")
+            a.e("F3 = F3 + F0;")
+            a.e("DM(I3, M6) = F3;")
+            a.e("F2 = F2 - F1;")
+        _loop(a, f"wr_st_sp_s{sl}", BLOCK, one)
+        a.label(f"wr_st_sp_next{sl}")
+    a.label("wr_st_spost_out")
+    a.restore(SAVE_SUM)
+    a.e(SUM_POST_STOCK, "the displaced instruction")
+    a.jump_abs("", SUM_POST_SITE + 3, "on, as stock")
+    a.lines.append("")
