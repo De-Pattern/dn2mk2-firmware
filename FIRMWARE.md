@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.53** | 2026-11-13 | FLEX polish: FLEX REC's page LEDs follow its page (NiKo); a switch to FLEX sets trig LEN to INF; BUF snaps buffer to buffer, a p-locked BUF shows its number, and BUF locks pick the buffer a trig plays (NiKo); PLAY two detents a mode; FUNC + turn moves R.LEN a bar | `builds/v0.53-PAGES/` | yes |
+| **v0.54-t1** (TEST) | 2026-11-14 | **Test build, stereo branch:** stereo samples play in stereo (L and R each through the voice's whole chain), at most four stereo voices at once | `builds/test/v0.54-t1-STEREO/` | yes |
+| v0.53 | 2026-11-13 | FLEX polish: FLEX REC's page LEDs follow its page (NiKo); a switch to FLEX sets trig LEN to INF; BUF snaps buffer to buffer, a p-locked BUF shows its number, and BUF locks pick the buffer a trig plays (NiKo); PLAY two detents a mode; FUNC + turn moves R.LEN a bar | `builds/v0.53-PAGES/` | yes |
 | v0.52 | 2026-11-12 | FLEX MUTE SRC: REC SETUP's knob H takes the SRC track out of the mix (its level and FX sends) while FLEX still records it; the RECORDER's R.LEN counts steps at the pattern's scale (impbox) | `builds/v0.52-MUTE/` | yes |
 | v0.51 | 2026-11-12 | lighter Monomachine and Machinedrum machines, not bit for bit (SID -64 %, DDRW -43 %, DENS -40 %, VO-6 -9 %, TRX-CY -33 %, TRX-MA -26 %), so more voices before the guard drops one; FLEX REC's settings per track, saved with the kit; CLEAR BUF (FUNC + NO); REC SETUP's state in the left column; sample TUNE plays its fine values and is drawn as WaveTone's ruler | `builds/v0.51-LIGHTER/` | yes |
 | v0.50 | 2026-11-12 | FLEX takes of a track at the track's level (v0.49's were very quiet); GAIN on REC SETUP (G, -24..+38 dB) with a level meter on H; BUF fixed (the take was read 14 slots off) and C BUF on REC SETUP; impbox's fixes: TUNE rounds, SMP readable with TRK held, page-2 locks shown, E/F pushed clear SLD/SLEN; gate: SHARC step flexlevel, the link steps ~20x faster | `builds/v0.50-LEVEL/` | yes |
@@ -91,6 +92,57 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.54-t1 — STEREO (TEST build, branch `stereo`)
+
+**A test build, not a release.** It is gated exactly like one, but it comes from the `stereo` feature
+branch. Flash it only to test stereo, and go back to v0.53 for everyday use if anything is off. The patcher lists it
+under TEST, never as the latest.
+
+`DN2mod_v0.54-t1_STEREO_OS1.11.syx`
+sha256 `c5f4165ea447ecdbb0dc0a586dcf6cd1f933a2880b28f0fad75a01878a356333`
+Gate: CLEARED TO FLASH, 2026-11-14 (54 gates; 48 reused, each a pass of this same build whose every input is byte-identical; the run spanned four jobs under the two-hour limit). Source: commit `9b11856` (branch `stereo`).
+
+Everything in v0.53, plus:
+
+**New**
+- **Stereo samples.** A sample imported with **keep stereo** ticked in the web tool (it shows **ST** in the
+  browser) plays in true stereo on the sample machines. L and R are each read from their own channel and run
+  through the voice's whole chain: filter, overdrive, envelopes and amp, with the same settings. They reach
+  the track's two sides. Each channel is bit for bit what a mono sample of that channel alone gives, in the runner.
+- **At most four stereo voices** sound at once. A fifth stereo voice plays its mono mix (L + R) / 2.
+- Mono samples, and every machine that is not a sample machine, are untouched. Without stereo samples,
+  nothing in the chain changes.
+
+**Gate:**
+- **`stereo`** (a SHARC runner part of its own): every run is bit-exact to the model, R's block included.
+  With R = L, all 16 tracks' buffers after the sum (both halves) and the main mix are bit for bit the
+  mono run's, every block, with the sound's parameters moving and on every filter type. With R silent,
+  every L half stays exact and track 0's R half changes. With R = -L/2, R renders bit for bit the mono
+  -L/2 sample.
+- **`smp`:** a format-2 sample renders L in the voice's block and R in its slot's, each bit for bit
+  the int16 mono sample of that channel.
+- **`stfmt`:** format 2 on the ColdFire (the pool, the link, the browser's ST).
+
+**Tests**
+1. In the web tool, tick **keep stereo** and import a stereo file whose two sides clearly differ (a
+   hard-panned drum loop, or a tone in L only). The browser shows **ST** beside it.
+2. Put it on a ONESHOT track and play it. Listen on headphones: L comes out left and R right, as in the
+   file. **This is the test only the unit can answer.**
+3. The same sample with the filter (multimode, lowpass 4, EQ, legacy LP/HP) and the overdrive turned up:
+   both sides change alike, with no clicks and no side dropping out.
+4. Four stereo voices (a chord, or four tracks), then a fifth: the fifth plays the mono mix, and nothing
+   drops.
+5. A mono sample and the stock machines next to it sound exactly as on v0.53.
+6. The regression check (top of this file).
+
+**Known issues**
+- **The comb filters (Comb- and Comb+)** play a stereo sample's L on both sides: that filter's path is not
+  doubled yet, so the voice falls back to mono rather than risk anything wrong.
+- **The FX sends** (chorus, delay, reverb) take the left side only.
+- **The recorder** records mono, as before. Stereo samples come from the web tool's import.
+- That R reaches the right output is checked only up to the track buffers in the runner. Test 2 is the
+  check on the unit.
 
 ## v0.53 — PAGES (FLEX page LEDs, BUF locks play, quicker PLAY, R.LEN by bars)
 
