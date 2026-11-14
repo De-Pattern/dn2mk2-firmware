@@ -75,7 +75,7 @@ _WORDS = ("F0", "F1", "F2", "F3", "O0", "O1", "O2", "O3", "O4", "O5", "O6", "O7"
           "x37", "c1", "step1", "step2", "src", "dst", "kk", "x1t", "stt", "skip", "go",
           "m0", "m1", "m2", "m3", "r0", "r1", "r2", "r3", "n4", "R0i", "R1i", "R2i", "R3i",
           "dt", "step", "row", "opp", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "xk",
-          "kind")
+          "kind", "rsp")
 
 
 def _a(L: C.Layout, name: str) -> int:
@@ -1115,24 +1115,30 @@ def _consonants(p: Prog, L: C.Layout) -> None:
 # -- the resonators ------------------------------------------------------------------------
 def _res_body(p: Prog, L: C.Layout, parallel: bool) -> None:
     """y = c1 x - c2 y1 - c2 y1 - R y2 (y1, y2 the limited outputs), c1/c2 ramped (RAMP); series:
-    the limited y to I2; parallel: I2's word + y, limited. I5 the input, I0 the state (y1, y2), R"""
+    the limited y to I2; parallel: I2's word + y, limited. I5 the input, I0 the state (y1, y2), R.
+    Clobbers I0 (left on the state), I1, I2."""
     _qconsts(p)
     p.ld(10, _a(L, "R"))
     p.ldi(2, 0, 0)
     p.ldi(3, 1, 0)
+    p.geti(12, 0)                               # v0.52: the state's address kept; I0 walks the input (its
+    p.st(_a(L, "rsp"), 12)                      # loads ride on the computes, as I5's could not)
+    p.geti(12, 5)
+    p.seti(0, 12)
     p.iconst(12, _a(L, "RAMP"))
     p.seti(1, 12)
 
     # v0.52 (speed): the count in R0 (no scratch count), two samples a round with y1 and y2 in
     # F2 and F3 by turns (no moves): the same words
     def one(y1, y2):
-        p.ldpost(1, 5)
         p.ldpost(4, 1)
         p.ldpost(5, 1)
-        p.float_(4, 4, 9)                       # c1, c2: the ramps' words (v0.52: floated here, i2f as before)
-        p.float_(5, 5, 9)
+        if SER_EXACT:                           # c1, c2: the ramps' words, floated here (v0.52: else floats already)
+            p.float_(4, 4, 9)
+            p.float_(5, 5, 9)
+        p.ldpost(1, 0)
+        p.fop(7, 5, "*", y1)                    # (v0.52: c2 y1 first, then c1 x: the same two products)
         p.fop(6, 4, "*", 1)
-        p.fop(7, 5, "*", y1)
         p.fop(6, 6, "-", 7)
         p.fop(6, 6, "-", 7)
         p.fop(7, 10, "*", y2)
@@ -1147,6 +1153,8 @@ def _res_body(p: Prog, L: C.Layout, parallel: bool) -> None:
             p.stpost(2, y2)
     p.loop_r(0, 8, lambda: (one(2, 3), one(3, 2)), one=0)
     p.st(_a(L, "n4"), 0)
+    p.ld(12, _a(L, "rsp"))
+    p.seti(0, 12)
     p.sti(0, 0, 2)
     p.sti(1, 0, 3)
 
@@ -1352,17 +1360,24 @@ def _formant_loop(p: Prog, L: C.Layout) -> None:
             p.lsh(2, 2, 4)
             p.iconst(5, 0x7FFFFF)
             p.iconst(8, -0x800000)
+            p.iconst(9, -23)
 
             def ramp():
                 for acc_r, d in ((1, 10), (2, 11)):
                     p.ash(3, acc_r, -4)
                     p.iop(3, 3, "MIN", 5)
                     p.iop(3, 3, "MAX", 8)
-                    p.stpost(2, 3)              # (the word: the series filter's input as it is, the parallel one's floated)
+                    if not SER_EXACT:           # (the float resonators' input: the word's value, i2f)
+                        p.float_(3, 3, 9)
+                    p.stpost(2, 3)              # (SER_EXACT: the word, the exact series' input as it is)
                     p.iop(acc_r, d, "+", acc_r)
             p.loop_r(0, 16, ramp, one=0)
 
         def held():
+            if not SER_EXACT:                   # (the words' values, once)
+                p.iconst(9, -23)
+                p.float_(1, 1, 9)
+                p.float_(2, 2, 9)
             p.loop_r(0, 4, lambda: [p.stpost(2, r) for _ in range(4) for r in (1, 2)], one=0)
         p.iop(3, 10, "OR", 11)
         p.ifz(3, "EQ", held, ramps)
