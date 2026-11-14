@@ -15,14 +15,20 @@ m5 = G.Image(dk, dsp.section7(stock))
 snap, mach = G.snapshot_path(dk, stock, pathlib.Path(tempfile.mkdtemp()))
 init = G.init_on(snap, mach, m5)
 ONE = SM.TYPE_OF["ONESHOT"]
+WALKDK, WALKMEM = dk, dk.ldr.LoadedMemory.from_stream(dsp.section7(stock))
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 6
 AMP = ST.STAGES[-1]
 
-def run(stereo_v, dup=1):
+def run(stereo_v, dup=1, zero_l=False):
     seen = {}          # amp state -> block
     rec = []
+    MIX = []
+    ENDM = []
     def amp(r):
         seen[G.m2.word_reg(r, "R4")] = G.m2.word_reg(r, "R12")
+    def endsnap(r):
+        if len(ENDM) < 4:
+            ENDM.append({a: G.m2.word(r.state, a) for a in list(range(0x200000, 0x300000, 4)) + list(range(0x20080000, 0x200C0000, 4))})
     def perc(r):
         if stereo_v is not None:
             G.m2.poke(r.state, ST.ANY, 1)
@@ -44,15 +50,33 @@ def run(stereo_v, dup=1):
         TB.append([G.m2.word(r.state, ST.TRACK_BUF + 4 * i) for i in range(16 * 64)])
     TB = []
     PRE_TB, MID_TB = [], []
-    hooks = {dsp.PERC_SW: perc, AMP[1]: amp, ST.SUM_POST_SITE + 3: tbuf,
+    hooks = {dsp.PERC_SW: perc, AMP[1]: amp, ST.SUM_POST_SITE + 3: tbuf, 0x1C3156: endsnap,
              0x1C2515: lambda r: PRE_TB.append([G.m2.word(r.state, ST.TRACK_BUF + 4 * i) for i in range(16 * 64)]),
              ST.SUM_POST_SITE: lambda r: MID_TB.append([G.m2.word(r.state, ST.TRACK_BUF + 4 * i) for i in range(16 * 64)])}
     DBG[stereo_v, dup] = (PRE_TB, MID_TB)
+    DBG[stereo_v, dup, "mix"] = MIX
+    DBG[stereo_v, dup, "end", zero_l] = ENDM
+    for a_ in (0x1C3060, 0x1C3061, 0x1C3062):
+        hooks[a_] = lambda r: MIX.append([G.m2.word(r.state, SM.MIX_BUF + 4 * i) for i in range(64)])
     MEMS = []
     def memsnap(r):
         if not MEMS:
             MEMS.append({a: G.m2.word(r.state, a) for a in range(0x240000, 0x2A0000, 4)})
-    hooks[ST.SUM_POST_SITE + 3] = (lambda r, f=tbuf: (f(r), memsnap(r)))
+    def zl(r):
+        if zero_l:
+            base = int(sys.argv[2], 0) if len(sys.argv) > 2 else ST.TRACK_BUF
+            for i in range(32):
+                G.m2.poke(r.state, base + 4 * i, 0)
+    def onrw(r):
+        zl(r)
+        if stereo_v is None:
+            RW["on"] = (ST.TRACK_BUF, ST.TRACK_BUF + 16 * 256)
+    hooks[ST.SUM_POST_SITE + 3] = (lambda r, f=tbuf: (f(r), memsnap(r), onrw(r)))
+    if stereo_v is None and not zero_l:
+        for lo, hi in ((0x1C1700, 0x1C3200), (0x1C9C80, 0x1CA100)):
+            for sw, *_x in WALKDK.walk(WALKMEM, lo, hi):
+                if sw not in hooks:
+                    hooks[sw] = (lambda r, a=sw: RW.__setitem__("pc", a))
     def lr(r):
         if stereo_v is not None and dup:
             lb = G.m2.word(r.state, ST.VOICE_BLOCK + 4 * stereo_v)
@@ -101,6 +125,15 @@ LRD = []
 WATCH = {"on": None, "pcs": {}}
 import sharc_core.memory as _mem
 _ow = _mem._dm_write
+_or = _mem._dm_read
+RW = {"on": None, "r": {}, "w": {}}
+def _r(state, address, width, *a, **k):
+    on = RW["on"]
+    ad = getattr(address, "value", address)
+    if on and isinstance(ad, int) and on[0] <= ad < on[1]:
+        pc = RW.get("pc")
+        RW["r"][pc] = RW["r"].get(pc, 0) + 1
+    return _or(state, address, width, *a, **k)
 def _w(state, address, width, value, *a, **k):
     on = WATCH["on"]
     ad = getattr(address, "value", address)
@@ -111,6 +144,8 @@ def _w(state, address, width, value, *a, **k):
 for _m in list(sys.modules.values()):
     if getattr(_m, "_dm_write", None) is _ow:
         _m._dm_write = _w
+    if getattr(_m, "_dm_read", None) is _or:
+        _m._dm_read = _r
 AT6 = []
 CHG = []
 PTR = []
@@ -120,6 +155,7 @@ print("ok", r0["ok"], "voices sounding:", loud)
 V = loud[0] if loud else 0
 r1, st, tb1 = run(V)
 r2, st2, tb2 = run(V, dup=0)
+r3, st3, tb3 = run(None, zero_l=True)
 print("ok", r1["ok"], r1.get("halt"))
 for b, ((lb, rb, odd, gf), (lb0, *_)) in enumerate(zip(st, mono)):
     L = lb.get(V, []); L0 = lb0.get(V, [])
@@ -155,3 +191,31 @@ print("the table's block vs the amp's R12, per block:", PTR[:3])
 print("from the amp's return to the sum:", CHG[:3])
 
 print("writes to L's block between the amp and the sum, by pc:", {hex(k) if k else k: v for k, v in WATCH["pcs"].items()})
+
+fl2 = lambda w: struct.unpack('<f', struct.pack('<I', w or 0))[0]
+m0, m2_ = DBG[None, 1, "mix"], DBG[V, 0, "mix"]
+for b, (a, c) in enumerate(zip(m0, m2_)):
+    ev = [i for i in range(0, 64, 2) if a[i] != c[i]]; od = [i for i in range(1, 64, 2) if a[i] != c[i]]
+    lo = [i for i in range(32) if a[i] != c[i]]; hi = [i for i in range(32, 64) if a[i] != c[i]]
+    print(f"mix {b}: peak L {max(abs(fl2(w)) for w in a[:32]):.4f} R {max(abs(fl2(w)) for w in a[32:]):.4f} -- R silent vs mono, differing even {len(ev)} odd {len(od)} | first half {len(lo)} second half {len(hi)}")
+
+print("reads of track 0's R half after the sum, by pc:", {hex(k): v for k, v in sorted(RW["r"].items()) if k}[:0] if False else sorted((hex(k), v) for k, v in RW["r"].items() if k))
+
+def spans_(addrs):
+    out, a0, prev = [], None, None
+    for a in sorted(addrs):
+        if prev is not None and a <= prev + 16:
+            prev = a; continue
+        if a0 is not None: out.append(f"{a0:#x}..{prev:#x}")
+        a0 = prev = a
+    if a0 is not None: out.append(f"{a0:#x}..{prev:#x}")
+    return out
+e0, e2, e3 = DBG[None, 1, "end", False], DBG[V, 0, "end", False], DBG[None, 1, "end", True]
+for b in range(min(len(e0), len(e2))):
+    d = [a for a in e0[b] if e0[b][a] != e2[b][a] and not (ST.DATA_L2 <= a < ST.DATA_L2 + ST.DATA_BYTES)]
+    print(f"state at block {b}'s return, R silent vs mono: {len(d)} words differ in", spans_(d)[:12])
+
+
+for b in range(min(len(e0), len(e3))):
+    d = [a for a in e0[b] if e0[b][a] != e3[b][a]]
+    print(f"state at block {b}'s start, track 0's L half zeroed after the sum vs mono (at the routine's return): {len(d)} words differ in", spans_(d)[:16])

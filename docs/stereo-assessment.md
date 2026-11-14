@@ -212,6 +212,30 @@ pair as stock's.
   ramp, where PAN is applied), then add R's sum and its side behind `STEREO`, checked on the
   runner (a stereo voice with R == L must give stock's mix bit for bit).
 
+## Stage 4 built (2026-11-14): R into its track's R half
+
+What the runner showed (scripts/sharc_stereo_rpass.py; panread/pcread probes):
+
+- **Between the amp and the sum** the body runs two per-voice gain ramps on the voice blocks
+  (`0x1c99ed`: a level ramp; `0x1c9a59`: a fade), sample x ramp, ramp stepping each sample.
+  The R pass does not copy them: the amp's wrapper keeps L's block and fills it with 1.0, a hook
+  between the loops (`0x1c9a3a`) keeps the first ramp, and a hook before the sum (`0x1c2512`)
+  makes L = r2 (r1 x) and R the same, stock's own multiplies in its order.
+- **The sum** (`0x1c2515`) adds each voice x 11.6266 (minus a fade step a sample when its fade word
+  is set) into both halves of its track's 64-word buffer at `0x259f68 + 0x100 track`. A hook
+  after it (`0x1c2557`) adds g R - g L into a stereo voice's track's R half.
+- **Checked**: with R == L every track buffer is bit for bit the mono run's, 8 blocks; with R
+  silent the L halves are exact and only the R halves change.
+- **Where the halves go**: their only readers are the sum and the per-channel output loops
+  (`0x1c2680`, `0x1c26c7`), which send each track's L half and R half as separate channels
+  through a routing table at `0x25d77c` (32 entries: track k's L, then its R). The main bus
+  (`0x25bb68` L, `0x25bbe8` R) is built from `0x258f68`, which is fed from per-voice stereo
+  buffers at `0x257ee8 + 0x100 v` that the runner never writes (filled outside the code it
+  models). PAN's gains are computed per track (`0x254db4`.., `0x254f74`..) but never change
+  the voice block or the track halves. **So that R reaches the right side, with PAN as
+  balance, is a test for the unit**: a stereo sample with the L channel only should come out on
+  the left.
+
 So the R pass is: after the chain, for each stereo voice, the same eight steps on the R block, each
 stage with a copy of its state whose parameter words follow L's and whose own words are R's (rule:
 a word changed by anything but the stage follows L; what the stage itself writes stays per channel;
