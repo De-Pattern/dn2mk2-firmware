@@ -99,7 +99,7 @@ class Run:
                 for k in range(32):
                     mem.put(BUF + 128 * t + 4 * k, 0)
         mem.put(L.C["mcost"], 0)
-        p = Prog("run", mem=mem)
+        p = Prog("run", mem=mem, merge=PP.PACK)
         p.spill = L.md.C["ash"]
         PP.mnm_ages(p, L)
         self.steps += p.steps
