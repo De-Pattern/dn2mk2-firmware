@@ -72,6 +72,16 @@ def spans(addrs):
     return out
 
 
+def render(pc, insn):
+    """the digikit dossier's mnemonic for INSN (tools/sharcfn.py), else its fields"""
+    try:
+        import collections as _c
+        import sharcfn
+        return sharcfn.render_instruction(pc, insn, None, set(), _c.Counter(), [])[0]
+    except Exception as e:                         # noqa: BLE001
+        return f"{insn.type_name} {insn.fields} ({type(e).__name__}: {e})"
+
+
 class StateTracer(m4.ChainTracer):
     def __init__(self, window):
         super().__init__()
@@ -94,7 +104,7 @@ class StateTracer(m4.ChainTracer):
             st = runner.state
             if self.show and self.show[0] <= pc < self.show[1] and LOG["ctx"] is not None and pc not in self.shown:
                 self.shown.add(pc)
-                self.lines.append(f"  {pc:#x}  {insn}")
+                self.lines.append(f"  {pc:#x}  {render(pc, insn)}")
             if pc == CHAIN and self.cur is None and self.runs_seen == 0:
                 self.cur = {"bases": {}}
                 self.runs_seen = 1

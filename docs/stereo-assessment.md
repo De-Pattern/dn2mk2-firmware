@@ -171,6 +171,18 @@ traced block's chain run, tagged with the call it happened in). Facts:
 - The block is written in this order: the machine's render (`0x180100`, ours), `0xb8251b`, the body's
   loop, then `0x1cdb56`, `0xb80c39`, `0xb8265b`, `0xb81368`, `0xb82342`, the amp.
 
+- **How the body calls them** (`--show`, the digikit dossier's mnemonics): each stage is called in a
+  loop over the sixteen voices (`R15 = 0x10`, the state pointer stepped by the stage's stride, e.g.
+  `0x14` for `0xb8251b`, `0x70` for `0xb80c39` from engine `+0xe088`), so the chain is stage by stage,
+  not voice by voice. Each call: `R4` the voice's state, `R12 = R8` the voice's block (read from the
+  block-pointer table through `I5`), `R9` and `R2` pushed (the amp also `R1`, from engine `+0x1390c`).
+  Call sites: `0x1c9459` (`0xb8251b`), `0x1c94fd` (`0xb80c39`), `0x1c959f` (`0xb81368`), `0x1c95b4`
+  (`0xb8265b`), `0x1c95c9` (`0x1cdb56`), `0x1c98af` (`0xb82342`), `0x1c99cc` (the amp).
+- **The body's own step is a gain**: `0x1c948c..0x1c949e` multiplies the block by `0x3fcade01`
+  (1.5849, +4 dB) when its condition holds; nothing kept between blocks.
+- **Stage 2a on the runner** (2026-11-14, gate part `smp`): a format-2 sample plays (L + R) / 2,
+  bit for bit the float32 sample of its mix, and bit-exact to the model.
+
 So the R pass is: after the chain, for each stereo voice, the same eight steps on the R block, each
 stage with a copy of its state whose parameter words follow L's and whose own words are R's (rule:
 a word changed by anything but the stage follows L; what the stage itself writes stays per channel;
