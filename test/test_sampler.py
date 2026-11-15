@@ -15,6 +15,7 @@ import pytest
 from dnfw.perc import machines as PM
 from dnfw.perc.dsl import flt
 from dnfw.perc.dsl import Mem
+from dnfw.dt2 import reader as DR
 from dnfw.sampler import live as SL
 from dnfw.sampler import machines as SM
 from dnfw.sampler import program as P
@@ -57,23 +58,13 @@ def test_the_pool_layout():
     assert SM.NAMES_OFFSET + 8 * SM.POOL_SLOTS <= SM.DATA_OFFSET
 
 
-DT2_MODELS = pathlib.Path(__file__).resolve().parents[2] / "dt2s117" / "research" / "tools"
-
-
-@pytest.mark.skipif(not (DT2_MODELS / "models_reader.py").is_file(),
-                    reason="the DT2 reader's reference model (outside the repository) is not here")
 def test_oneshot_is_the_dt2s_reader():
     # v0.18: ONESHOT through the DT2's own reader -- its 6-tap interpolator at 96 kHz and
-    # its decimator -- against the bit-exact model of the DT2's code (dt2-reader-exact.md,
-    # outside the repository: it is derived from Elektron's firmware)
-    sys.path.insert(0, str(DT2_MODELS))
-    import models_reader as MR
+    # its decimator -- against our model of it (2026-11-15: dnfw.dt2.reader, in place of a
+    # model outside the repository that only upstream's host had)
     out = _play(SM.TYPE_OF["ONESHOT"], {}, 20)
     pcm = [max(-32768, min(32767, round(x * 32768))) for x in SL.test_samples()[0]]
-    v = MR.Voice(pcm, 0, 0, len(pcm) << 31, 1 << 29, 0)          # 0.25 frames a 96 kHz tick
-    ref = [0.0] * 32
-    for _ in range(19):
-        ref += [float(x) for x in MR.read_block(v, MR.load_polyphase())]
+    ref = [0.0] * 32 + DR.read(DR.Voice(pcm, 0, DR.ONE // 4), 19 * 32)   # 0.25 frames a 96 kHz tick
     # LEV 100 makes up the interpolator's gain (0.4045): the DT2's output times 1 / 0.4045
     g = struct.unpack("<f", P.tables_bytes()[-4:])[0]
     err = [abs(a - g * b) for a, b in zip(out, ref)]
