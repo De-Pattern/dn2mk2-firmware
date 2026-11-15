@@ -19,6 +19,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import sys
 import zipfile
 
@@ -29,6 +30,18 @@ SRC = ROOT / "src"
 STOCK = pathlib.Path(os.environ.get("DN2_STOCK_DIR", ROOT.parent / "stock"))
 STOCK_FILES = {"dt2": "Digitakt_II_OS1.17.syx", "md": "Elektron_SPS1-1UW_OS1.63.syx",
                "mnm": "Elektron_SFX6-60_OS1.32B.syx"}
+
+
+# dn2mk2's patcher-worker.js reads the version from the bundle's name with this pattern and
+# writes it as VERSION (2026-11-15: its X.Y-only pattern missed v0.54-t1's "-tN", so the
+# browser wrote no VERSION and the build stopped; NiKo). The bundle is named and rebuilt here
+# exactly as the worker will see it.
+WORKER_NAME = re.compile(r"dnfw-v([0-9]{1,3}\.[0-9]{1,3}(?:-t[0-9]{1,3})?)\.zip$")
+
+
+def worker_version(zname: str) -> str | None:
+    m = WORKER_NAME.search(zname)
+    return m.group(1) if m else None
 
 
 def isolated_rebuild(zbytes: bytes, version: str) -> str:
@@ -104,11 +117,16 @@ def main() -> int:
     # RUN/code, the version as RUN/VERSION, nothing from this repository), in a clean
     # interpreter. v0.39's bundle passed the in-repo rebuild above but stopped in the
     # browser: the build read VERSION from the repository, which the zip does not carry.
-    iso = isolated_rebuild(zbuf.getvalue(), version)
+    zname = f"dnfw-v{version}.zip"
+    wv = worker_version(zname)
+    if wv != version:
+        print(f"the patcher's worker would read {zname}'s version as {wv!r}, not {version!r}: it would "
+              "write no VERSION and the build would stop in the browser")
+        return 1
+    iso = isolated_rebuild(zbuf.getvalue(), wv)
     if iso != want:
         print(f"the zip alone does not rebuild the cleared file: {iso}")
         return 1
-    zname = f"dnfw-v{version}.zip"
     (outdir / zname).write_bytes(zbuf.getvalue())
     man = outdir / "builds.json"
     rows = json.loads(man.read_text()) if man.exists() else []

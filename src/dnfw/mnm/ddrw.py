@@ -125,7 +125,10 @@ def _half(p: Prog, L: C.Layout) -> None:
     p.iconst(12, 0)
     p.float_(3, 3, 12)
     PM.recip(p, 3, 3)                           # 1 / (TIME + 1)
-    p.fconst(2, C.TOP)
+    # v0.56 (owner: "time in ddrw is not working"): the glide word g, 1.0 on the Monomachine's
+    # model (its references: W gl reads 0 there), the DN2's host's (machines._host_ddrw) else
+    p.ld(2, W["gl"])
+    p.ifz(2, "EQ", lambda: p.fconst(2, C.TOP), kind="f")
     C.knob(p, 1, 3)
     p.iconst(12, 0)
     p.if_(1, "EQ", 12, lambda: p.fconst(2, 0x7EB852 * C.Q23), kind="i")
