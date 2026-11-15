@@ -767,7 +767,9 @@ class Prog:
     def loop_r(self, counter: int, n_from: int | None, body, one: int = 12) -> None:
         """v0.42: loop() with the count in register COUNTER (no scratch word: two L2 accesses
         an iteration fewer). BODY must leave COUNTER alone (ONE it may use). N_FROM None: the
-        count is in COUNTER already, and is not 0."""
+        count is in COUNTER already, and is not 0. ONE = COUNTER: the count steps down by
+        `Rc = Rc - 1;` (dec, the 16-bit form) and no register is set to 1, so BODY may use
+        every register but COUNTER."""
         if n_from is not None:
             self.iconst(counter, n_from)
         elif self.run:
@@ -780,16 +782,22 @@ class Prog:
                 before = self.r[counter]
                 body()
                 assert self.r[counter] == before, f"loop_r: the body changed its count R{counter}"
-                self.iconst(one, 1)
-                self.iop(counter, counter, "-", one)
+                self._loop_step(counter, one)
                 if self.r[counter] == 0:
                     break
             self._barrier()                    # the jump back
             return
         body()
-        self.iconst(one, 1)
-        self.iop(counter, counter, "-", one)
+        self._loop_step(counter, one)
         self.jump("NE", top)
+
+    def _loop_step(self, counter: int, one: int) -> None:
+        """loop_r's count, one down: through ONE, or by dec when ONE is the counter itself."""
+        if one == counter:
+            self.dec(counter, counter)
+        else:
+            self.iconst(one, 1)
+            self.iop(counter, counter, "-", one)
 
     # -- leaf subroutines ---------------------------------------------------------------
     def call(self, name: str, body) -> None:
