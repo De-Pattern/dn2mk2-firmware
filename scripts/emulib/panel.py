@@ -60,6 +60,7 @@ class Panel:
         if self.timers is None:
             raise SystemExit("this snapshot carries no timer state to claim")
         self.png_dir = pathlib.Path(png_dir)
+        self.ran = 0                # instructions run since the snapshot resumed (every settle)
         # v0.34 (docs/timing-model.md): the audio interrupt at its real cadence, when the
         # machine was built with digikit's SSI0/eDMA event source (Machine(ssi0_request_hz=..))
         ssi = machine.ev.get("ssi0_dma") if hasattr(machine, "ev") else None
@@ -91,6 +92,7 @@ class Panel:
             done += ran
             if ran == 0:
                 break
+        self.ran += done
         return done
 
     # --- input --------------------------------------------------------------

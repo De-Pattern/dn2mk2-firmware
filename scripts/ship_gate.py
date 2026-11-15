@@ -840,7 +840,9 @@ def main() -> int:
             ov, src = hex(lay["rec_overlay"]), hex(lay["rec_src"])
             # (1.12 redraws later in the emulator; the stock page came back
             # 60..300 M instructions after NO on clean 1.12, so the waits are longer: the checks are the same)
-            steps = (f"wait:5,png:p0,mem:{ov}:4,press:17,wait:3,tap:49,wait:3,release:17,"
+            # The first screen is taken once the first frame is composed, at most 40 M after the
+            # resume (it was a fixed 25 M, which the first frame reached within 0.5 M on some builds)
+            steps = (f"firstframe:40,png:p0,mem:{ov}:4,press:17,wait:3,tap:49,wait:3,release:17,"
                      f"wait:60,mem:{ov}:4,png:a1,spin:0:3,wait:15,mem:{src}:4,spin:0:9,wait:15,mem:{src}:4,png:a2,no,"
                      f"wait:300,mem:{ov}:4,png:a3,wait:15,png:a4")
             js = work / "recorder.json"
@@ -854,6 +856,9 @@ def main() -> int:
                 good = False
                 if rc == 0 and js.exists():
                     r = json.loads(js.read_text())
+                    ff = r.get("first_frame_at")
+                    if ff is None:
+                        return False, "no frame composed within 40 M instructions of the resume"
                     m = r["memory"]
                     seen = [int(m[k], 16) for k in (ov, f"{ov}@1", f"{ov}@4")]
                     srcs = [int(m[k], 16) for k in (src, f"{src}@3")]     # v0.41: 3 detents, then 9 more
@@ -861,9 +866,9 @@ def main() -> int:
                     good = (seen == [0, 1, 0] and srcs == [0, 3] and not r["setter_writes"]
                             and r["screen_frames"] > 0 and shots[1] != shots[0] and shots[1] != shots[2])
                     why = (f"overlay {seen}, src {srcs}, setter writes "
-                           f"{len(r['setter_writes'])}, frames {r['screen_frames']}")
+                           f"{len(r['setter_writes'])}, frames {r['screen_frames']}, first frame at {ff / 1e6:.0f} M")
                 return good, ("FUNC+VOICE opens it, knob A moves SRC four detents a choice (3: none, 12: three; v0.41) with no write to the sound, NO closes it, "
-                 "the screen drawn throughout"
+                 f"the screen drawn throughout (first frame at {ff / 1e6:.0f} M)"
                               if good else why)
             later("recorder", "recorder screen (ColdFire)", "recorder screen (ColdFire)", [rec_cmd, sorted(EMU_ENV.items())], rec_body)
 

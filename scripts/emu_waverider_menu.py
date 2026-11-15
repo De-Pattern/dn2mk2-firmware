@@ -29,7 +29,9 @@ tapped, DOWN, YES. Watched while it runs:
   uses.
 
 Steps (comma-separated): `func-src` (open MACHINE SEL), `up`, `down`, `left`,
-`right`, `yes`, `no`, `png:NAME`, `wait:MILLIONS`, `turn:ENC:DELTA` (push and
+`right`, `yes`, `no`, `png:NAME`, `wait:MILLIONS`, `firstframe:MILLIONS` (run 1 M at a time until
+the first frame is composed, at most MILLIONS after the snapshot resumed, the warm-up included; the JSON's
+`first_frame_at` says when, or null), `turn:ENC:DELTA` (push and
 turn -- what moves a value here, parameters included), `spin:ENC:DELTA` (a
 plain turn: shows the value, moves nothing in this emulator, stock included),
 `tap:CODE`, `press:CODE` / `release:CODE` (hold a key: TRIG 1-16 are 25-40 and
@@ -2111,6 +2113,7 @@ def main() -> int:
                          "a2": f"{uc.reg_read(K.UC_M68K_REG_A2):#010x}",
                          "stack": bytes(uc.mem_read(sp, 96)).hex()})
     alive = []
+    first_frame_at = None
     uc.hook_add(UC_HOOK_CODE, fault_reporter, begin=0x4011ED4A, end=0x4011ED4A)
     # v0.38: a free() of an address on the running stack (blskk's crash: stock grew a vector
     # slc_keynotes had put on its stack, and freed the stack buffer to the heap; the heap is
@@ -2239,6 +2242,15 @@ def main() -> int:
             alive.append({"name": step[6:], "frames": panel.frames(), "pc": f"{uc.reg_read(K.UC_M68K_REG_PC):#010x}"})
         elif step.startswith("wait:"):
             panel.settle(int(float(step[5:]) * 1_000_000))
+        elif step.startswith("firstframe:"):
+            # the first frame after the resume comes when it comes (it moved by a fixed 20 K
+            # instructions with a build's code, and by 20 M with the harness's own stepping):
+            # wait for it, up to a bound, rather than for a fixed time
+            limit = int(float(step[11:]) * 1_000_000)
+            while panel.frames() == 0 and panel.ran < limit:
+                if panel.settle(min(1_000_000, limit - panel.ran)) == 0:
+                    break
+            first_frame_at = panel.ran if panel.frames() else None
         elif step.startswith("turn:"):
             _, enc, delta = step.split(":")
             panel.push_and_turn(int(enc), int(delta))
@@ -2475,7 +2487,7 @@ def main() -> int:
               "mirror_type_writes": mirror_writes, "type_writes": type_writes,
               "direct_calls": calls_made,
               "frames": frames, "memory": mems, "down_to": down_to, "until": until, "popups": popups, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
-              "screen_frames": panel.frames() - frames_at_reset[0],
+              "screen_frames": panel.frames() - frames_at_reset[0], "first_frame_at": first_frame_at,
               "panel_writers": panel_writers, "items": items,
               "alive": alive, "fault_reports": reported, "stack_frees": stack_frees[:10],
               "isr": None if ssi is None else {
