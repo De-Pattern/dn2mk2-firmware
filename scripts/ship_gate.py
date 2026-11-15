@@ -1183,8 +1183,10 @@ def main() -> int:
             snd0 = kit + 52
             samp0 = snd0 + 0x6A
 
-            def samp_all(v):
-                return [f"poke:{kit + 52 + 1163 * t + 0x6A:#x}:{v:02x}00" for t in range(16)]
+            def samp_all(v):                    # (2026-11-14: and a redraw asked, as a load of the value asks one: 1.12
+                # redraws a poked value only when asked, so the list's NO put back a slot it had not seen drawn)
+                return [f"poke:{kit + 52 + 1163 * t + 0x6A:#x}:{v:02x}00" for t in range(16)] + [
+                    f"poke:{lay['smp_overlay_dirty']:#x}:00000001"]
             d = bytearray(0x1000)
             struct.pack_into("<II", d, 0, 0x31504D53, 4)
             for k, (fr, nm) in enumerate([(48000, "KICK"), (96000, "SHS_HAU"), (0, ""), (24000, "SNARE")]):
@@ -1569,9 +1571,12 @@ def main() -> int:
                         f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:6", "png:n0"] + snap_      # 0: the folder
                     # (the emulator's clock, the 1.5 kHz ticks at 0x4058f8d4, does not run: it is set
                     # as time would move it: the repeat's 0.4 s then 0.08 s steps, the marquee's 1 s
-                    # rest and 0.2 s a character)
+                    # rest and 0.2 s a character). 2026-11-14 (the 1.12 gate's blind spots): each clock step
+                    # waits 20 M, about four UI passes. Idle, the UI loop passes once in about 4.5 M instructions
+                    # on 1.11 and 1.12 alike (jmp_poll entries over 100 M, clean v0.53), so 2 M held a pass or
+                    # none by the snapshot's phase: 1.11's per-build snapshot held one, 1.12's none (one repeat seen)
                     def clock(t):
-                        return [f"poke:{TICK:#x}:{t:08x}", "wait:2"]
+                        return [f"poke:{TICK:#x}:{t:08x}", "wait:20"]
                     ns += clock(100) + ["press:14", "wait:2"] + clock(700) + clock(850) + clock(1000) + snap_   # 1: held DOWN
                     ns += ["release:14", "wait:2"] + clock(1300) + snap_ + clock(1600) + snap_                  # 2, 3: let go
                     # 4-19: the marquee of the row it stopped on (selected at tick 1000)
@@ -1694,9 +1699,14 @@ def main() -> int:
             from dnfw.perc import machines as PMx   # noqa: PLC0415
             kit = 0x4210D08C
             snd0 = kit + 52
-            st = ["wait:2", "png:stock"]
+            # (2026-11-14, the 1.12 gate's blind spots: 20 M before the stock page's picture, about four UI passes:
+            # 2 M held none on 1.12's snapshot, so no frame was composed; and a redraw asked after each poke, as
+            # a type chosen in MACHINE SEL asks one: 1.12 redrew only on a change of page, so SID 6581's page
+            # stood for the next SID and DDRW's for DPRO-WAVE)
+            st = ["wait:20", "png:stock"]
             for ty in MMx.TYPES:
-                st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", "wait:20", f"png:m{ty}"]
+                st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:20",
+                       f"png:m{ty}"]
             wslot = PMx.PARAMS[3][1]             # DPRO-WAVE's WPRS: the fourth place
             st += [f"poke:{snd0 + 0xDE:#x}:{MMx.TYPES[MMx.NAMES.index('DPRO-WAVE')]:02x}",
                    f"poke:{snd0 + 0x14 + 2 * wslot:#x}:0000", "wait:4"]
@@ -1763,16 +1773,32 @@ def main() -> int:
         if "smp_question_up" in lay:
             kit = 0x4210D08C
             Q, H, S = lay["smp_question_up"], lay["smp_held_lo"], lay["slc_state"]
-            qs = (f"wait:3,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,call:{Q:#x},press:25,wait:2,yes,"
+            # (2026-11-14, the 1.12 gate: stock's popups waited for by state, not time, whatever the snapshot's project
+            # and card show: the project's per-slot write protection cleared (stock's own project, 0x4018e0a8; 1.12's
+            # per-build snapshot holds the factory PRESETS, slot 0 protected, so the save said WRITE PROTECTED), a
+            # further question (OVERWRITE '...'? when the card holds the project) answered YES, and each view
+            # waited for: SAVING (0x4020734c) and the message after it (0x40207294, ERROR without a card)
+            QV, PV, MV, PROJ = 0x4020671C, 0x4020734C, 0x40207294, 0x4018E0A8
+            qs = (f"wait:3,poke-ret:{PROJ:#x}:0x1de79:00,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,call:{Q:#x},"
+                  f"press:25,wait:2,yes,"
                   f"wait:4,mem:{H:#x}:4,release:25,wait:6,mem:{S:#x}:4,mem:{H:#x}:4,press:17,wait:2,tap:8,"
-                  f"wait:2,release:17,wait:20,png:q,call:{Q:#x},yes,wait:30,mem:{S:#x}:4,call:{Q:#x},tap:2,"
+                  f"wait:2,release:17,wait:20,png:q,call:{Q:#x},yes,wait:30,mem:{S:#x}:4,call:{Q:#x},"
+                  f"yes-while:{QV:#x}:5,until-class:{MV:#x}:1:300,until-class:{MV:#x}:0:300,tap:2,"
                   f"wait:6,yes,wait:6,png:m,mem:{S:#x}:4,no,wait:6,mem:{S:#x}:4,"
                   # v0.41 (the owner, v0.40: "YES opens the slice menu, sometimes" while saving):
                   # FUNC + SETTINGS, YES, and a YES while SAVING is drawn (its view 0x4020734c at
                   # the list's end), then one on the message after it (0x40207294): both stock's,
                   # no menu; smp_question_up sees both up; the message's YES takes it down
-                  f"press:17,wait:2,tap:8,wait:2,release:17,wait:20,yes,wait:3,png:s,call:{Q:#x},yes,wait:3,"
-                  f"mem:{S:#x}:4,wait:15,png:e,call:{Q:#x},yes,wait:6,mem:{S:#x}:4,call:{Q:#x}")
+                  f"press:17,wait:2,tap:8,wait:2,release:17,wait:20,yes,wait:3,yes-while:{QV:#x}:5,"
+                  f"until-class:{PV:#x}:1:50,png:s,call:{Q:#x},yes,wait:3,"
+                  f"mem:{S:#x}:4,until-class:{MV:#x}:1:300,png:e,call:{Q:#x},yes,wait:6,mem:{S:#x}:4,call:{Q:#x},"
+                  f"until-class:{MV:#x}:0:300,call:{Q:#x},"
+                  # a slot write-protected (every slot's bit set): WRITE PROTECTED, the message a
+                  # unit on the factory project shows. Measured in the emulator (1.12): YES does not take it down and
+                  # opens no menu; it goes down by itself (about 210 M instructions)
+                  f"poke-ret:{PROJ:#x}:0x1de79:{'ff' * 16},press:17,wait:2,tap:8,wait:2,release:17,wait:20,yes,"
+                  f"until-class:{MV:#x}:1:100,png:w,call:{Q:#x},yes,wait:6,mem:{S:#x}:4,call:{Q:#x},"
+                  f"until-class:{MV:#x}:0:300,call:{Q:#x}")
             qjs = work / "question.json"
             q_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                      "--snapshot", snap, "--set-d0-at", "0x4005f5c6:0", "--steps", qs,
@@ -1786,7 +1812,7 @@ def main() -> int:
                     m = r["memory"]
                     d0 = [c["d0"] for c in r["direct_calls"]]
                     shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("q", "m")}
-                    d0 = d0 + [None] * (6 - len(d0))
+                    d0 = d0 + [None] * (10 - len(d0))
                     facts = {"TRIG 1 held: seen held": m[hex(H)] == "02000000",
                              "TRIG 1 + YES: stock's, no menu": int(m[hex(S)], 16) == 0,
                              "let go: nothing held": m[f"{hex(H)}@2"] == "00000000",
@@ -1800,12 +1826,19 @@ def main() -> int:
                              "the question drawn": shots["q"] != shots["m"],
                              # v0.41
                              "SAVING seen up: YES on it is stock's, no menu": d0[3] == 1 and int(m[f"{hex(S)}@6"], 16) == 0,
-                             "the message after it seen up: its YES takes it down, no menu":
-                             d0[4] == 1 and d0[5] == 0 and int(m[f"{hex(S)}@7"], 16) == 0}
+                             # on a snapshot without a card the message is ERROR, which
+                             # its YES takes down. A unit has a card: the save is done and the message is DONE,
+                             # which takes no key and goes by itself. Either way its YES opens no menu; a message
+                             # its YES takes down is held to ERROR's form, one it does not must go by itself
+                             "the message after it seen up: its YES opens no menu; it goes (ERROR: by that YES, "
+                             "DONE: by itself)":
+                             d0[4] == 1 and int(m[f"{hex(S)}@7"], 16) == 0 and (d0[5] == 0 or d0[6] == 0),
+                             "WRITE PROTECTED seen up: its YES opens no menu; it goes by itself":
+                             d0[7] == 1 and int(m[f"{hex(S)}@8"], 16) == 0 and d0[9] == 0}
                     good = all(facts.values())
                     why = f"{facts} d0={d0} mem={m}"
                 return good, ("a stock question's YES is the question's; TRIG + YES is stock's; the page's "
-                              "own YES still opens its menu; SAVING's and its message's keys are stock's" if good else why)
+                              "own YES still opens its menu; SAVING's and its message's keys are stock's, WRITE PROTECTED's too" if good else why)
             later("question", "stock questions and held keys (ColdFire)", "stock questions and held keys (ColdFire)", [q_cmd, sorted(EMU_ENV.items())], q_body)
 
         # 6k. v0.30: MACHINE SEL from one sample machine to another keeps SAMP (owner: the stock
@@ -2101,9 +2134,13 @@ def main() -> int:
         if "colsw" in lay:
             kit = 0x4210D08C
             ty = kit + 52 + 0xDE
-            rs = (f"wait:3,poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20," + "down,wait:3," * 9
+            # (2026-11-14, the 1.12 gate: down to GRID's row as stock reads it, not nine rows: 1.11's gate snapshot
+            # holds v0.14's MACHINE SEL rows, a 1.12 per-build one this build's (LIST_NEW), GRID further down)
+            rs = (f"wait:3,poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20,down-to:12,wait:3,"
                   + "png:r0,yes,wait:20,right,wait:20,png:r1,left,wait:20,png:r2,right,wait:20,png:r3,types,"
-                  + "no,wait:10,png:v0,press:2,wait:30,png:v1,release:2,wait:10,png:v2")   # v0.35: SYN held (O14)
+                  # (2026-11-14: 300 M after NO and after SYN's release: stock shows the page's title a while after
+                  # a key, then the pattern's name; both pictures are taken once the title has settled)
+                  + "no,wait:300,png:v0,press:2,wait:30,png:v1,release:2,wait:300,png:v2")   # v0.35: SYN held (O14)
             rjs = work / "colsw.json"
             r_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                      "--snapshot", snap, "--steps", rs, "--png-dir", work / "colsw", "--json", rjs]

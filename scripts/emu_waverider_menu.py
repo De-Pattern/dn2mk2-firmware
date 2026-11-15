@@ -100,6 +100,7 @@ TYPE_READS = {0x400254B4: 2, 0x40031BD2: 0, 0x40031C1C: 0, 0x40036478: 0, 0x4003
               0x400B17CC: 0}
 GETTER_RTS = 0x4003647C                 # rts of the machine-type getter 0x40036462
 TRACK_GETTER_EXIT = 0x4004B81E          # getMachineType(track) 0x4004b7f2: the common exit
+MSEL_FOLLOW, MSEL_ROW_TYPE = 0x4005A956, 0x4005B162   # MACHINE SEL: UP/DOWN's scroll-follow(view); the cursor row's type(view)
 ISR = 0x40025E36                        # the audio frame handler: modulation, frame, send
 ISR_RTE = 0x40027BC6                    # its only rte (docs/usbprobe.md)
 SEQ_ISR, SEQ_VECTOR = 0x400D99DE, 121   # the sequencer's timer ISR (emu_jump.py)
@@ -1951,6 +1952,35 @@ def main() -> int:
         def took(uc_, address, size, user):
             entry_args[address] = tuple(arg(4 * n) & 0xFFFFFFFF for n in range(1, 6))
         uc.hook_add(UC_HOOK_CODE, took, begin=int(va, 0), end=int(va, 0))
+    # MACHINE SEL's view, as UP / DOWN hand it to the scroll-follow (the down-to: step)
+    msel_view: dict[str, int] = {}
+    down_to: list[list] = []
+    popups: list[list] = []
+    screen_obj = json.loads((root / "src/dnfw/mods/waverider_code.json").read_text())["layout"].get("wr_screen_obj")
+
+    def view_of(vt: int) -> int:
+        """the view of class VT in the screen's list, or 0 (as smp_question_up walks it: node +0 the next, +8 the
+        view; the sentinel at screen + 20, the first node at screen + 28)"""
+        def ok(a):
+            return 0x40000000 <= a < 0x48000000 and not a & 3
+        scr = machine.long(screen_obj) if screen_obj else 0
+        if not ok(scr):
+            return 0
+        node = machine.long(scr + 28)
+        for _ in range(32):
+            if not ok(node) or node == scr + 20:
+                return 0
+            v = machine.long(node + 8)
+            if ok(v) and machine.long(v) == vt:
+                return v
+            node = machine.long(node)
+        return 0
+
+    def view_up(vt: int) -> bool:
+        return view_of(vt) != 0
+    until: list[list] = []
+    uc.hook_add(UC_HOOK_CODE, lambda uc_, ad, sz, us: msel_view.__setitem__("view", arg(4) & 0xFFFFFFFF),
+                begin=MSEL_FOLLOW, end=MSEL_FOLLOW)
 
     track_getter5: dict[str, int] = {}
 
@@ -2134,6 +2164,75 @@ def main() -> int:
             panel.let_go(FUNC)
         elif step in KEYS:
             panel.tap(KEYS[step])
+        elif step.startswith("until-call:"):
+            # until-call:VA:WANT[:MOST] (2026-11-14, the 1.12 gate): 10 M at a time until VA() returns WANT, at most MOST
+            # times: a state waited for, not a time (a save's bar and message last as long as the save does). Not a
+            # direct call (the JSON's direct_calls are the steps' own probes); the JSON's until: [VA, WANT, rounds, d0]
+            parts = step.split(":")
+            fn, want = int(parts[1], 0), int(parts[2], 0)
+            most, rounds, got = int(parts[3]) if len(parts) > 3 else 100, 0, None
+            while rounds < most:
+                panel.settle(10_000_000)
+                rounds += 1
+                guest_call(fn)
+                got = returned["d0"]
+                got = got - (1 << 32) if got & 0x80000000 else got
+                if got == want:
+                    break
+            until.append([parts[1], want, rounds, got])
+            print(f"  until {parts[1]}() == {want}: {rounds} x 10 M, d0 = {got}")
+        elif step.startswith("view-words:"):
+            # view-words:VT:N -- the first N longs of the view of class VT now up (none: []), into the JSON's popups
+            _, vt_, n_ = step.split(":")
+            v_ = view_of(int(vt_, 0))
+            popups.append([step, v_ and f"{v_:#x}", [machine.long(v_ + 4 * k) for k in range(int(n_))] if v_ else []])
+        elif step.startswith(("poke-ret:", "yes-while:", "until-class:")):
+            # (2026-11-14, the 1.12 gate: question walks stock's popups by state, whatever the project shows)
+            # poke-ret:FN:OFF:HEX -- HEX at FN() + OFF (an object only a stock call gives, the project, say);
+            # yes-while:VT[:MOST] -- YES while a view of class VT is on the screen (each question answered);
+            # until-class:VT:WANT[:MOST] -- 10 M at a time until a view of class VT is up (1) or not (0).
+            # The views as smp_question_up walks them (csrc/sampler/rec.c). The JSON's popups: [step, rounds, up]
+            parts = step.split(":")
+            if parts[0] == "poke-ret":
+                guest_call(int(parts[1], 0))
+                at_ = (returned["d0"] + int(parts[2], 0)) & 0xFFFFFFFF
+                machine.write(at_, bytes.fromhex(parts[3]))
+                popups.append([step, 0, f"{at_:#x}"])
+            else:
+                vt, rounds = int(parts[1], 0), 0
+                if parts[0] == "yes-while":
+                    most = int(parts[2]) if len(parts) > 2 else 5
+                    while rounds < most and view_up(vt):
+                        panel.tap(KEYS["yes"])
+                        panel.settle(20_000_000)
+                        rounds += 1
+                else:
+                    want, most = bool(int(parts[2], 0)), int(parts[3]) if len(parts) > 3 else 100
+                    while rounds < most and view_up(vt) != want:
+                        panel.settle(10_000_000)
+                        rounds += 1
+                popups.append([step, rounds, view_up(vt)])
+                print(f"  {step}: {rounds} rounds, up {view_up(vt)}")
+        elif step.startswith("down-to:"):
+            # down-to:TYPE[:MOST] (2026-11-14, the 1.12 gate): DOWN in MACHINE SEL until the cursor's row is TYPE,
+            # read as stock reads it (0x4005b162(view)), at most MOST presses; not a count of rows, which is the
+            # snapshot's list (1.11's gate snapshot holds v0.14's rows, a per-build one this build's). The JSON's
+            # down_to: [TYPE, presses, the row's type] each
+            parts = step.split(":")
+            want, most = int(parts[1], 0), int(parts[2]) if len(parts) > 2 else 40
+            presses, row = 0, None
+            while presses < most:
+                panel.tap(KEYS["down"])
+                presses += 1
+                if "view" not in msel_view:
+                    raise SystemExit("down-to: no MACHINE SEL view seen (is MACHINE SEL open?)")
+                guest_call(MSEL_ROW_TYPE, msel_view["view"])
+                row = returned["d0"]
+                row = row - (1 << 32) if row & 0x80000000 else row
+                if row == want:
+                    break
+            down_to.append([want, presses, row])
+            print(f"  down-to {want}: {presses} DOWN, the row's type {row}")
         elif step.startswith("png:"):
             shots[step[4:]] = panel.screen(step[4:])
         elif step.startswith("alive:"):          # v0.33: a liveness checkpoint
@@ -2375,7 +2474,7 @@ def main() -> int:
               "setter_writes": writes,
               "mirror_type_writes": mirror_writes, "type_writes": type_writes,
               "direct_calls": calls_made,
-              "frames": frames, "memory": mems, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
+              "frames": frames, "memory": mems, "down_to": down_to, "until": until, "popups": popups, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
               "screen_frames": panel.frames() - frames_at_reset[0],
               "panel_writers": panel_writers, "items": items,
               "alive": alive, "fault_reports": reported, "stack_frees": stack_frees[:10],
