@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.53** | 2026-11-13 | FLEX polish: FLEX REC's page LEDs follow its page (NiKo); a switch to FLEX sets trig LEN to INF; BUF snaps buffer to buffer, a p-locked BUF shows its number, and BUF locks pick the buffer a trig plays (NiKo); PLAY two detents a mode; FUNC + turn moves R.LEN a bar | `builds/v0.53-PAGES/` | yes |
+| **v0.54** | 2026-11-15 | our names on the Digitone's **own NAME screen**: a recording's FILE NAME, the browser's RENAME and CREATE FOLDER open stock's naming screen (its keys, FUNC + ARROW edit grid, SETTINGS: RANDOM, copy/paste name) | `builds/v0.54-NAME/` | yes |
+| v0.53 | 2026-11-13 | FLEX polish: FLEX REC's page LEDs follow its page (NiKo); a switch to FLEX sets trig LEN to INF; BUF snaps buffer to buffer, a p-locked BUF shows its number, and BUF locks pick the buffer a trig plays (NiKo); PLAY two detents a mode; FUNC + turn moves R.LEN a bar | `builds/v0.53-PAGES/` | yes |
 | v0.52 | 2026-11-12 | FLEX MUTE SRC: REC SETUP's knob H takes the SRC track out of the mix (its level and FX sends) while FLEX still records it; the RECORDER's R.LEN counts steps at the pattern's scale (impbox) | `builds/v0.52-MUTE/` | yes |
 | v0.51 | 2026-11-12 | lighter Monomachine and Machinedrum machines, not bit for bit (SID -64 %, DDRW -43 %, DENS -40 %, VO-6 -9 %, TRX-CY -33 %, TRX-MA -26 %), so more voices before the guard drops one; FLEX REC's settings per track, saved with the kit; CLEAR BUF (FUNC + NO); REC SETUP's state in the left column; sample TUNE plays its fine values and is drawn as WaveTone's ruler | `builds/v0.51-LIGHTER/` | yes |
 | v0.50 | 2026-11-12 | FLEX takes of a track at the track's level (v0.49's were very quiet); GAIN on REC SETUP (G, -24..+38 dB) with a level meter on H; BUF fixed (the take was read 14 slots off) and C BUF on REC SETUP; impbox's fixes: TUNE rounds, SMP readable with TRK held, page-2 locks shown, E/F pushed clear SLD/SLEN; gate: SHARC step flexlevel, the link steps ~20x faster | `builds/v0.50-LEVEL/` | yes |
@@ -91,6 +92,57 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.54 — NAME (the Digitone's own NAME screen for our names)
+
+`DN2mod_v0.54_NAME_OS1.11.syx`
+sha256 `8a3586d20255d6cb22d8f6a8ee841773871834d09280754d0d2ed2889dd12ba3`
+Gate: CLEARED TO FLASH, 2026-11-15 (54 gates; 39 reused, each a pass of this same build whose every input is byte-identical; the run spanned three jobs under the two-hour limit). Source: commit `8dba573` (branch `stockname`). Docs: `docs/name-screen.md`.
+
+Everything in v0.53, plus:
+
+**The stock NAME screen** (owner: "identical to the stock Elektron namer"):
+- These now open the Digitone's own naming screen instead of ours:
+  - **FILE NAME** after a recording,
+  - **RENAME** in the +DRIVE browser,
+  - **CREATE FOLDER**.
+- The screen is titled FILE NAME, SAMPLE NAME or FOLDER NAME, and starts on the current name.
+- It is stock's own screen, so everything works as it does for a pattern name: U/D changes
+  the character, L/R moves the cursor, FUNC + ARROW opens the edit grid, FUNC + NO deletes,
+  FUNC + YES inserts, SETTINGS gives a random name, and COPY / PASTE / CLEAR name work too.
+- **YES** saves the name. **NO** leaves it as it was (a recording keeps its name and goes on
+  to ASSIGN, as before).
+- Names are kept in capitals, up to 35 characters where the pool keeps long names.
+- Our own naming screen stays in the build as a fallback, used only if the stock screen
+  can't be opened.
+
+Commit `8dba573`.
+
+**Gate:**
+- **`recflow`:** the recording's name is spelt with the stock screen's own keys, and its YES
+  names the sample.
+- **New step `stockname`:**
+  - The stock screen is up after TRIM's YES, opened once and drawn.
+  - Its NO goes on to ASSIGN without a name.
+  - Its negative control (no main view) falls back to our own screen.
+- **`drive`:** CREATE FOLDER goes through the stock screen.
+
+**Tests**
+1. Record something (RECORDER, or FUNC + YES saving a FLEX take). After TRIM, YES: the
+   Digitone's own NAME screen, titled FILE NAME, with its key hints at the bottom.
+2. Spell a name with U/D and L/R, try FUNC + ARROW (the grid) and SETTINGS (random). YES:
+   ASSIGN, and the sample has that name in the list and on the +Drive (RECORDED).
+3. Record again, and press NO on the NAME screen: ASSIGN, with the name it had.
+4. +DRIVE browser, a sample, RENAME: the NAME screen on its name, titled SAMPLE NAME. YES
+   renames it. NO leaves it.
+5. CREATE FOLDER: the NAME screen on "NEW", titled FOLDER NAME. YES makes the folder.
+6. A long name (over 16 characters): the screen scrolls (>>), and all of it is kept.
+7. The regression check (top of this file).
+
+**Known issues**
+- Everything listed for v0.53.
+- On the unit, check that the screen's look and keys match a pattern's NAME screen. The emulator
+  shows stock's own drawing.
 
 ## v0.53 — PAGES (FLEX page LEDs, BUF locks play, quicker PLAY, R.LEN by bars)
 
