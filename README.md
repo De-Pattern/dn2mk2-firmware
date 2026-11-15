@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.54** | 2026-11-15 | our names on the Digitone's **own NAME screen**: a recording's FILE NAME, the browser's RENAME and CREATE FOLDER open stock's naming screen (its keys, FUNC + ARROW edit grid, SETTINGS: RANDOM, copy/paste name) | `builds/v0.54-NAME/` | yes |
+| **v0.55** | 2026-11-15 | the 8 **FLEX buffers in every sample machine**: SAMP past 127 to B1..B8 (knob, list, p-locks), a track on Bn plays that buffer's take; MUTE SRC waits for the first take (no gap) | `builds/v0.55-FLEXPOOL/` | yes |
+| v0.54 | 2026-11-15 | our names on the Digitone's **own NAME screen**: a recording's FILE NAME, the browser's RENAME and CREATE FOLDER open stock's naming screen (its keys, FUNC + ARROW edit grid, SETTINGS: RANDOM, copy/paste name) | `builds/v0.54-NAME/` | yes |
 | v0.53 | 2026-11-13 | FLEX polish: FLEX REC's page LEDs follow its page (NiKo); a switch to FLEX sets trig LEN to INF; BUF snaps buffer to buffer, a p-locked BUF shows its number, and BUF locks pick the buffer a trig plays (NiKo); PLAY two detents a mode; FUNC + turn moves R.LEN a bar | `builds/v0.53-PAGES/` | yes |
 | v0.52 | 2026-11-12 | FLEX MUTE SRC: REC SETUP's knob H takes the SRC track out of the mix (its level and FX sends) while FLEX still records it; the RECORDER's R.LEN counts steps at the pattern's scale (impbox) | `builds/v0.52-MUTE/` | yes |
 | v0.51 | 2026-11-12 | lighter Monomachine and Machinedrum machines, not bit for bit (SID -64 %, DDRW -43 %, DENS -40 %, VO-6 -9 %, TRX-CY -33 %, TRX-MA -26 %), so more voices before the guard drops one; FLEX REC's settings per track, saved with the kit; CLEAR BUF (FUNC + NO); REC SETUP's state in the left column; sample TUNE plays its fine values and is drawn as WaveTone's ruler | `builds/v0.51-LIGHTER/` | yes |
@@ -92,6 +93,53 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.55 — FLEXPOOL (the FLEX buffers in every sample machine)
+
+`DN2mod_v0.55_FLEXPOOL_OS1.11.syx`
+sha256 `298b02141fd7847b0a6fcc0a174718e4c3be5e21933ba961753c92e2b16c40dc`
+Gate: CLEARED TO FLASH, 2026-11-15 (56 gates; 45 reused, each a pass of this same build whose every input is byte-identical; the run spanned three jobs under the two-hour limit). Source: commit `4c9d64b` (branch `flexpool`). Docs: `docs/flex-pool.md`.
+
+Everything in v0.54, plus:
+
+**The FLEX buffers in SAMP** (owner: "add the recorded buffers (1-8) to the end of the project ram list"):
+- SAMP on ONESHOT, WERP, STRETCH, REPITCH, GRID and SLICE goes on past 127 to **B1..B8**:
+  - the knob (D at 127, a detent right: B1);
+  - the sample list: rows B1..B8 after 127, named "FLEX BUF n" (a take in it) or "FLEX EMPTY n";
+  - UP/DOWN in the list.
+- A track on Bn plays that buffer's playing take, the same one FLEX plays, and follows it when a
+  new take lands; an empty buffer plays nothing.
+- SAMP p-locks can name a buffer.
+- The SAMP cell reads B1..B8; page 2 shows FLEX BUF n / FLEX EMPTY n in the waveform's place.
+- MIDI CC on SAMP is as before (0..127).
+
+**MUTE SRC waits for a take** (owner: the immediate mute left a gap): with MUTE ON, the SRC track
+stays in the mix until its FLEX buffer holds a take, then mutes; CLEAR BUF gives it back.
+
+**Gate:**
+- New step `flexpool` (ColdFire): the knob over 127/B1 both ways, B8 held, the old values as
+  before, a stale knob as before; the panel's encoder at 127 reaches B1 and opens the list;
+  DOWN/UP through B2, B1, 127; the list and pages drawn, B1 (a take) and B2 (empty) told apart.
+- New step `flexplay` (coupled): a take recorded into buffer 1; a ONESHOT track on B1 sends
+  SAMP 129, the DSP renders it, the render is the take at the note's pitch.
+- `mute` (coupled): new link 1b, MUTE ON with no take leaves the track heard; negative control
+  `--break notake`.
+
+**Tests**
+1. Record a FLEX take into BUF 01. Another track, ONESHOT, SAMP up past 127: B1. Play it: the take.
+2. Turn SAMP: the list shows B1 as FLEX BUF 1, B2 as FLEX EMPTY 2; UP/DOWN through 127, B1, B2.
+3. Record a new take into BUF 01 while the ONESHOT track plays B1: it follows to the new take.
+4. STRETCH on B1 (the take fitted to its recorded steps at the tempo), GRID on B1.
+5. A SAMP p-lock to B1 on one trig, a pool sample on the next: each plays its own.
+6. MUTE SRC ON with no take: the SRC track heard. Record the first take: it mutes, FLEX plays
+   the loop. CLEAR BUF: the track back.
+7. The regression check (top of this file).
+
+**Known issues**
+- Everything listed for v0.54.
+- A buffer has no waveform overview: page 2 names it instead.
+- Turning SAMP up from 127 to B1 with a trig held (a p-lock) is unverified on the emulator.
+- DDRW's TIME and BR1/BR2 (reported again): next build.
 
 ## v0.54 — NAME (the Digitone's own NAME screen for our names)
 
