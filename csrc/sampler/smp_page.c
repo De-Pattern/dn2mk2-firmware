@@ -98,6 +98,15 @@ static int value(void *view, u32 id, int *top)
 {
     u8 flag;
     int v = GET_VALUE(view, id, &flag) >> 8;
+    if (id == SMP_SAMP_ID) {                    /* v0.55: a FLEX buffer's code (129..143) */
+        extern int rt_samp_buf(u32 samp);
+        int u = (GET_VALUE(view, id, &flag) & 0xFFFF) >> 8;
+        if (rt_samp_buf((u32)u) >= 0) {
+            if (top)
+                *top = 127;
+            return u;
+        }
+    }
     const int *r = RECORD(id);
     int lo = r[2] >> 8, t = (r[3] >> 8) - lo;
     v -= lo;
@@ -257,6 +266,13 @@ static void w_samp(void *c, int x, int y, int slot)
     }
     char d[4];
     int n = 0;
+    extern int rt_samp_buf(u32 samp);
+    int fb = rt_samp_buf((u32)slot);
+    if (fb >= 0) {                              /* v0.55: a FLEX buffer: B1..B8 */
+        glyph(c, cx - 1, y + 6, 'B', 1);
+        glyph(c, cx + 4, y + 6, (char)('1' + fb), 1);
+        return;
+    }
     if (slot >= 100) d[n++] = '0' + slot / 100;
     if (slot >= 10) d[n++] = '0' + slot / 10 % 10;
     d[n++] = '0' + slot % 10;
@@ -286,6 +302,13 @@ static void w_samp_small(void *c, int x, int y, int slot)
     }
     char d[4];
     int n = 0;
+    extern int rt_samp_buf(u32 samp);
+    int fb = rt_samp_buf((u32)slot);
+    if (fb >= 0) {                              /* v0.55: a FLEX buffer */
+        glyph(c, cx - 1, y + 6, 'B', 1);
+        glyph(c, cx + 4, y + 6, (char)('1' + fb), 1);
+        return;
+    }
     if (slot >= 100) d[n++] = '0' + slot / 100;
     if (slot >= 10) d[n++] = '0' + slot / 10 % 10;
     d[n++] = '0' + slot % 10;
@@ -474,6 +497,23 @@ static int shows(int i)
 }
 
 /* one cell: its widget at (X, Y) and, LABELLED, its label under it */
+/* v0.55: a control's value text as its record writes it; SAMP on a FLEX buffer reads B1..B8 */
+static void val_text(void *view, u32 id, char *vb)
+{
+    u8 flag;
+    int w = GET_VALUE(view, id, &flag);
+    ((void (*)(int, char *))RECORD_FMT(id))(w, vb);
+    if (id == SMP_SAMP_ID) {
+        extern int rt_samp_buf(u32 samp);
+        int fb = rt_samp_buf((u32)((w & 0xFFFF) >> 8));
+        if (fb >= 0) {
+            vb[0] = 'B';
+            vb[1] = (char)('1' + fb);
+            vb[2] = 0;
+        }
+    }
+}
+
 static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labelled, int pill)
 {
     int top, v, w = id ? widget_of(id, kind) : W_EMPTY;
@@ -533,9 +573,8 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
     int buf_lock = labelled && id == SMP_BUF_ID && kind == SMP_BOUNCE_KIND && locked(view, id);
     if (labelled && id && (shows(cell_i) || buf_lock)) {     /* v0.35: SYN held (v0.48: or just turned): the value, as the record's */
         char vb[32];                            /* formatter writes it for the header (O14) */
-        u8 flag;
         vb[0] = 0;
-        ((void (*)(int, char *))RECORD_FMT(id))(GET_VALUE(view, id, &flag), vb);
+        val_text(view, id, vb);
         vb[6] = 0;
         LABEL(c, x + 12, y - 7, "%s", vb);
     } else if (labelled && id)
@@ -563,9 +602,8 @@ void smp_knob_page(void *view, void *c, const unsigned short *ids, const char *c
         }
         if (shows(i)) {                         /* v0.35: SYN held (v0.48: or just turned): the value (O14) */
             char vb[32];
-            u8 flag;
             vb[0] = 0;
-            ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
+            val_text(view, ids[i], vb);
             vb[6] = 0;
             LABEL(c, x + 12, y - 7, "%s", vb);
         } else
@@ -603,6 +641,19 @@ static void waveform(void *c, int slot, int x0, int cy)
             pc[i++] = (char)('0' + p % 10u);
             pc[i++] = '%';
             pc[i] = 0;
+        }
+        extern int rt_samp_buf(u32 samp);
+        extern u32 rt_buf_bytes(u32 b);
+        int fbw = rt_samp_buf((u32)slot);      /* v0.55: a FLEX buffer: what it holds */
+        if (fbw >= 0) {
+            static char fl[16] __attribute__((section(".data")));
+            const char *t = rt_buf_bytes((u32)fbw) ? "FLEX BUF " : "FLEX EMPTY ";
+            int i = 0;
+            while (t[i]) { fl[i] = t[i]; i++; }
+            fl[i++] = (char)('1' + fbw);
+            fl[i] = 0;
+            TEXT(c, FONT, bx, cy - 3, CENTRED, fl);
+            return;
         }
         TEXT(c, FONT, bx, cy - 3, CENTRED, slot < 1 ? "OFF"
              : loading ? (smp_walk_total ? pc : "LOADING") : "EMPTY");
@@ -743,12 +794,37 @@ static int list_slot __attribute__((section(".data"))) = -1;
 static u32 list_at __attribute__((section(".data"))) = 0;
 int smp_overlay_dirty __attribute__((section(".data"))) = 0;   /* page.c's wr_poll redraws */
 
+extern int rt_samp_buf(u32 samp);
+extern u32 rt_buf_code(u32 b), rt_buf_bytes(u32 b);
+/* v0.55: the list's rows: SAMP 0..127, then the eight FLEX buffers (128..135) */
+#define LIST_ROWS 136
+static int samp_row(int v)                      /* a SAMP value's row */
+{
+    int b = rt_samp_buf((u32)v);
+    return b >= 0 ? 128 + b : v;
+}
+static int row_samp(int r)                      /* a row's SAMP value */
+{
+    return r >= 128 ? (int)rt_buf_code((u32)(r - 128)) : r;
+}
+
 static void slot_name(int k, char *out, int max)   /* SAMP value K (0 OFF) */
 {
     const char *n = 0;
     int cnt = smp_count();
     extern int rt_on;
-    if (k <= 0)
+    int fb = rt_samp_buf((u32)k);
+    if (fb >= 0) {                              /* v0.55: a FLEX buffer */
+        static char bn[16] __attribute__((section(".data")));
+        const char *t = rt_buf_bytes((u32)fb) ? "FLEX BUF" : "FLEX EMPTY";
+        int j = 0;
+        for (; t[j] && j < 12; j++)
+            bn[j] = t[j];
+        bn[j++] = ' ';
+        bn[j++] = (char)('1' + fb);
+        bn[j] = 0;
+        n = bn;
+    } else if (k <= 0)
         n = "OFF";
     else if (rt_on && k - 1 >= REC_FIRST && k - 1 < REC_FIRST + 4)
         n = k - 1 == REC_FIRST ? "REC 1" : k - 1 == REC_FIRST + 1 ? "REC 2" : "---";   /* v0.41: the buffers */
@@ -945,6 +1021,15 @@ static void sample_list(void *c, void *view, int slot, int kind)
 
 /* v0.33: the list belongs to the track it opened on. Another track active (its page drawn
  * by stock, or not yet drawn) means it is gone: it must not go on taking keys unseen */
+/* v0.55: a sample machine's SRC page (not FLEX's) on the active track, drawn just now: its
+ * knob D is SAMP (rec.c's smp_ui_pop takes a turn up past 127 onto the FLEX buffers) */
+int smp_samp_page(void)
+{
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    return now - lst_seen_at < 300u && list_trk == (int)UI_TRACK
+        && list_kind >= SMP_KIND0 && list_kind < SMP_KIND0 + SMP_N0;
+}
+
 int smp_list_elsewhere(void)
 {
     return smp_lst_open && list_trk >= 0 && UI_TRACK != list_trk;
@@ -962,7 +1047,7 @@ int smp_list_visible(void)
 _Static_assert(LIST_W < 19, "the list's name buffer");
 void smp_list_draw(void *c)
 {
-    int slot = list_slot < 0 ? 0 : list_slot;
+    int slot = list_slot < 0 ? 0 : samp_row(list_slot);   /* v0.55: as a row */
     int x0 = 26, x1 = 127;
     for (int y = 0; y <= 63; y++)
         for (int x = x0; x <= x1; x++)
@@ -980,18 +1065,24 @@ void smp_list_draw(void *c)
     /* five slots around the chosen one, it outlined */
     for (int r = 0; r < 5; r++) {
         int k = slot - 2 + r, y = 36 - 9 * r;
-        if (k < 0 || k > 127)
+        if (k < 0 || k >= LIST_ROWS)
             continue;
         char ln[64], nm[19], num[4];
-        slot_name(k, ln, 63);
-        fit_name(ln, LIST_W, k == slot ? mq_off(LIST_KEY(slot)) : -1, nm);   /* v0.39 */
-        num3(num, k);
+        slot_name(row_samp(k), ln, 63);
+        fit_name(ln, LIST_W, k == slot ? mq_off(LIST_KEY(row_samp(slot))) : -1, nm);   /* v0.39 */
+        if (k >= 128) {                         /* v0.55: a FLEX buffer: B1..B8 */
+            num[0] = ' ';
+            num[1] = 'B';
+            num[2] = (char)('1' + k - 128);
+            num[3] = 0;
+        } else
+            num3(num, k);
         TEXT(c, FONT, x0 + 3, y, 0, "%s", num);
         TEXT(c, FONT, x0 + 23, y, 0, "%s", nm);
         if (k == slot)
             box(c, x0 + 1, y - 2, x1 - 4, y + 7, 0);
     }
-    scrollbar(c, x1 - 1, 1, 43, slot, 128);
+    scrollbar(c, x1 - 1, 1, 43, slot, LIST_ROWS);
 }
 
 /* -- v0.25: the folder browser (ASSIGN SAMPLE), FUNC + YES in the list, as the DT2's +Drive
@@ -1965,9 +2056,8 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
             fill(c, x + 6, 2, x + 17, 4);
         else if (shows(i)) {                    /* v0.35: SYN held (v0.48: or just turned): the value (O14) */
             char vb[32];
-            u8 flag;
             vb[0] = 0;
-            ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
+            val_text(view, ids[i], vb);
             vb[6] = 0;
             LABEL(c, x + 12, 0, "%s", vb);
         } else
@@ -1976,9 +2066,8 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     for (int i = 0; i < 4; i++)                 /* v0.35: the top row's too (unlabelled: on the knobs' line) */
             if (ids[i] && shows(i)) {
                 char vb[32];
-                u8 flag;
                 vb[0] = 0;
-                ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
+                val_text(view, ids[i], vb);
                 vb[6] = 0;
                 LABEL(c, CELL_X(i) + 12, TOP_Y + 3 - 7, "%s", vb);
             }

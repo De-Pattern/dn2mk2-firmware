@@ -908,8 +908,9 @@ int smp_assign(int track, int slot)
 /* v0.25: SAMP on TRACK set to VALUE (0 OFF, k slot k - 1) as the knob sets it, and read */
 int smp_set_samp(int track, int value)
 {
-    if (track < 0 || track > 15 || value < 0 || value > 127 || !KIT)
-        return -1;
+    extern int rt_samp_buf(u32 samp);
+    if (track < 0 || track > 15 || value < 0 || (value > 127 && rt_samp_buf((u32)value) < 0) || !KIT)
+        return -1;                              /* v0.55: or a FLEX buffer's code */
     int ty = SOUND_TYPE(track);
     if (!SAMP_MACHINE(ty))
         return -1;                              /* not a sample machine: nothing to set */
@@ -919,7 +920,18 @@ int smp_set_samp(int track, int value)
     u32 ps = PARAM_SET(owner, SMP_SAMP_ID, (u32)track);
     if (!ps)
         return -1;
-    SET_VALUE(ps, SMP_SAMP_ID, (u32)value << 8, (u32)track, 0, 0, 1);
+    /* v0.55: smp_quant writes VALUE as it is; a FLEX buffer's code (above the record's 127,
+     * where the stock setter would clamp it) goes in through smp_quant's own write, the stock
+     * call made with a value in range and other than the one held (so it is not skipped) */
+    extern int smp_samp_direct;
+    u32 sent = (u32)value;
+    if (value > 127) {
+        smp_samp_direct = value;
+        sent = smp_samp_of(track) == 127 ? 126u : 127u;
+    } else
+        smp_samp_direct = -1;
+    SET_VALUE(ps, SMP_SAMP_ID, sent << 8, (u32)track, 0, 0, 1);
+    smp_samp_direct = 0;
     return 0;
 }
 
@@ -1780,6 +1792,18 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         smp_knob_d = (signed char)it[8];
         smp_knob_at = *(volatile u32 *)0x4058E8D4u;
         smp_knob_code = (int)code;
+        /* v0.55: SAMP at 127 turned up on a sample machine's SRC page: on to the FLEX buffers
+         * (the stock knob stops at the record's 127, so this turn never reaches the setter) */
+        extern int smp_samp_page(void);
+        extern u32 rt_buf_code(u32 b);
+        int t = (int)UI_TRACK_NOW;
+        if (code == 4 && smp_knob_d > 0 && !rec_overlay && !smp_fb_open && smp_samp_page()
+            && SAMP_MACHINE(SOUND_TYPE(t)) && smp_samp_of(t) == 127) {
+            int r = 127 + smp_knob_d;
+            smp_set_samp(t, (int)rt_buf_code((u32)((r > 135 ? 135 : r) - 128)));
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
     }
     u32 flags = (u32)it[8] << 24 | (u32)it[9] << 16 | (u32)it[10] << 8 | it[11];
     /* v0.25: a key's item: bit 0 while it is down (a press), bit 4 on most keys' release,
@@ -2269,9 +2293,13 @@ static void lst_step(u32 code)
     if (smp_list_view && smp_list_up(smp_list_view)) {
         int t = (int)UI_TRACK_NOW;
         smp_list_hold();
-        int v = smp_samp_of(t) + (code == K_DOWN ? 1 : -1);
-        if (v >= 0 && v <= 127)
-            smp_set_samp(t, v);
+        /* v0.55: by rows: SAMP 0..127, then the FLEX buffers B1..B8 (rows 128..135) */
+        extern int rt_samp_buf(u32 samp);
+        extern u32 rt_buf_code(u32 b);
+        int s0 = smp_samp_of(t), b0 = rt_samp_buf((u32)s0);
+        int r = (b0 >= 0 ? 128 + b0 : s0) + (code == K_DOWN ? 1 : -1);
+        if (r >= 0 && r <= 135)
+            smp_set_samp(t, r >= 128 ? (int)rt_buf_code((u32)(r - 128)) : r);
         return;
     }
     lrpt_code = 0;                              /* neither up: the repeat ends */

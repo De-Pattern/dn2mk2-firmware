@@ -192,6 +192,7 @@ FIRST = (("preflight", "preflight (never reused)"),
 EMU = (("meter", "DSP load meter (ColdFire)"),
        ("keepsamp", "SAMP kept across sample machines (ColdFire)"),
        ("functurn", "FUNC + turn (ColdFire)"),
+       ("flexpool", "FLEX buffers in every sample machine's SAMP (ColdFire)"),
        ("aniz", "start-up animation, every frame"),
        ("recorder", "recorder screen (ColdFire)"),
        ("mnmpages", "Monomachine pages and detents (ColdFire)"),
@@ -217,6 +218,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
        ("thres", "THRES on both processors (coupled)"),
        ("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)"),
+       ("flexplay", "FLEX buffers played by a ONESHOT track, on both processors (coupled)"),
        ("mute", "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)"),
        ("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"),
        ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
@@ -1884,6 +1886,84 @@ def main() -> int:
                               "with a stale knob, or on a stock machine" if good else why)
             later("functurn", "FUNC + turn (ColdFire)", "FUNC + turn (ColdFire)", [f_cmd, sorted(EMU_ENV.items())], f_body)
 
+        # 6m2. v0.55 (owner: "add the recorded buffers (1-8) to the end of the project RAM list"):
+        # SAMP on a sample machine goes on past 127 to the eight FLEX buffers (their codes,
+        # BUF_SAMP0 + 2 b). The knob (the setter's own call of smp_quant, the knob's last turn
+        # poked fresh): 127 -> B1, B1 -> B2, B1 -> 127, B8 held, 5 -> 6 and 122 -> 123 as before, a
+        # stale knob as before. Knob D at 127 turned right by the panel's encoder (the stock knob
+        # stops at the record's 127: smp_ui_pop takes it on): B1, the list up on it, naming the
+        # buffer; DOWN B2, UP B1, UP 127 (smp_set_samp's write past the record, through smp_quant)
+        if "rt_buf_code" in lay:
+            from dnfw.sampler import machines as SMp   # noqa: PLC0415
+            kit = 0x4210C08C
+            snd0 = kit + 52
+            samp0 = snd0 + 20 + 2 * 43
+            clock, memcpy = 0x4058E8D4, 0x40134490
+            srec = SMp.SAMP_REC
+            b1, b2, b8 = SMp.BUF_SAMP0, SMp.BUF_SAMP0 + 2, SMp.BUF_SAMP0 + 14
+
+            def pcase(ty, old, knob, fresh, value):
+                q = [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", f"poke:{samp0:#x}:{old:04x}",
+                     f"poke:{lay['smp_knob_d']:#x}:{knob & 0xFFFFFFFF:08x}"]
+                q += [f"call:{memcpy:#x}:{lay['smp_knob_at']:#x}:{clock:#x}:4"] if fresh else \
+                     [f"poke:{lay['smp_knob_at']:#x}:80000000"]
+                return q + [f"call:{lay['smp_quant']:#x}:sound0:43:{value:#x}:{srec}"]
+            pcases = [("127, a detent right: B1", (8, 0x7F00, 1, True, 0x8000), b1 << 8),
+                      ("B1, right: B2", (8, b1 << 8, 1, True, (b1 + 1) << 8), b2 << 8),
+                      ("B1, left: 127", (8, b1 << 8, -1, True, (b1 - 1) << 8), 0x7F00),
+                      ("B8, right: held", (8, b8 << 8, 1, True, (b8 + 1) << 8), b8 << 8),
+                      ("STRETCH 127, right: B1", (10, 0x7F00, 1, True, 0x8000), b1 << 8),
+                      ("5, right: 6 (as before)", (8, 0x0500, 1, True, 0x0600), 0x0600),
+                      ("122, right: 123 (as before)", (8, 0x7A00, 1, True, 0x7B00), 0x7B00),
+                      ("a stale knob: as it is", (8, 0x7F00, 1, False, 0x7F00), 0x7F00)]
+            ps = ["wait:3"] + [f"poke:{kit + 52 + 1163 * t + 0xDE:#x}:08" for t in range(16)]
+            for _n, args, _w in pcases:
+                ps += pcase(*args)
+            # the list and the pages, buffer 1 holding a take (its bytes poked), the others empty
+            # (rt_on follows the pool's directory: smp_dir_ok set first, then the take's bytes)
+            ps += [f"poke:{lay['smp_dir_ok']:#x}:00000001", "wait:4", f"poke:{lay['rt_play']:#x}:" + "00" * 8,
+                   f"poke:{lay['rt_rbytes']:#x}:00001000" + "00000000" * 15,
+                   f"poke:{snd0 + 0xDE:#x}:08", f"poke:{samp0:#x}:7f00", f"poke:{lay['smp_knob_at']:#x}:80000000",
+                   "wait:6", "tap:2", "wait:10", "spin:3:1", "wait:10", "png:list_b1",
+                   f"mem:{samp0:#x}:2", f"mem:{lay['smp_lst_open']:#x}:4",
+                   "down", "wait:8", "png:list_b2", f"mem:{samp0:#x}:2",
+                   "up", "wait:8", f"mem:{samp0:#x}:2", "up", "wait:8", f"mem:{samp0:#x}:2",
+                   "no", "wait:8", f"poke:{lay['smp_samp_turned']:#x}:80000000",   # (no turn: the list stays shut)
+                   f"poke:{samp0:#x}:{b1:02x}00", f"poke:{lay['smp_overlay_dirty']:#x}:00000001",
+                   "wait:10", "png:page1_b1", "tap:2", "wait:10", "png:page2_b1",
+                   f"poke:{samp0:#x}:{b2:02x}00", f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:10",
+                   "png:page2_b2", f"mem:{lay['rt_on']:#x}:4", f"mem:{lay['rt_rbytes']:#x}:4",
+                   f"poke:{snd0 + 0xDE:#x}:01", "wait:4"]
+            pjs = work / "flexpool.json"
+            p_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                     "--snapshot", snap, "--steps", ",".join(ps), "--png-dir", work / "flexpool", "--json", pjs]
+
+            def p_body(tdir):
+                rc, out = run("FLEX buffers in the list", p_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and pjs.exists():
+                    r = json.loads(pjs.read_text())
+                    calls = [c for c in r["direct_calls"] if int(str(c.get("fn", "0")), 0) == lay["smp_quant"]]
+                    got = [c["d0"] & 0xFFFF for c in calls]
+                    facts = {n: (g == w) for (n, _a, w), g in zip(pcases, got)}
+                    m = r["memory"]
+                    lo, sp = hex(lay["smp_lst_open"]), hex(samp0)
+                    sh = {n: pathlib.Path(r["screens"][n]).read_bytes() if n in r["screens"] else b""
+                          for n in ("list_b1", "list_b2", "page1_b1", "page2_b1", "page2_b2")}
+                    facts["knob D at 127, a detent right (the panel's encoder): B1, the list up on it"] = \
+                        m.get(sp) == f"{b1:02x}00" and int(m.get(lo, "0"), 16) == 1
+                    facts["DOWN: B2, UP: B1, UP: 127"] = [m.get(f"{sp}@2"), m.get(f"{sp}@3"), m.get(f"{sp}@4")] == \
+                        [f"{b2:02x}00", f"{b1:02x}00", "7f00"]
+                    facts["each view drawn, B1 and B2 told apart (FLEX BUF 1 holding its take, FLEX EMPTY 2)"] = \
+                        all(sh.values()) and len(set(sh.values())) == 5 and \
+                        m.get(hex(lay["rt_on"])) == "00000001" and m.get(hex(lay["rt_rbytes"])) == "00001000"
+                    good = len(got) == len(pcases) and all(facts.values())
+                    why = f"{facts} got={[hex(g) for g in got]} mem={m}"
+                return good, ("SAMP past 127 to the FLEX buffers B1..B8 by the knob and in the list, as before "
+                              "below; a stale knob as before; the list and both pages name the buffer" if good else why)
+            later("flexpool", "FLEX buffers in every sample machine's SAMP (ColdFire)",
+                  "FLEX buffers in every sample machine's SAMP (ColdFire)", [p_cmd, sorted(EMU_ENV.items())], p_body)
+
         # 6n. v0.32: the DSP load meter. smp_dsp_load gives the last half second's peak (the
         # idle packets' unit 18, permille) in percent, rounded, and -1 when none came in the last
         # second; a PERC page with FUNC held draws it in the tempo's place
@@ -2351,6 +2431,25 @@ def main() -> int:
         later("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)",
               "FLEX: a recorder trig's take played by a note, on both processors (coupled)",
               [fx_cmd, sorted(EMU_ENV.items())], fx_body)
+
+        # v0.55 (owner: the FLEX buffers in every sample machine): the take recorded as in flex,
+        # then a ONESHOT track on SAMP B1 plays it (emu_coupled_flex.py --pool, links P0..P3)
+        if "rt_buf_code" in lay:
+            fp_js = work / "flexplay.json"
+            fp_cmd = [a.coupled_py, "-u", "scripts/emu_coupled_flex.py", "--build", a.build, "--stock", a.stock,
+                      "--snapshot", snap, "--pool", "--json", fp_js]
+
+            def fp_body(tdir):
+                rc, out = run("flexplay coupled", fp_cmd, logs, env=EMU_ENV, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, out[-900:]
+                return True, ("on the ColdFire and the DSP together: a take recorded into buffer 1; a ONESHOT "
+                              "track on SAMP B1: its voice sent buffer 1's playing half (SAMP 129), the DSP "
+                              "renders it, the render is the take at the note's pitch")
+            later("flexplay", "FLEX buffers played by a ONESHOT track, on both processors (coupled)",
+                  "FLEX buffers played by a ONESHOT track, on both processors (coupled)",
+                  [fp_cmd, sorted(EMU_ENV.items())], fp_body)
 
         # v0.52 FLEX MUTE SRC (owner, option B): knob H on REC SETUP turns it ON; a note on the SRC
         # track: its voices' frame LEVEL and FX sends 0 (the DSP's LEVEL too), the other voices' as

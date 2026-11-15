@@ -15,7 +15,10 @@ OFF gives LEVEL and the sends back.
 
 Negative control (--break nomute): H is not turned, MUTE stays OFF: fails at 1 (and 3).
 
-Usage: emu_coupled_mute.py --build out/v052.syx [--break nomute] [--json OUT]"""
+v0.55, link 1b: ON with no take in the track's buffer leaves track 3 heard; the take's bytes then
+poked, ON mutes it (2..6). Negative control (--break notake): no take poked: fails at 2.
+
+Usage: emu_coupled_mute.py --build out/v052.syx [--break nomute|notake] [--json OUT]"""
 
 from __future__ import annotations
 
@@ -46,7 +49,7 @@ def main() -> int:
     p.add_argument("--layout", default=str(HERE.parent / "src/dnfw/mods/waverider_code.json"))
     p.add_argument("--stock", default=str(HERE.parent.parent / "Digitone_II_OS1.11.syx"))
     p.add_argument("--snapshot", default=str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
-    p.add_argument("--break", dest="brk", default=None, choices=("nomute",))
+    p.add_argument("--break", dest="brk", default=None, choices=("nomute", "notake"))
     p.add_argument("--json", default=None)
     a = p.parse_args()
     lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
@@ -123,6 +126,9 @@ def main() -> int:
     def word(fr, off):
         return struct.unpack(">H", fr[off:off + 2])[0]
 
+    def s_voices(g):
+        return [v for v in range(16) if g["voices"][v]["track"] == S]
+
     def note(mute, n=64):
         if a.brk != "nomute" or not mute:
             c.call(lay["fx_set"], T, FX_MUTE, 1 if mute else 0)
@@ -142,10 +148,21 @@ def main() -> int:
         c.periods(30)
         return got
 
-    off1, on, off2 = note(False), note(True), note(False)
-
-    def s_voices(g):
-        return [v for v in range(16) if g["voices"][v]["track"] == S]
+    # v0.55 (owner: muted at once left a gap; "trigger the mute when the rec trig ends"): ON with no
+    # take in the track's buffer leaves track 3 heard; once the buffer holds a take (its bytes
+    # poked: the take itself is emu_coupled_flex's), ON mutes it
+    off1, pre = note(False), note(True)
+    if a.brk != "notake":
+        c.poke(lay["rt_on"], struct.pack(">i", 1))
+        c.poke(lay["rt_rbytes"], struct.pack(">16I", *([4096] * 16)))
+    on, off2 = note(True), note(False)
+    pre_l = [(v, g["voices"][v]["level"]) for g in pre[-24:] for v in s_voices(g)]
+    first_l = [(v, g["voices"][v]["level"]) for g in off1[-24:] for v in s_voices(g)]
+    rep["numbers"]["no_take"] = {"masks": sorted({g["mask"] for g in pre}), "levels": pre_l[-3:]}
+    link("1b. v0.55: MUTE ON with no take in the buffer: track 3 still heard (mask 0, its LEVEL as unmuted)",
+         all(g["mask"] == 0 for g in pre) and pre_l and first_l and pre_l[-1][1] > 0
+         and abs(pre_l[-1][1] - first_l[-1][1]) <= 0.03 * first_l[-1][1],
+         f"masks {rep['numbers']['no_take']['masks']}, LEVEL {pre_l[-1:]} (unmuted {first_l[-1:]})")
 
     def peak(run):
         return max((p["voices"][v]["peak"] for p in run for v in s_voices(p)), default=0.0)

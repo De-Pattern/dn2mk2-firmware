@@ -2976,7 +2976,23 @@ void smp_mod_apply(void *mirror)
      * sent to) a BOUNCE voice never got its buffer: SAMP 0, silence (emu_coupled_flex) */
     for (u32 b = 0; b < 16; b++) {
         u8 *snd = VOICE_SOUND(b);
-        if (!snd || snd[SOUND_TYPE] != BOUNCE_TYPE)
+        if (!snd)
+            continue;
+        if (snd[SOUND_TYPE] >= 8 && snd[SOUND_TYPE] <= 13) {
+            /* v0.55: a sample machine on a FLEX buffer (its SAMP the buffer's code, the sound's
+             * or a lock's) hears the buffer's playing half, or OFF while it is empty */
+            extern int rt_samp_buf(u32 samp);
+            extern u32 rt_buf_samp(u32 buf);
+            int fb = rt_samp_buf((u32)(*TARGET_CELL(b, SAMP_SLOT) >> 8));
+            if (fb >= 0) {
+                volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
+                u32 want = rt_buf_samp((u32)fb);
+                if ((u32)(*cell >> 8) != want)
+                    *cell = (u16)(want << 8);
+            }
+            continue;
+        }
+        if (snd[SOUND_TYPE] != BOUNCE_TYPE)
             continue;
         /* v0.53 (NiKo: a BUF lock on a playback trig was ignored): the voice plays the buffer its
          * own BUF names (the voice's target, the step's lock applied), not the track's; FLEX REC
@@ -3002,6 +3018,8 @@ void smp_mod_apply(void *mirror)
         if (snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
             continue;                           /* not a sample machine */
         u32 set = *TARGET_CELL(b, SAMP_SLOT) >> 8;   /* the sound's or the lock's: 0 OFF, k: slot k - 1 */
+        if (set > POOL_SLOTS)
+            continue;                           /* v0.55: a FLEX buffer (above) */
         volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
         int heard = *cell >> 8;
         int k = heard - (int)set;

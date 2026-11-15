@@ -481,6 +481,26 @@ u32 rt_buf_samp(u32 b)                          /* v0.53: the same for buffer B 
     return (u32)HALF_SLOT(b, rt_play[b]) + 1u;
 }
 
+/* v0.55 (owner: "add the recorded buffers (1-8) to the end of the project RAM list"): every
+ * sample machine can play a FLEX buffer. Its SAMP holds the buffer's code (half 0's SAMP,
+ * BUF_SLOT0 + 1 + 2 b); link.c's smp_mod_apply hears the playing half, as FLEX's own voices
+ * do. The sample list shows the eight after the pool (rows 128..135) */
+int rt_samp_buf(u32 samp)                       /* the buffer a SAMP value names, or -1 */
+{
+    u32 lo = BUF_SLOT0 + 1u;
+    return samp >= lo && samp < lo + BUF_HALVES ? (int)((samp - lo) / 2u) : -1;
+}
+
+u32 rt_buf_code(u32 b)                          /* buffer B's SAMP value */
+{
+    return BUF_SLOT0 + 1u + 2u * (b < BUF_N ? b : BUF_N - 1u);
+}
+
+u32 rt_buf_bytes(u32 b)                         /* the playing take's bytes, 0 none */
+{
+    return b < BUF_N && rt_on ? rt_rbytes[HALF_IX(b, rt_play[b])] : 0;
+}
+
 u32 rt_bounce_samp(u32 t)
 {
     return rt_buf_samp(rt_buf_of(t));
@@ -642,6 +662,12 @@ static u32 ms_mask_now(void)
         return 0;
     for (u32 t = 0; t < 16; t++) {
         if (!rt_is_bounce(t) || !fx_valid(t) || !fx_get(t, FX_MUTE))
+            continue;
+        /* v0.55 (owner: muted at once left a gap; "trigger the mute when the rec trig ends"):
+         * the SRC track is heard while the first take records, and muted once the track's
+         * buffer holds a take (its playing half: rt_buf_samp), so FLEX's loop takes over;
+         * cleared, it is heard again */
+        if (!rt_buf_samp(rt_buf_of(t)))
             continue;
         int src = fx_get(t, FX_SRC);
         if (src >= 2 && src < 18 && (u32)(src - 2) != t)

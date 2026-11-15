@@ -204,8 +204,14 @@ static int func_kind(u8 *s, int slot, u32 id)
 
 /* from the setter's write (hooks.S, smp_quant_hook): S = the sound, SLOT, VALUE the
  * value about to be written (coarse << 8 | fine), ID its record -> the value to write */
+int smp_samp_direct __attribute__((section(".data"))) = 0;   /* v0.55: smp_set_samp's own write */
 int smp_quant(u8 *s, int slot, int value, u32 id)
 {
+    if (smp_samp_direct && slot == SMP_SAMP_SLOT) {     /* v0.55: smp_set_samp's own write */
+        extern u32 smp_samp_turned;
+        smp_samp_turned = *(volatile u32 *)0x4058E8D4u;    /* (as below, for every SAMP write) */
+        return smp_samp_direct > 0 ? smp_samp_direct << 8 : value;
+    }
     int fk = func_kind(s, slot, id);
     int old0 = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
     if (fk == F_NONE)
@@ -264,6 +270,22 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
     if (slot == SMP_SAMP_SLOT) {                /* v0.27: SAMP turned by hand (smp_page.c's list) */
         extern u32 smp_samp_turned;
         smp_samp_turned = *(volatile u32 *)0x4058E8D4u;
+    }
+    if (slot == SMP_SAMP_SLOT && type < SMP_N0 && smp_knob_d
+        && *(volatile u32 *)0x4058E8D4u - smp_knob_at <= KNOB_FRESH) {
+        /* v0.55: past SAMP 127 the list goes on to the eight FLEX buffers (rows 128..135, each
+         * the buffer's code: rt_buf_code), turned by the knob's own steps */
+        extern int rt_samp_buf(unsigned int samp);
+        extern unsigned int rt_buf_code(unsigned int b);
+        int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
+        int oc = old >> 8, nc = (value >> 8) & 0xFF;
+        int ob = rt_samp_buf((unsigned int)oc);
+        int row = ob >= 0 ? 128 + ob : oc;
+        if (ob >= 0 || nc > 127 || (smp_knob_d > 0 && row + smp_knob_d > 127)) {
+            int r = row + smp_knob_d;
+            r = r < 0 ? 0 : r > 135 ? 135 : r;
+            return (r >= 128 ? (int)rt_buf_code((unsigned int)(r - 128)) : r) << 8;
+        }
     }
     int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
     int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
