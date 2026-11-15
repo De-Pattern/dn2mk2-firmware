@@ -86,5 +86,7 @@ When a build prints `CLEARED TO FLASH`, in the same session:
 like a release (`CLEARED TO FLASH` on that file). Versioned `X.Y-tN` (e.g. `0.54-t1`), named
 for the feature. Published to the `builds` branch under `test/vX.Y-tN-NAME/` and to the
 patcher with `web_bundle.py ... --test` (listed under TEST, never the latest, with a warning),
-with a section in the branch's own `FIRMWARE.md`. No `releases/` file on `main`: that would
-announce it. Its tests and known issues go to the owner with the build.
+with a section in the branch's own `FIRMWARE.md`. Its tests and known issues go to the owner with
+the build. It is announced only when the owner asks (2026-11-14, v0.54-t1): then
+`releases/vX.Y-tN.md` on `main`, titled `# vX.Y-tN · NAME (TEST build)`, saying it is a test build;
+the workflow makes it a pre-release, never the latest.
