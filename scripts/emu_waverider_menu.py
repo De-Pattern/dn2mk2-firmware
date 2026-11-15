@@ -1675,6 +1675,17 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
     return out
 
 
+def frames_va(root: pathlib.Path) -> int:
+    """the audio frame counter (FRAMES, 1,500 a second) as this tree's slice.c defines it: OS 1.12 moved
+    it, so it is read from the ported source, not written here"""
+    import re
+    src = (root / "csrc/sampler/slice.c").read_text()
+    m = re.search(r"#define FRAMES \(\*\(volatile u32 \*\)(0x[0-9A-Fa-f]+)u\)", src)
+    if not m:
+        raise SystemExit("--frame-clock: no FRAMES define in csrc/sampler/slice.c")
+    return int(m.group(1), 16)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--build", default="out/waverider-m5")
@@ -1702,6 +1713,10 @@ def main() -> int:
                         "0x40025e36 preempting whatever runs), as on the unit, where it takes "
                         "about 55 %% of the ColdFire's time (docs/timing-model.md). 0: only "
                         "`frame:` steps enter it, as before")
+    p.add_argument("--frame-clock", action="store_true",
+                   help="2026-11-15: the audio frame counter (FRAMES) moves with the UI's instructions at "
+                        "digikit's instruction clock (emulib.panel.Panel.frame_clock); without it, and without "
+                        "--isr-frame, it stands still and FRAMES-timed notes and redraws never move")
     p.add_argument("--stack-at", action="append", default=[], metavar="VA",
                    help="at every entry to VA, the code addresses on the stack: who calls it")
     p.add_argument("--regs-last", type=int, default=0, metavar="N",
@@ -2096,6 +2111,10 @@ def main() -> int:
             uc_.reg_write(K.UC_M68K_REG_D0, val & 0xFFFFFFFF)
         uc.hook_add(UC_HOOK_CODE, set_d0, begin=va, end=va)
     panel = Panel(machine, png_dir=str(png_dir))
+    if a.frame_clock:
+        if a.isr_frame:
+            raise SystemExit("--frame-clock with --isr-frame: the audio ISR counts the frames itself")
+        panel.frame_clock(frames_va(pathlib.Path(a.root)))
     # v0.33: what a freeze leaves (the owner's and testers' reports): the firmware's own fault
     # reporter (V%02x M%x P%08x: an exception), memory the CPU touched outside every mapped
     # region, and `alive` checkpoints (frames composed so far, the CPU's PC: a run whose

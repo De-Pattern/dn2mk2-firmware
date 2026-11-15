@@ -27,10 +27,12 @@ The timers are claimed through digikit's `restore_timers`, never constructed:
 from __future__ import annotations
 
 import pathlib
+import struct
 
 TAP = 2_000_000                     # well inside the hold threshold
 SETTLE = 10_000_000                 # let the UI compose after an input
 CHUNK = 10_000_000
+CLOCK_CHUNK = 500_000              # frame_clock(): FRAMES moves every 160 frames (0.1 s), not every 2 s
 
 # (channel, bit); `code_for` is channel * 8 + bit + 1, so code = these + 1.
 MOD = (0, 5)
@@ -61,6 +63,7 @@ class Panel:
             raise SystemExit("this snapshot carries no timer state to claim")
         self.png_dir = pathlib.Path(png_dir)
         self.ran = 0                # instructions run since the snapshot resumed (every settle)
+        self.clock = None           # frame_clock(): (FRAMES's address, its value at the resume, frames a second)
         # v0.34 (docs/timing-model.md): the audio interrupt at its real cadence, when the
         # machine was built with digikit's SSI0/eDMA event source (Machine(ssi0_request_hz=..))
         ssi = machine.ev.get("ssi0_dma") if hasattr(machine, "ev") else None
@@ -86,14 +89,30 @@ class Panel:
 
         done = 0
         while done < instructions:
-            budget = min(CHUNK, instructions - done)
+            budget = min(CLOCK_CHUNK if self.clock else CHUNK, instructions - done)
             self.m.pc, ran, _stop = longrun.spin(self.m.m, self.m.pc, budget,
                                                  pits=self.timers, fast=True, async_events=self.events)
             done += ran
+            if self.clock:
+                self._tick(self.ran + done)
             if ran == 0:
                 break
         self.ran += done
         return done
+
+    def frame_clock(self, frames_va, per_sec=1500):
+        """2026-11-15: the audio frame counter (FRAMES, PER_SEC a second, the audio ISR's) moves with
+        the UI's instructions at digikit's instruction clock (emu.pit.INSTR_PER_SEC), written after
+        each chunk (CLOCK_CHUNK while it runs). Without the audio ISR it stood still (0 since the
+        snapshot's boot), so what the firmware times by it never moved: a note's 1.5 s (slice.c)
+        never ended, and the overlay's redraw tick (page.c, FRAMES_NOW - rec_next) never came
+        again: a new note was never drawn"""
+        self.clock = (frames_va, self.m.long(frames_va), per_sec)
+
+    def _tick(self, ran):
+        from emu.pit import INSTR_PER_SEC
+        va, f0, per_sec = self.clock
+        self.m.write(va, struct.pack(">I", (f0 + ran * per_sec // INSTR_PER_SEC) & 0xFFFFFFFF))
 
     # --- input --------------------------------------------------------------
     def tap(self, key, after=SETTLE):

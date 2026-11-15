@@ -1046,14 +1046,19 @@ def main() -> int:
                      # SAMP) after MACHINE SEL (FUNC + SRC, NO: its keys' releases never reach the
                      # mod, so SRC stayed "held" and every YES went to stock: the owner's dead
                      # SLICE/GRID menus, reproduced) and a FUNC combo on the page (FUNC + LEFT)
-                     f"{pk},tap:2,wait:10,func-src,wait:20,no,wait:10,png:y0,press:17,wait:2,left,wait:3,release:17,wait:6,yes,wait:8,png:y1,"
+                     f"{pk},tap:2,wait:10,func-src,wait:20,no,wait:10,png:y0,press:17,wait:2,left,wait:3,release:17,wait:6,press:10,wait:2,png:y1,release:10,wait:6,"
                      f"no,wait:6,tap:18,wait:6,press:33,wait:6,release:33,wait:6,press:34,wait:6,release:34,wait:6,"
                      f"press:26,wait:6,release:26,wait:6")
             js = work / "slice.json"
             slc_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                           "--build", bdir, "--snapshot", snap, "--steps", steps,
-                                          "--regs-at", "0x400576ca",
+                                          "--regs-at", "0x400576ca", "--frame-clock",
                                           "--png-dir", work / "slice", "--json", js]
+            # 2026-11-15: --frame-clock (FRAMES moves as the UI runs; the menu emulator runs no audio ISR, so
+            # it stood at 0). Without it the editor's COULD NOT SAVE (the poked editor's slot is slice.c's -1)
+            # stayed up for good, and YES's answer here, NO SAMPLE ON SAMP (the SAMP slot is empty on our
+            # snapshots), was drawn only by chance (page.c redraws a note only once FRAMES has moved). y1 is
+            # taken while YES is held, inside the answer's 1.5 s: `yes` (a 2 M tap, a 10 M settle) outlasted it
 
             # v0.40 (a user: "sometimes EDIT SLICE POINTS or CREATE SLICE GRID returns CANNOT
             # READ IT"): the menus opened again and again, TR.DET OFF and ON, after CLEAR SLICE
