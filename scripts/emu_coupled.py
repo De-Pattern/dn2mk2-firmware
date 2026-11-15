@@ -103,6 +103,7 @@ class Coupled:
         self.blocks = 0
         self.last_seq = {0: None, 1: None}
         self.delivered = 0
+        self.last_packet = None                 # the ColdFire's packet this period (512 words), or None
         self.dsp_packets = 0
         self.halt = None
         self.taps: dict = {}
@@ -288,7 +289,7 @@ class Coupled:
             frame_be = self.frame_filter(frame_be)
         self.last_frame = frame_be
         if not self.dsp:
-            self._cf_packet()
+            self.last_packet = self._cf_packet()
             self.blocks += 1
             now = time.perf_counter()
             self.period_wall.append(now - t_start)
@@ -298,6 +299,7 @@ class Coupled:
         packet = self._cf_packet()
         if packet is not None and self.packet_filter is not None:
             packet = self.packet_filter(packet)
+        self.last_packet = packet
         M, SM = self.M, self.SM
         tap = {}
 
