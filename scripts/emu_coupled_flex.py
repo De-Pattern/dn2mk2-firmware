@@ -63,6 +63,7 @@ KB_ON = 0x42432A9C                       # KEYBOARD's state (1 on; measured on s
 
 
 STATE, SRC, OUT = 0x8000DE60, 0x80003AF0, 0x800068E4
+DETENT_PERIODS = 10                      # turn()'s periods a detent: 10 M of UI, past the slowest first detent (4.3 M)
 NOTE_CELLS = 0x254B14                    # the DSP's note a voice (perc/program.py)
 SLOT_TUNE = 25
 
@@ -206,10 +207,11 @@ def main() -> int:
     # v0.50 (impbox: "BUF can't be set"): knob C turns BUF, four detents a buffer, through the knob's
     # own path (the sound's slot 35 at sound + 20 + 2 x 35, where rt_buf_of reads it); back to 01
     # for the take. Knob G is GAIN, a dB a detent; back to 0
+    # a detent every DETENT_PERIODS periods (was 2); why: emu_coupled_mute.py
     def turn(enc, delta, n):
         for _ in range(n):
             c.machine.pc = P.encoder(c.machine.m, c.panel.profile, enc, delta)
-            c.periods(2)
+            c.periods(DETENT_PERIODS)
 
     def bufword():
         return struct.unpack(">H", c.read(snd + 20 + 2 * 35, 2))[0] >> 8
