@@ -87,6 +87,20 @@ def scenario(sound, machines, seed: int, blocks: int, *, globals_random: bool, s
     return fb
 
 
+EXP_MASK = 0x7F800000                           # a float32 word with every exponent bit set is NaN or infinity
+
+
+def finite(words) -> bool:
+    """every word a finite float32 (no NaN, no infinity)"""
+    return all((w & EXP_MASK) != EXP_MASK for w in words)
+
+
+def sounds(words) -> bool:
+    """some word is a finite, nonzero float32: sound. NaN and infinity are not (2026-11-14: `w & 0x7fffffff` alone
+    counted them, so a run of NaN passed as sound)"""
+    return any((w & EXP_MASK) != EXP_MASK and w & 0x7FFFFFFF for w in words)
+
+
 def tx_page(m2, st) -> int:
     return TX_BASE + (((m2.word(st, TX_PAGE_WORD) or 0) & 1) << 11)
 
@@ -162,7 +176,8 @@ def run(M5, snap, m2mach, m5img, stockimg, sound, machines, blocks: int = 16) ->
                 bad = [b for b, (x, y) in enumerate(zip(s["caps"], d["caps"])) if x[key] != y[key]]
                 if bad:
                     diff[key] = bad
-        sounding = both and any(any(w & 0x7FFFFFFF for w in c["main"]) for c in s["caps"])
+        sounding = both and any(sounds(c["main"]) for c in s["caps"])
+        main_finite = both and all(finite(c["main"]) for c in s["caps"] + d["caps"])
         records = both and all(c["records"] is not None for c in s["caps"] + d["caps"])
         tb_diff = [b for b, (x, y) in enumerate(zip(s["caps"], d["caps"])) if x["track buffers"] != y["track buffers"]] \
             if both else None
@@ -173,7 +188,8 @@ def run(M5, snap, m2mach, m5img, stockimg, sound, machines, blocks: int = 16) ->
             checks[f"{name}: the comparison sees it"] = both and bool(diff)
             numbers[name] = {"differing (output: blocks)": diff}
             continue
-        checks[f"{name}: the stock run sounds on the main mix"] = sounding
+        checks[f"{name}: the stock run sounds on the main mix (finite, nonzero words)"] = sounding
+        checks[f"{name}: the main mix is finite (no NaN, no infinity), every block, both images"] = main_finite
         checks[f"{name}: the reply buffer was found at the output stage's call"] = records
         checks[f"{name}: main, tracks A/B, FX returns, TDM 0..13, records bit-identical, every block"] = (
             both and not diff)
