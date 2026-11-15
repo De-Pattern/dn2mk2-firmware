@@ -54,10 +54,10 @@ def _host_ddrw(p: Prog, L: K.Layout) -> None:
             p.lsh(1, 0, 6)
             p.iop(1, 1, "-", 0)                 # 63 x
             p.iconst(12, 63)
-            p.iop(1, 1, "+", 12)
+            p.iop(1, 12, "+", 1)
             p.lsh(1, 1, -7)                     # (63 x + 63) >> 7: 0..63
             p.iconst(12, 64)
-            p.iop(1, 1, "+", 12)
+            p.iop(1, 12, "+", 1)
             p.ifz(0, "NE", lambda: p.ipass(0, 1))
         p.iconst(12, -7)
         p.float_(0, 0, 12)

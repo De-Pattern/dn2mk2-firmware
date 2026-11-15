@@ -76,3 +76,18 @@ def test_the_page_saves_only_the_cleared_sha():
     assert "got === b.sha256" in page and "$(\"#save\").disabled = false" in page
     worker = (ROOT / "tools" / "web" / "patcher-worker.js").read_text()
     assert "zipSha" in worker and "pyodide/v0.27.7" in worker
+
+
+def test_web_bundle_names_as_the_worker_reads_them():
+    """2026-11-15 (NiKo, v0.54-t1: "the mod's version file cannot be read"): dn2mk2's
+    patcher-worker.js wrote VERSION only for X.Y names; web_bundle now refuses a bundle whose
+    name the worker's pattern would not read back as its version"""
+    import importlib.util
+    import pathlib
+    spec = importlib.util.spec_from_file_location(
+        "web_bundle", pathlib.Path(__file__).resolve().parents[1] / "scripts" / "web_bundle.py")
+    W = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(W)
+    assert W.worker_version("dnfw-v0.55.zip") == "0.55"
+    assert W.worker_version("dnfw-v0.54-t1.zip") == "0.54-t1"
+    assert W.worker_version("dnfw-v0.30.1.zip") is None      # (before VERSION: none written)

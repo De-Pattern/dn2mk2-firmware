@@ -110,3 +110,63 @@ def test_digibank_room():
     mnm = K.TABLE_LAYOUT["mnm"][0]
     lo, hi = mnm + C.DIGI_OFF, mnm + C.DIGI_OFF + 4 * C.DIGI_WORDS
     assert lo >= K.TABLE_LAYOUT["_end"][0] and hi <= 0x100000, (hex(lo), hex(hi))
+
+
+# v0.56 (owner: "time in ddrw is not working ... BR1 and BR2 controls are 99% inaudible";
+# docs/ddrw-fix.md): the DN2's host maps DDRW's BR and TIME; the Monomachine's model and its
+# references (above) are untouched (gl 0 there: g = 1.0)
+def _ddrw_host(inputs):
+    import struct
+    from dnfw.md import core as K
+    from dnfw.mnm import machines as MM
+    b = bench.Bench(ddrw)                                   # its memory and tables
+    L = b.L.md                                              # the layout the DSP's host is given
+    p = b._prog()
+    for k, x in enumerate(inputs):
+        p.iconst(0, x)
+        p.sti(K.INP0 + k, 3, 0)
+    MM._host_ddrw(p, L)
+    f = lambda a: struct.unpack("<f", struct.pack("<I", b.mem.get(a) & 0xFFFFFFFF))[0]   # noqa: E731
+    knobs = [round(f(L.state + 4 * (K.W0 + C.P0 + k)) * 128) for k in range(8)]
+    return knobs, f(L.mnm.W["gl"])
+
+
+@pytest.mark.parametrize("br,want", [(0, 0), (1, 64), (64, 95), (127, 127)])
+def test_ddrw_br_mapped(br, want):
+    knobs, _ = _ddrw_host([5 << 7, 64 << 7, 9 << 7, 0, br << 7, 3 << 7, br << 7, 64 << 7])
+    assert knobs == [5, 64, 9, 0, want, 3, want, 64]       # BR1, BR2 mapped; the rest as sent
+
+
+@pytest.mark.parametrize("t", [0, 16, 64, 127])
+def test_ddrw_time_glide(t):
+    from dnfw.mnm import machines as MM
+    _, g = _ddrw_host([0, 0, 0, t << 7, 0, 0, 0, 64 << 7])
+    want = 0.0 if t == 0 else (t + 1) / (MM.DDRW_RATE * (1 + MM.DDRW_FADE * t * t))
+    assert g == pytest.approx(want, rel=1e-4)
+
+
+def test_ddrw_time_fades_for_its_time():
+    """a WAV1 change mid-note at TIME 16 (g as the host gives it) differs from the instant change
+    for about 30 ms (1 + c 16^2 half-renders); the model's own (no host: gl 0) is instant"""
+    import math
+    import struct
+    from dnfw.mnm import machines as MM
+    c = bench.golden("DDRW")["cases"][0]
+
+    def render(t, glide, n=160):
+        b = bench.Bench(ddrw)
+        out = []
+        for blk in range(n):
+            if glide:
+                g = (t + 1) / (MM.DDRW_RATE * (1 + MM.DDRW_FADE * t * t))
+                b.mem.put(b.L.W["gl"], struct.unpack("<I", struct.pack("<f", g))[0])
+            A, F = c["A"][min(blk, 31)], c["F"][min(blk, 31)]
+            knobs = [40 if blk >= 10 else 0, 0, 0, t, 0, 0, 0, 64]
+            out += b.block(A, F, knobs, blk == 0) if blk in (0, 10) else b.block(A, F)
+        return out
+    inst, slow, model = render(0, False), render(16, True), render(16, False)
+    d = [math.sqrt(sum((x - y) ** 2 for x, y in zip(slow[16 * k:16 * k + 16], inst[16 * k:16 * k + 16])) / 16)
+         for k in range(160)]
+    last = max(k for k in range(160) if d[k] > 1e-3)
+    assert 60 <= last - 10 <= 120                           # 1 + 0.372 x 256 = 96 half-renders
+    assert model == inst                                    # the Monomachine's own: TIME inaudible
