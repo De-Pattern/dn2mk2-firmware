@@ -53,6 +53,7 @@ import os
 import pathlib
 import struct
 import sys
+import types
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -76,6 +77,23 @@ BLK_READY, BLK_SECTORS = 0x4461C68C, 0x4461C6B0
 SET_SECTOR = 0x6FF000
 CALLS_A_TICK = 4                                         # ISR entries a tick here (measured)
 CUE_STEP, END_STEP = 3, 36
+# the sequencer's state a trace row keeps (record(); emu_jump_coupled.py reads it through seq_row)
+SEQ_STATE, SEQ_STATE_BYTES = 0x42C5B900, 0x200
+SEQ_NODES, SEQ_NODES_BYTES = 0x446493D0, 0xF4
+SEQ_PATTERN = 0x42C5B9A0                                 # the playing pattern: P0 + n * PSTRIDE
+SEQ_A91C, SEQ_TICK = 0x42C5B91C, 0x42C5B91E
+SEQ_GLOBAL, SEQ_SUB = 0x42C5B9D0, 0x42C5B9D4             # the global step, its sixths
+TRACK_CUR, TRACK_NEXT = 0x42C5B984, 0x42C5B964           # each track's step, and its next
+
+
+def seq_row(read, n: int, tag: str = "") -> dict:
+    """one trace row: the sequencer as record() keeps it (READ(va, n) -> bytes)"""
+    def u(va, k):
+        return int.from_bytes(read(va, k), "big")
+    return {"n": n, "tag": tag, "pat": (u(SEQ_PATTERN, 4) - P0) // PSTRIDE, "a91c": u(SEQ_A91C, 2),
+            "tick": u(SEQ_TICK, 1), "t6": u(SEQ_GLOBAL, 4) * 6 + u(SEQ_SUB, 4),
+            "cur": list(read(TRACK_CUR, 16)), "next": list(read(TRACK_NEXT, 16)),
+            "digest": hashlib.sha256(read(SEQ_STATE, SEQ_STATE_BYTES) + read(SEQ_NODES, SEQ_NODES_BYTES)).hexdigest()[:16]}
 
 
 def main() -> int:
@@ -148,32 +166,6 @@ def main() -> int:
     def sym(name, n=1):
         return int.from_bytes(m.read(syms[name], n), "big") if name in syms else None
 
-    # the patterns
-    A01, A02 = P0, P0 + PSTRIDE
-    m.write(A01 + LEN, struct.pack(">h", 12 if a.variant == "odd" else 16))
-    m.write(A01 + MODE, b"\0")
-    cue_step, end_step = (18, 50) if a.variant == "odd" else (CUE_STEP, END_STEP)
-    if a.variant == "odd":
-        m.write(A02 + LEN, struct.pack(">h", 16))
-        m.write(A02 + MODE, b"\0")
-        track_len = [16] * 16
-        master_len = 16
-    elif a.variant == "pp":
-        m.write(A02 + LEN, struct.pack(">h", 12))
-        m.write(A02 + MODE, b"\0")
-        track_len = [12] * 16
-        master_len = 12
-    else:
-        m.write(A02 + LEN, struct.pack(">h", 16))
-        m.write(A02 + MODE, b"\1")
-        track_len = [16, 5, 7, 3] + [16] * 12
-        master_len = 16
-        for t, n in enumerate(track_len):
-            m.write(A02 + TRK * t + TLEN, struct.pack(">h", n))
-            m.write(A02 + TRK * t + TLEN + 3, b"\2")    # +1167: 1x
-    for pat in (A01, A02):
-        m.write(pat + SCALE, b"\2")                      # 1x
-
     regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
 
     def isr():
@@ -204,29 +196,60 @@ def main() -> int:
                 uc.reg_write(r, v)
             uc.reg_write(K.UC_M68K_REG_PC, pc)
 
+    E = types.SimpleNamespace(m=m, panel=panel, isr=isr, guest=guest, u8=u8, u16=u16, u32=u32, sym=sym, syms=syms,
+                              disk=disk, io=io, faults=faults, ui_share=lambda k: panel.settle(200_000) if k % 8 == 7 else None)
+    return run(a, E)
+
+
+def run(a, E) -> int:
+    """the scenario A names on the machine E gives (emu_jump's own, or emu_jump_coupled.py's): the patterns, the
+    cues, the checks and the trace digest, the same whichever runs them"""
+    m, panel, isr, guest, u8, u32, sym, syms = E.m, E.panel, E.isr, E.guest, E.u8, E.u32, E.sym, E.syms
+    disk, io, faults = E.disk, E.io, E.faults
+    # the patterns
+    A01, A02 = P0, P0 + PSTRIDE
+    m.write(A01 + LEN, struct.pack(">h", 12 if a.variant == "odd" else 16))
+    m.write(A01 + MODE, b"\0")
+    cue_step, end_step = (18, 50) if a.variant == "odd" else (CUE_STEP, END_STEP)
+    if a.variant == "odd":
+        m.write(A02 + LEN, struct.pack(">h", 16))
+        m.write(A02 + MODE, b"\0")
+        track_len = [16] * 16
+        master_len = 16
+    elif a.variant == "pp":
+        m.write(A02 + LEN, struct.pack(">h", 12))
+        m.write(A02 + MODE, b"\0")
+        track_len = [12] * 16
+        master_len = 12
+    else:
+        m.write(A02 + LEN, struct.pack(">h", 16))
+        m.write(A02 + MODE, b"\1")
+        track_len = [16, 5, 7, 3] + [16] * 12
+        master_len = 16
+        for t, n in enumerate(track_len):
+            m.write(A02 + TRK * t + TLEN, struct.pack(">h", n))
+            m.write(A02 + TRK * t + TLEN + 3, b"\2")    # +1167: 1x
+    for pat in (A01, A02):
+        m.write(pat + SCALE, b"\2")                      # 1x
+
     trace = []
 
     def pat_index():
-        return (u32(0x42C5B9A0) - P0) // PSTRIDE
+        return (u32(SEQ_PATTERN) - P0) // PSTRIDE
 
     def record(tag=""):
-        block = m.read(0x42C5B900, 0x200) + m.read(0x446493D0, 0xF4)
-        row = {"n": len(trace), "tag": tag, "pat": pat_index(), "a91c": u16(0x42C5B91C), "tick": u8(0x42C5B91E),
-               "t6": u32(0x42C5B9D0) * 6 + u32(0x42C5B9D4),
-               "cur": list(m.read(0x42C5B984, 16)), "next": list(m.read(0x42C5B964, 16)),
-               "digest": hashlib.sha256(block).hexdigest()[:16]}
+        row = seq_row(m.read, len(trace), tag)
         trace.append(row)
         return row
 
     def ticks(n, tag=""):
         for k in range(n * CALLS_A_TICK):
             isr()
-            if k % 8 == 7:
-                panel.settle(200_000)
+            E.ui_share(k)
             record(tag)
 
     def global_step():
-        return u32(0x42C5B9D0)
+        return u32(SEQ_GLOBAL)
 
     out = {"scenario": a.scenario, "variant": a.variant, "stock": a.stock}
 
@@ -252,7 +275,7 @@ def main() -> int:
         out.update(on=sym("jmp_on"), sector_after_yes=sector(), writes_after_yes=list(io["writes"]))
 
     if a.scenario == "rapid":
-        return rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with_ptn)
+        return rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with_ptn, E.ui_share)
 
     if a.scenario == "persist":
         # power-on: the setting's RAM as the loader leaves it (.data: off, unread), the
@@ -292,7 +315,7 @@ def main() -> int:
     ticks(3)
     cue_at = len(trace)
     out["cue_global_step"] = global_step()
-    out["cue_tick"] = u8(0x42C5B91E)
+    out["cue_tick"] = u8(SEQ_TICK)
     if a.scenario in ("off", "on"):
         cue_a02()
     elif a.scenario == "pc":
@@ -346,7 +369,7 @@ def main() -> int:
     return 0 if not faults else 1
 
 
-def rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with_ptn) -> int:
+def rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with_ptn, ui_share) -> int:
     """the rapid-fire sweep (the module's docstring, `rapid`)"""
     pats = [P0 + n * PSTRIDE for n in range(4)]
     lens = [16, 12, 7, 5]
@@ -357,15 +380,14 @@ def rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with
         m.write(pat + SCALE, bytes([sc]))
 
     def pat_index():
-        v = u32(0x42C5B9A0)
+        v = u32(SEQ_PATTERN)
         return (v - P0) // PSTRIDE if v >= P0 else -1
     count = [0]
 
     def entry():
         isr()
+        ui_share(count[0])
         count[0] += 1
-        if count[0] % 8 == 0:
-            panel.settle(200_000)
         return record()
 
     def cue(keys):

@@ -49,9 +49,10 @@ failure:
    DN2's own NameView is up, opened once and drawn; its NO goes on to ASSIGN without a name. The negative
    control clears the main view pointer: our own naming screen stands in (the fallback). The recorder
    flow (6d) spells a name with the stock screen's own keys and its YES names the recording.
-6s. **DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
+6s. **DIRECT JUMP** (`emu_jump.py` run on the coupled emulator by `emu_jump_coupled.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
-   that is not the PTN view's stays stock's; the setting persists in its sector.
+   that is not the PTN view's stays stock's; the setting persists in its sector; rapid fire (83 cues). Every run
+   on the coupled emulator: the UI and the audio ISR every period (the stock control too).
 6q. **UI fuzz** (v0.33, `emu_fuzz_ui.py`): the sample pages driven at random, two seeds.
    v0.34 (docs/timing-model.md): with the audio interrupt firing on its own at its real
    cadence through the real vectors, preempting the mod's UI code; a CPU exception, the
@@ -2253,8 +2254,21 @@ def main() -> int:
             jruns = [("off", "pp", True), ("off", "pp", False), ("pc", "pp", False), ("on", "pp", False),
                      ("ref", "pp", True), ("on", "pt", False), ("ref", "pt", True), ("on", "odd", False),
                      ("persist", "pp", False), ("rapid", "pp", False)]
-            jcmds = [[a.venv, "-u", "scripts/emu_jump.py", "--build", bdir, "--snapshot", snap, "--scenario", sc,
-                      "--variant", var, "--png-dir", jdir / "screens", "--json", jdir / f"{sc}_{var}_{'stock' if st else 'build'}.json"]
+            # 2026-11-14 (the 1.12 gate's blind spots): both runs from one snapshot that booted
+            # stock (ui1200M, no section beside it), the build installed over it. 1.12's per-build
+            # ui800M booted THIS build: its UI state calls into the build's C chunk, so reverted to
+            # stock (--stock) it faulted at once (stock's fault reporter, from 0x46acee58)
+            jsnap = snap.parent / "ui1200M.snap"
+            if not jsnap.exists() or pathlib.Path(f"{jsnap}.section_3_MAIN_OS.bin").exists():
+                jsnap = snap
+            # 2026-11-14 (the 1.12 gate's blind spots): every run on the coupled emulator (scripts/emu_jump_coupled.py:
+            # emu_jump's own run(), checks and digest, the UI and the audio ISR every period; --stock the coupled
+            # emulator on the stock image). emu_jump alone never runs the audio ISR: on 1.12 the sequencer's node pool
+            # ran dry at entry 256; with the ISR run inside it, the work A04's switch (rapid) and, from v0.53, A01's
+            # loop (odd) start waited on a TDM side it does not have, and no key reached stock's cue after it
+            jcmds = [[a.venv, "-u", "scripts/emu_jump_coupled.py", "--build", a.build, "--stock-image", a.stock,
+                      "--snapshot", jsnap, "--scenario", sc, "--variant", var, "--png-dir", jdir / f"screens_{sc}_{var}",
+                      "--json", jdir / f"{sc}_{var}_{'stock' if st else 'build'}.json"]
                      + (["--stock"] if st else []) for sc, var, st in jruns]
 
             def jump_body(tdir):
