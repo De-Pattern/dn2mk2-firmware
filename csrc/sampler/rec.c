@@ -86,6 +86,7 @@ static int trk_pend_t __attribute__((section(".data"))) = 0;        /* and the t
 static u32 no_at __attribute__((section(".data"))) = 0;             /* NO pressed (held: to the top) */
 extern void smp_discard(int k);
 static void rename_start(int slot);
+static void sn_poll(void);                     /* v0.54: the stock NAME screen */
 static int lst_func __attribute__((section(".data"))) = 0;
 #define UI_TRACK_NOW (*(volatile unsigned char *)0x42431A6Cu)
 int smp_set_samp(int track, int value);
@@ -100,7 +101,7 @@ int smp_assign(int track, int slot);                 /* below: 0 done */
 
 /* v0.22: after a recording, the DT2's steps (manual 13.2, 9..11): TRIM, then NAME, then
  * ASSIGN (a [TRIG] key: that track plays it; NO: none). rec_phase 0 is the RECORDER. */
-enum { PH_REC, PH_TRIM, PH_NAME, PH_ASSIGN, PH_WORK };   /* v0.25: WORK, NORMALIZING */
+enum { PH_REC, PH_TRIM, PH_NAME, PH_ASSIGN, PH_WORK, PH_SNAME };   /* v0.25: WORK, NORMALIZING; v0.54: SNAME, the stock NAME screen up */
 int rec_phase __attribute__((section(".data"))) = PH_REC;
 int trim_slot __attribute__((section(".data"))) = -1;
 u32 trim_n __attribute__((section(".data"))) = 0;           /* its frames, as recorded */
@@ -164,7 +165,7 @@ static u32 enc_eaten __attribute__((section(".data"))) = 0;    /* v0.39: the enc
 
 int rec_visible(void)
 {
-    return rec_overlay;
+    return rec_overlay && rec_phase != PH_SNAME;   /* v0.54: not over the stock NAME screen */
 }
 
 /* the DSP's source and channel: v0.33, SRC (IN, MAIN, TRK1..16: the DSP's 0, 1, 2 + t) and
@@ -628,6 +629,7 @@ void rec_poll(void)
     }
     extern void smp_marquee_poll(void);
     rpt_poll();
+    sn_poll();                                  /* v0.54: the stock NAME screen's answer */
     smp_marquee_poll();                         /* v0.39: the selected long name's marquee */
     fb_pv_poll();
     extern void rt_poll(void);
@@ -996,6 +998,124 @@ int smp_trig_track(u32 code)
     return code >= K_TRIG1 && code < K_TRIG1 + 16u ? (int)(code - K_TRIG1) : -1;
 }
 
+
+/* v0.54: the DN2's own NAME screen for our names (owner, 2026-11-14: "identical to the stock
+ * elektron namer"; docs/name-screen.md). Stock's naming screen is a view of its own class,
+ * NameView, made as PATTERN NAME makes it (0x400795ba): the shared block and the view in one
+ * allocation, NameView(title, name, id, max, prefixed, prefix, callback), then opened over the
+ * main screen's view. The callback (a std::function<void(std::string, int)>) runs on YES with
+ * the name; NO closes the view without it. While the view is up every key is stock's
+ * (smp_question_up) and none of our screens draws (page.c's wr_screen). Anything not as
+ * expected (no main screen view yet, or one whose controller is not the screen we draw over)
+ * leaves our own naming screen in use. */
+#define SN_NEW       ((u32 (*)(u32))0x40120264u)    /* operator new (as u32: stock returns in d0; a pointer return here would read a0) */
+#define SN_STR       ((void (*)(void *, const char *, void *))0x401CE69Eu)   /* std::string(const char *, alloc) */
+#define SN_STR_FREE  ((void (*)(void *))0x401CCBEEu)                    /* ~std::string */
+#define SN_FN_FREE   ((void (*)(void *))0x40188086u)                    /* ~std::function */
+#define SN_VIEW      ((void (*)(void *, void *, void *, int, int, int, void *, void *))0x40119156u)
+#define SN_OPEN      ((void (*)(void *, void *, int))0x4011C8BEu)       /* View::open(child shared_ptr, 0) */
+#define SN_COUNT_FREE ((void (*)(void *))0x401880CCu)                  /* ~__shared_count */
+#define SN_MAIN_VIEW 0x44647980u                                        /* MainScreenView's shared_ptr */
+#define SN_BLOCK_VT  0x401E0BC8u                                        /* _Sp_counted_ptr_inplace<NameView> */
+#define SN_VIEW_VT   0x40206AC0u                                        /* NameView */
+#define SN_BYTES     0xB0u                                              /* the block (16) and the view (160) */
+static char sn_name[NM_LONG + 1] __attribute__((section(".data")));
+static int sn_state __attribute__((section(".data"))) = 0;     /* 1 open, 2 named (YES) */
+static int sn_seen __attribute__((section(".data"))) = 0;      /* the view seen in the screen's list */
+static u32 sn_at __attribute__((section(".data"))) = 0;
+u32 sn_opens __attribute__((section(".data"))) = 0;            /* (the gate reads these) */
+u32 sn_results __attribute__((section(".data"))) = 0;
+
+static void sn_invoke(void *functor, u32 *str, int id)        /* the view's YES: the name */
+{
+    (void)functor;
+    (void)id;
+    const char *n = str ? (const char *)*str : 0;
+    int j = 0;
+    for (; n && j < NM_LONG && n[j]; j++) {
+        char ch = n[j];
+        if (ch >= 'a' && ch <= 'z')
+            ch = (char)(ch - 32);
+        sn_name[j] = ch >= ' ' && ch <= '~' ? ch : ' ';
+    }
+    sn_name[j] = 0;
+    sn_state = 2;
+    sn_results++;
+}
+
+static int sn_manage(u32 *dest, const u32 *src, int op)       /* std::function's manager: an empty functor */
+{
+    if (op == 0)                                /* __get_type_info: none */
+        dest[0] = 0;
+    else if (op == 1)                           /* __get_functor_ptr */
+        dest[0] = (u32)src;
+    else if (op == 2) {                         /* __clone_functor */
+        dest[0] = src[0];
+        dest[1] = src[1];
+    }
+    return 0;
+}
+
+static int ram_ok(u32 a);
+int sn_up(void)                                 /* a NameView in the screen's list */
+{
+    extern void *wr_screen_obj;
+    u32 s = (u32)wr_screen_obj;
+    if (!ram_ok(s))
+        return 0;
+    u32 node = *(volatile u32 *)(s + 28);
+    for (int n = 0; n < 32 && ram_ok(node) && node != s + 20; n++) {
+        u32 v = *(volatile u32 *)(node + 8);
+        if (ram_ok(v) && *(volatile u32 *)v == SN_VIEW_VT)
+            return 1;
+        node = *(volatile u32 *)node;
+    }
+    return 0;
+}
+
+/* the stock NAME screen over everything, titled TITLE, on TEXT (MAX characters at most); 1 if
+ * it opened (rec_poll's sn_poll finishes it), 0 to use ours */
+static int sn_open(const char *title, const char *text, int max)
+{
+    extern void *wr_screen_obj;
+    u32 main_view = *(volatile u32 *)SN_MAIN_VIEW;
+    if (sn_state || !ram_ok(main_view) || !wr_screen_obj
+        || *(volatile u32 *)(main_view + 44) != (u32)wr_screen_obj)
+        return 0;
+    u32 *blk = (u32 *)SN_NEW(SN_BYTES);
+    if (!blk)
+        return 0;
+    blk[0] = SN_BLOCK_VT;
+    blk[1] = 1;                                 /* use */
+    blk[2] = 1;                                 /* weak */
+    blk[3] = (u32)blk + 16u;                    /* the view, in place */
+    char alloc = 0;
+    u32 s_title = 0, s_name = 0, s_prefix = 0;
+    u32 fn[4];                                  /* std::function: the functor's 8 bytes, manager, invoker */
+    fn[0] = 0;
+    fn[1] = 0;
+    fn[2] = (u32)sn_manage;
+    fn[3] = (u32)sn_invoke;
+    SN_STR(&s_title, title, &alloc);
+    SN_STR(&s_name, text, &alloc);
+    SN_STR(&s_prefix, "%03d:", &alloc);         /* (not shown: prefixed 0) */
+    SN_VIEW(blk + 4, &s_title, &s_name, 0, max, 0, &s_prefix, fn);
+    SN_STR_FREE(&s_prefix);
+    SN_STR_FREE(&s_name);
+    SN_STR_FREE(&s_title);
+    SN_FN_FREE(fn);
+    u32 sp[2];                                  /* shared_ptr<View> (NameView's View is at +0) */
+    sp[0] = (u32)blk + 16u;
+    sp[1] = (u32)blk;
+    SN_OPEN((void *)main_view, sp, 0);
+    SN_COUNT_FREE(&sp[1]);
+    sn_state = 1;
+    sn_seen = 0;
+    sn_at = *(volatile u32 *)0x4058E8D4u;
+    sn_opens++;
+    return 1;
+}
+
 /* MAX: 35 for a recording (its name goes with it into +DRIVE > RECORDED), the pool's long
  * names' 35 for a rename where the pool keeps them, else the short name's 7 */
 static void name_start_max(int max)
@@ -1011,7 +1131,25 @@ static void name_start_max(int max)
     nm_cur = 0;
     rec_phase = PH_NAME;
 }
-static void name_start(void) { name_start_max(NM_LONG); }
+/* v0.54: the stock NAME screen on the name as set up (sn_open), when it opens */
+static void name_open(const char *title)
+{
+    char t[NM_LONG + 1];
+    int j, last = -1;
+    for (j = 0; j < nm_max && j < NM_LONG; j++) {
+        t[j] = nm_text[j] ? nm_text[j] : ' ';
+        if (t[j] != ' ')
+            last = j;
+    }
+    t[last + 1] = 0;
+    if (sn_open(title, t, nm_max))
+        rec_phase = PH_SNAME;
+}
+static void name_start(void)
+{
+    name_start_max(NM_LONG);
+    name_open("FILE NAME");
+}
 
 static void name_step(int d)
 {
@@ -1043,6 +1181,7 @@ static void folder_name_start(void)
     nm_only = 2;
     rec_phase = PH_NAME;
     rec_overlay = 1;
+    name_open("FOLDER NAME");
 }
 
 static void rename_start(int slot)
@@ -1054,6 +1193,7 @@ static void rename_start(int slot)
     name_start_max(smp_meta_ok ? NM_LONG : 7);  /* v0.46: long where the pool keeps long names */
     nm_only = 1;
     rec_overlay = 1;
+    name_open("SAMPLE NAME");
 }
 
 extern void smp_rec_store_named(int k, const char *name);
@@ -1088,6 +1228,56 @@ static void name_done(void)
         nm_only = 0;
         rec_phase = PH_REC;
         rec_overlay = 0;
+    }
+}
+
+/* NO on the naming screen: a rename or a new folder left as it was; a recording keeps the
+ * name it has and goes on to ASSIGN */
+static void name_cancel(void)
+{
+    if (nm_only) {
+        nm_only = 0;
+        rec_phase = PH_REC;
+        rec_overlay = 0;
+    } else {
+        as_done = -1;
+        rec_phase = PH_ASSIGN;
+        extern const char *smp_long_name(int k);   /* v0.46: into +DRIVE > RECORDED, under it */
+        smp_rec_store_named(trim_slot, smp_long_name(trim_slot));
+    }
+}
+
+/* v0.54: the stock NAME screen's answer, once a UI pass: YES gave a name (the view's callback),
+ * or the view closed without one (NO). Finished here, outside stock's key handling. */
+static void sn_poll(void)
+{
+    extern int smp_overlay_dirty;
+    if (!sn_state)
+        return;
+    int up = sn_up();
+    if (up)
+        sn_seen = 1;
+    if (sn_state == 2) {
+        sn_state = 0;
+        if (rec_phase != PH_SNAME)
+            return;
+        int j = 0;
+        for (; j < NM_LONG && sn_name[j]; j++)
+            nm_text[j] = sn_name[j];
+        for (; j <= NM_LONG; j++)
+            nm_text[j] = 0;
+        rec_phase = PH_NAME;
+        name_done();
+        smp_overlay_dirty = 1;
+        return;
+    }
+    if (!up && (sn_seen || *(volatile u32 *)0x4058E8D4u - sn_at > 3000u)) {
+        sn_state = 0;
+        if (rec_phase == PH_SNAME) {
+            rec_phase = PH_NAME;
+            name_cancel();
+        }
+        smp_overlay_dirty = 1;
     }
 }
 
@@ -1478,16 +1668,9 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
         }
         else if (code == K_YES)
             name_done();
-        else if (code == K_NO && nm_only) {    /* the browser's RENAME, left as it was */
-            nm_only = 0;
-            rec_phase = PH_REC;
-            rec_overlay = 0;
-        } else if (code == K_NO) {
-            as_done = -1;
-            rec_phase = PH_ASSIGN;              /* the name it has */
-            extern const char *smp_long_name(int k);   /* v0.46: into +DRIVE > RECORDED, under it */
-            smp_rec_store_named(trim_slot, smp_long_name(trim_slot));
-        } else if (smp_func_held && code >= K_UP && code <= K_RIGHT) {  /* the grid */
+        else if (code == K_NO)                  /* the browser's RENAME left as it was; a recording */
+            name_cancel();                      /* keeps the name it has */
+        else if (smp_func_held && code >= K_UP && code <= K_RIGHT) {  /* the grid */
             grid_move(code);
             if (code == K_LEFT || code == K_RIGHT)
                 rpt_start(code);
@@ -1552,7 +1735,8 @@ int smp_question_up(void)
         u32 v = *(volatile u32 *)(node + 8);
         if (ram_ok(v)) {
             u32 cls = *(volatile u32 *)v;
-            if (cls == QUESTION_VTABLE || cls == PROGRESS_VTABLE || cls == MESSAGE_VTABLE)
+            if (cls == QUESTION_VTABLE || cls == PROGRESS_VTABLE || cls == MESSAGE_VTABLE
+                || cls == SN_VIEW_VT)           /* v0.54: the stock NAME screen */
                 return 1;
         }
         node = *(volatile u32 *)node;

@@ -187,6 +187,11 @@ void wr_screen(void *screen, void *canvas)
     extern void sl_screen(int phase, int covered);      /* parameter slides (csrc/slides) */
     sl_screen(0, 0);
     SCREEN_DRAW(screen, canvas);
+    extern int sn_up(void);
+    if (sn_up()) {                              /* v0.54: the stock NAME screen: nothing of ours over it */
+        sl_screen(1, 1);
+        return;
+    }
     sl_screen(1, rec_visible() || slc_visible() || smp_fb_visible() || smp_list_visible());
     if (rec_visible())
         rec_screen_draw(canvas);

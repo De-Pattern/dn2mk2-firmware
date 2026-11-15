@@ -45,6 +45,10 @@ failure:
    headers first; stock areas and gaps byte-identical; everything reads erased; no write
    after the first TRIM; a bad card and a TRIM error fail at their sector; a power-on after
    cuts at seven points boots with an empty pool, and after the whole erase as a fresh install.
+6d2. **stock NAME screen** (v0.54, `emu_waverider_menu.py`, docs/name-screen.md): after TRIM's YES the
+   DN2's own NameView is up, opened once and drawn; its NO goes on to ASSIGN without a name. The negative
+   control clears the main view pointer: our own naming screen stands in (the fallback). The recorder
+   flow (6d) spells a name with the stock screen's own keys and its YES names the recording.
 6s. **DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
    that is not the PTN view's stays stock's; the setting persists in its sector.
@@ -199,6 +203,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("unused", "SELECT UNUSED (ColdFire)"),
        ("hooks", "overlays let go (ColdFire)"),
        ("recflow", "recorder flow (ColdFire)"),
+       ("stockname", "stock NAME screen: NO, and its fallback (ColdFire)"),
        ("slice", "SLICE menus and SLICES keys (ColdFire)"),
        ("samplist", "sample list, browser, playhead (ColdFire)"),
        ("colsw", "MACHINE SEL columns, SYN held (ColdFire)"),
@@ -852,7 +857,7 @@ def main() -> int:
         if "rec_phase" in lay and "rec_pv_on" in lay:
             g = {k: hex(lay.get(k, 0)) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n", "trim_s",
                                                   "trim_e", "nm_text", "rec_pv_on", "smp_func_held", "smp_cmds",
-                                                  "smp_saved", "trim_head_x")}
+                                                  "smp_saved", "trim_head_x", "sn_opens", "sn_results")}
             kit = 0x4210C08C                    # the snapshot's live kit ([0x800052a0])
             snd = hex(kit + 52 + 1163 * 2)      # track 3's sound
             steps = (f"wait:3,mem:0x800052a0:4,mem:{snd}:256,poke:{g['trim_slot']}:00000004,"
@@ -866,14 +871,11 @@ def main() -> int:
                      f"mem:{g['trim_head_x']}:4,png:p0,addl:0x4058e8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p1,"
                      f"addl:0x4058e8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p2,"
                      f"release:10,wait:3,release:17,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_func_held']}:4,"
-                     f"mem:{g['smp_cmds']}:4,mem:{g['trim_head_x']}:4,png:pr,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,spin:0:3,wait:3,right,"
-                     f"wait:3,spin:0:2,wait:3,mem:{g['nm_text']}:8,press:17,wait:2,yes,wait:3,release:17,wait:3,"
-                     f"mem:{g['nm_text']}:8,press:17,wait:2,no,wait:3,release:17,wait:3,mem:{g['nm_text']}:8,"
-                     # v0.33: FUNC + NO steps the cursor back too (owner: held, it clears letter
-                     # after letter; the repeat runs on the unit's 1.5 kHz clock, which the
-                     # emulator barely moves): "CB", cursor on B -> "CB", cursor on C -> "B"
-                     f"press:17,wait:2,press:12,wait:10,release:12,wait:3,release:17,wait:3,mem:{g['nm_text']}:8,"
-                     f"png:n1,yes,wait:10,mem:{g['rec_phase']}:4,png:a1,tap:27,"
+                     f"mem:{g['smp_cmds']}:4,mem:{g['trim_head_x']}:4,png:pr,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,"
+                     # v0.54: FILE NAME is the DN2's own NAME screen (NameView, docs/name-screen.md),
+                     # spelt with its own keys: UP gives A, RIGHT, UP twice gives B
+                     f"mem:{g['sn_opens']}:4,up,wait:5,right,wait:5,up,wait:5,up,wait:5,"
+                     f"png:n1,yes,wait:10,mem:{g['rec_phase']}:4,mem:{g['sn_results']}:4,mem:{g['nm_text']}:8,png:a1,tap:27,"
                      f"wait:20,mem:{g['rec_phase']}:4,mem:{snd}:256,png:r1,mem:{lay['trim_zoom']:#x}:4")
             js = work / "recflow.json"
             flow_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
@@ -899,13 +901,14 @@ def main() -> int:
                     cmds = [int(m[nth(cm, k)], 16) for k in range(3)]
                     before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[nth(snd, 1)])
                     s0, e0 = int(m[g["trim_s"]], 16), int(m[g["trim_e"]], 16)
-                    names = [bytes.fromhex(m[nth(g["nm_text"], k)])[:4] for k in range(3)]
+                    name = bytes.fromhex(m[g["nm_text"]])[:4]
+                    nshot = {k: pathlib.Path(r["screens"][k]).read_bytes() for k in ("pr", "n0", "n1")}
                     hx = g["trim_head_x"]
                     heads = [struct.unpack(">i", bytes.fromhex(m[nth(hx, k)]))[0] for k in range(4)] \
                         if "trim_head_x" in lay else None
                     shot = {k: pathlib.Path(r["screens"][k]).read_bytes() for k in ("p0", "p1", "p2", "pr")}
                     facts = {"kit": m["0x800052a0"] == f"{kit:08x}",
-                             "phases": phases == [4, 1, 2, 3, 0],
+                             "phases (v0.54: FILE NAME is the stock NAME screen, phase 5)": phases == [4, 1, 5, 3, 0],
                              "trim": 0 < s0 < e0 < 0x17700,
                              "preview": int(m[pv], 16) == 1 and int(m[nth(pv, 1)], 16) == 0
                              and cmds[1] == cmds[0] + 1 and cmds[2] == cmds[1] + 1
@@ -914,21 +917,75 @@ def main() -> int:
                              "time, the screen changing) and is gone once let go":
                              heads is not None and 4 <= heads[0] < heads[1] < heads[2] <= 123 and heads[3] == -1
                              and shot["p0"] != shot["p1"] != shot["p2"] != shot["pr"],
-                             "name": names == [b"CB\0\0", b"C B\0", b"CB\0\0"],
-                             "v0.33: FUNC + NO steps back: a second one takes the letter before (and, held, the rest)":
-                             bytes.fromhex(m[nth(g["nm_text"], 3)])[:2] in (b"B\0", b"\0\0"),
+                             "v0.54: YES on TRIM opens the stock NAME screen (once), drawn, and its keys spell "
+                             "the name (UP, RIGHT, UP UP: AB); its YES names the recording and goes on to ASSIGN":
+                             int(m[g["sn_opens"]], 16) == 1 and int(m[g["sn_results"]], 16) == 1
+                             and name == b"AB\0\0" and nshot["n0"] != nshot["pr"] and nshot["n1"] != nshot["n0"],
                              "oneshot": before[0xDE] != 8 and after[0xDE] == 8,
                              "samp": after[0x6A] == 5,
                              "frames": r["screen_frames"] > 0,
                              "v0.33: F zooms TRIM (drawn)": int(m[f"{lay['trim_zoom']:#x}"], 16) >= 1
                              and pathlib.Path(r["screens"]["tz"]).read_bytes() != pathlib.Path(r["screens"]["t2"]).read_bytes()}
                     good = all(facts.values())
-                    why = str(facts) + f" phases {phases} cmds {cmds} names {names} heads {heads}"
+                    why = str(facts) + f" phases {phases} cmds {cmds} name {name} heads {heads}"
                 return good, ("SAVING on to TRIM; TRIM's ends move; FUNC + YES previews while held, its playhead "
                               f"moving (columns {heads[:3]}), gone at release; YES on to "
-                              "FILE NAME (knob, arrows, FUNC + YES inserts, FUNC + NO deletes), YES on to ASSIGN, "
+                              "FILE NAME, the stock NAME screen (spelt AB with its keys), YES on to ASSIGN, "
                               "a [TRIG] key makes track 3 ONESHOT on the slot" if good else why)
             later("recflow", "recorder flow (ColdFire)", "recorder flow (ColdFire)", [flow_cmd, sorted(EMU_ENV.items())], flow_body)
+
+        # 6d2. v0.54: the stock NAME screen (docs/name-screen.md). After TRIM's YES the DN2's
+        # own NameView is up (phase 5, opened once, drawn); its NO closes it without a name:
+        # the recording keeps the one it has and goes on to ASSIGN (phase 3, no result). The
+        # negative control: the same keys with the main screen's view pointer (SN_MAIN_VIEW)
+        # cleared, which leaves our own naming screen in use (phase 2, nothing opened): the
+        # fallback, and proof the facts above see the stock screen and not ours.
+        if "sn_opens" in lay and "rec_phase" in lay:
+            g2 = {k: hex(lay[k]) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n", "trim_s",
+                                           "trim_e", "smp_saved", "sn_opens", "sn_results")}
+            pre = (f"wait:3,poke:{g2['trim_slot']}:00000004,poke:{g2['trim_n']}:00017700,"
+                   f"poke:{g2['trim_s']}:00000000,poke:{g2['trim_e']}:00017700,poke:{g2['smp_saved']}:00000000,"
+                   f"poke:{g2['rec_overlay']}:00000001,poke:{g2['rec_phase']}:00000004,wait:10,"
+                   f"poke:{g2['smp_saved']}:00000001,wait:10,png:t0,")
+            tail = (f"yes,wait:10,mem:{g2['rec_phase']}:4,mem:{g2['sn_opens']}:4,png:s0,no,wait:10,"
+                    f"mem:{g2['rec_phase']}:4,mem:{g2['sn_results']}:4,png:s1")
+            sn_runs = {}
+            for kind, extra in (("stock", ""), ("control", "poke:0x44647980:00000000,")):
+                js_ = work / f"stockname_{kind}.json"
+                sn_runs[kind] = (js_, [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                                       "--build", bdir, "--snapshot", snap, "--steps", pre + extra + tail,
+                                       "--png-dir", work / f"stockname_{kind}", "--json", js_])
+
+            def sn_body(tdir):
+                seen = {}
+                for kind, (js_, cmd) in sn_runs.items():
+                    rc, out = run(f"stock name {kind}", cmd, logs, env=EMU_ENV, trace=tdir)
+                    if rc != 0 or not js_.exists():
+                        return False, f"{kind}: " + out[-600:]
+                    r = json.loads(js_.read_text())
+                    m = r["memory"]
+                    ph = g2["rec_phase"]
+                    seen[kind] = {"phase_up": int(m[ph], 16), "opens": int(m[g2["sn_opens"]], 16),
+                                  "phase_after": int(m[f"{ph}@2"], 16), "results": int(m[g2["sn_results"]], 16),
+                                  "drawn": pathlib.Path(r["screens"]["s0"]).read_bytes()
+                                  != pathlib.Path(r["screens"]["t0"]).read_bytes(),
+                                  "faults": [f for f in r.get("fault_reports", [])]}
+                st, ct = seen["stock"], seen["control"]
+                facts = {"YES on TRIM: the stock NAME screen up (phase 5), opened once, drawn":
+                         st["phase_up"] == 5 and st["opens"] == 1 and st["drawn"],
+                         "its NO: closed without a name, on to ASSIGN (phase 3), no result":
+                         st["phase_after"] == 3 and st["results"] == 0,
+                         "no fault report": not st["faults"] and not ct["faults"],
+                         "negative control (no main screen view): our own naming screen (phase 2), "
+                         "nothing opened; its NO on to ASSIGN too":
+                         ct["phase_up"] == 2 and ct["opens"] == 0 and ct["phase_after"] == 3}
+                good = all(facts.values())
+                return good, ("the stock NAME screen opens on TRIM's YES and its NO leaves the name, "
+                              "on to ASSIGN; with no main view our own screen stands in (control)"
+                              if good else f"{facts} {json.dumps({k: {x: y for x, y in v.items() if x != 'faults'} for k, v in seen.items()})}")
+            later("stockname", "stock NAME screen: NO, and its fallback (ColdFire)",
+                  "stock NAME screen: NO, and its fallback (ColdFire)",
+                  [c for _j, c in sn_runs.values()] + [sorted(EMU_ENV.items())], sn_body)
 
         # 6e. v0.23, SLICE: its menus drawn over the page (the menu, the grid dialog, the
         # editor with a slice table), the editor's keys and knobs moving the picked slice;
