@@ -74,9 +74,19 @@ STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_l
 # touches L2 above the image's end) and well below the startup's non-cacheable window
 # 0x200fa000..0x200fdfff; the I-cache (enabled by the startup, docs/waverider-dsp-silence.md)
 # serves it. Its voices' state and scratch stay in L1, its tables in DDR.
-PERC_L2_LOAD = 0x200C0000
-PERC_L2_SPAN = 0x23000                       # 140 KB (v0.24: with P-I, about 132 KB; 80 KB v0.17..v0.23)
-PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbe0000
+# A layout proposal (2026-11): PERC starts at 0x200AC000 instead of 0x200C0000, one contiguous span up to
+# the sample machines' code (0x200E3000): 220 KB instead of 140 KB. It stays above 0x200AB800 (kept free
+# for the sampler-tables proposal's L2 room, 0x200AA000..0x200AB800) and below 0x200EA000 (nothing of
+# ours goes from there up to the non-cacheable window). Only PERC's code is written, not its whole span
+# (PERC_PAD): the DSP program must stay within the 1 MiB upload buffer (dnfw.safety).
+PERC_L2_LOAD = 0x200AC000
+PERC_L2_SPAN = 0x37000                       # 220 KB (0x23000, 140 KB, at 0x200C0000 until this proposal)
+PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbd6000 (0xbe0000 before)
+PERC_PAD = 120                               # 20 NOPs (zeros) after PERC's code: the branch predictor needs 12 valid
+                                             # instructions after its last jump (hwrules BRANCH-12), and 64 bytes
+                                             # clear the I-cache's prefetch
+L2_KEPT_FREE_END = 0x200AB800                # the end of the room kept free below PERC
+L2_OURS_END = 0x200EA000                     # nothing of ours from here up to L2_NOCACHE
 L2_IMAGE_END = 0x2008823C                    # the stock stream's last L2 byte
 L2_NOCACHE = 0x200FA000                      # the startup's non-cacheable L2 window starts here
 PERC_SCRATCH_DM = 0x2DDE80                   # 55 words (dnfw.perc.machines.SC_WORDS)
@@ -111,6 +121,11 @@ SMP_L2_SPAN = 0x6000                         # v0.28: 24 KB (the re-latch took t
 SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbf1800 (v0.24; 0xbea000 v0.17..v0.23)
 PVMIX_L2_LOAD = SMP_L2_LOAD + SMP_L2_SPAN - 0x400           # v0.25: pvmix.asm (wr_pvmix)
 PVMIX_SW = 0xB80000 + (PVMIX_L2_LOAD - 0x20000000) // 2
+# the L2 layout's bounds, checked on every build (a raise, not an assert: python -O keeps it)
+if not (MAIN_TAP_L2 + MAIN_TAP_BYTES <= L2_KEPT_FREE_END <= PERC_L2_LOAD
+        and SMP_L2_LOAD + SMP_L2_SPAN <= L2_OURS_END <= L2_NOCACHE):
+    raise ImportError(f"L2 layout: PERC {PERC_L2_LOAD:#x} must start at or above {L2_KEPT_FREE_END:#x}, and the "
+                      f"sample machines' span end {SMP_L2_LOAD + SMP_L2_SPAN:#x} at or below {L2_OURS_END:#x}")
 SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 128  # 16 voices x 128 bytes (v0.15)
 SMP_SCRATCH_DM = 0x2DF700                    # after 16 x 128 bytes of state (v0.15)
 SMP_STAGE_DM = SMP_SCRATCH_DM + 0x100        # the recorder's block (dnfw.sampler.machines.REC_STAGE)
@@ -387,7 +402,7 @@ def _smp_pool() -> bytes:
 
 def l2_spans() -> list[tuple[str, int, bytes]]:
     """(what, load address, payload) of what goes in L2: PERC's code, then the sample
-    machines', each zero-padded to its span (so at least 64 bytes of NOPs after it)."""
+    machines': the sample machines' zero-padded to their span, PERC's code followed by PERC_PAD bytes of NOPs."""
     obj = objects()
     out = []
     for what, name, at, span in (("perc.asm (wr_perc), in L2", "perc", PERC_L2_LOAD, PERC_L2_SPAN),
@@ -401,9 +416,9 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
                                "64 bytes of its room")
             out.append((what, at, code + bytes(room - len(code)) + pv + bytes(PVMIX_ROOM - len(pv))))
             continue
-        if span - len(code) < 64:
-            raise DspError(f"{name}.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
-        out.append((what, at, code + bytes(span - len(code))))
+        if span - len(code) < PERC_PAD:
+            raise DspError(f"{name}.asm ({len(code)} bytes) leaves fewer than {PERC_PAD} bytes of its L2 span")
+        out.append((what, at, code + bytes(PERC_PAD)))    # PERC: its code, not its whole span
     # v0.32: the voices' working state (zeros)
     out.append(("Machinedrum voices: 16 slots x 1 KB, in L2 (zeros; v0.32)", MD_STATE_L2,
                 bytes(16 * _md_core().MD_STRIDE)))

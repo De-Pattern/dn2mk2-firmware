@@ -517,7 +517,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,tdm,stock,stockout,tableready,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,l2tail,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,tdm,stock,stockout,tableready,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -606,6 +606,11 @@ def main(argv=None):
             print("\nstep 3g: voice state and scratch full of garbage (v0.33)")
             results["3g_garbage"] = step_garbage(warm(), sound, machines)
             show(results["3g_garbage"])
+            gc.collect()
+        if "l2tail" in steps:
+            print("\nstep 3t: PERC's unwritten L2 span full of garbage (the L2 layout proposal)")
+            results["3t_l2tail"] = step_l2tail(warm(), sound, machines)
+            show(results["3t_l2tail"])
             gc.collect()
         if "wipe" in steps:
             print("\nstep 3w: the output guard's wipe, a poisoned P-I voice (v0.34)")
@@ -1769,6 +1774,67 @@ def step_garbage(init, sound, machines) -> dict:
     checks = {"every Machinedrum and Monomachine machine, started on NaN or random voice state and "
               "scratch: every block returns, its track finite, PERC bit-exact": not bad}
     return {"ok": not bad, "checks": checks, "numbers": {"failing": bad, "runs": res}}
+
+
+def step_l2tail(init, sound, machines) -> dict:
+    """The L2 layout proposal: the DSP program writes only PERC's code and its NOP tail, not its whole
+    span, and L2 survives a DSP restart (it is not zeroed: a previous program's words stay). So the
+    rest of the span, up to the sample machines' code, must never be read. It is filled with NaN or
+    random words before our first instruction (the block counter, on block 0), on the post-init
+    snapshot the image is loaded on (a cold boot of the DSP program); every Machinedrum and
+    Monomachine machine must then return every block with every track's output bit-identical, word
+    for word, to the same run without the fill."""
+    import random as _r
+    from dnfw.mnm import machines as MMx
+    lo = dsp.PERC_L2_LOAD + len(dsp.objects()["perc"]) + dsp.PERC_PAD
+    hi = dsp.SMP_L2_LOAD
+    fills = {"nan": lambda k: 0xFFFFFFFF, "random": (lambda g: lambda k: g.getrandbits(32))(_r.Random(35))}
+
+    def filled(fill):
+        done = {"n": 0}
+
+        def poke(r):
+            if done["n"]:
+                return
+            done["n"] = 1
+            for a in range(lo, hi, 4):
+                m2.poke(r.state, a, fill(a))
+        return {dsp.COUNT_SW: poke}
+
+    cases = {}
+    for g in range((PM.N + 7) // 8):             # the Machinedrum machines, eight tracks a run
+        n_g = min(8, PM.N - 8 * g)
+
+        def fb(b, g=g, n_g=n_g):
+            f = base_frame(sound, machines, overrides=perc_words(8 * g), trigger=b == 1,
+                           others={t: 5 for t in range(1, n_g)}, trigger_others=True)
+            for t in range(1, n_g):
+                for slot, w in perc_words(8 * g + t).items():
+                    f.param(t, slot, w)
+            return f.to_bytes()
+        cases[f"md{g}"] = fb
+    for k, name in enumerate(MMx.NAMES):        # each Monomachine machine, beside a PERC voice
+        def fb(b, k=k):
+            f = base_frame(sound, machines, t0=MMx.TYPES[k], trigger=b == 1, others={1: 5}, trigger_others=True)
+            for slot, w in mnm_words(k).items():
+                f.param(0, slot, w)
+            for slot, w in perc_words(0).items():
+                f.param(1, slot, w)
+            return f.to_bytes()
+        cases[name] = fb
+    res, bad = {}, []
+    for case, fb in cases.items():
+        ref = run_blocks(init, fb, 6)
+        for fname, fill in fills.items():
+            rr = run_blocks(init, fb, 6, extra_hooks=filled(fill))
+            same = ref["ok"] and rr["ok"] and rr["buffer_bits"] == ref["buffer_bits"]
+            res[f"{fname}_{case}"] = {"ok": same, "halt": rr.get("halt")}
+            if not same:
+                bad.append(f"{fname}_{case}")
+        print(f"    l2tail {case}: {'ok' if not any(b.endswith(case) for b in bad) else 'DIFFERS'}", flush=True)
+    checks = {f"PERC's unwritten span {lo:#x}..{hi:#x} ({hi - lo:,} B) full of NaN or random words: every "
+              "Machinedrum and Monomachine machine returns every block, its output bit-identical": not bad}
+    return {"ok": not bad, "checks": checks, "numbers": {"from": hex(lo), "to": hex(hi), "failing": bad, "runs": res}}
 
 
 def step_wipe(init, sound, machines) -> dict:

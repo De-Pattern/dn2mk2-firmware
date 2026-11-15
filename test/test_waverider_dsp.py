@@ -203,7 +203,7 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
     spans = dsp.l2_spans()
     data = spans[2:]                             # v0.32: the voices' state, zeros, below the code
     spans = spans[:2]
-    assert [(at, len(pl)) for _, at, pl in spans] == [(dsp.PERC_L2_LOAD, dsp.PERC_L2_SPAN),
+    assert [(at, len(pl)) for _, at, pl in spans] == [(dsp.PERC_L2_LOAD, len(dsp.objects()["perc"]) + dsp.PERC_PAD),
                                                       (dsp.SMP_L2_LOAD, dsp.SMP_L2_SPAN)]
     for _w, at, payload in data:
         assert dsp.L2_IMAGE_END + 0x10000 <= at and at + len(payload) <= dsp.PERC_L2_LOAD
@@ -225,7 +225,7 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
     for b in bootstream.walk(stock7).blocks:
         if b.count and 0x20000000 <= b.target < 0x20100000:
             assert b.target + b.count <= dsp.L2_IMAGE_END
-    assert dsp.PERC_SW == 0xBE0000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
+    assert dsp.PERC_SW == 0xBD6000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
     assert dsp.SMP_SW == 0xBF1800 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
 
 
@@ -316,11 +316,20 @@ def test_the_idle_stub_is_placed_and_returns_where_its_source_says():
                       "DM(0x2c49e0) = R9;", "DM(0x2c59e0) = R9;"}
 
 
+def test_the_l2_layout_keeps_its_bounds():
+    """the layout proposal: PERC from 0x200AC000 to the sample machines' code, above the room kept free
+    (to 0x200AB800) and with nothing of ours from 0x200EA000 up"""
+    assert dsp.PERC_L2_LOAD == 0x200AC000 and dsp.SMP_L2_LOAD == 0x200E3000
+    assert dsp.MAIN_TAP_L2 + dsp.MAIN_TAP_BYTES <= dsp.L2_KEPT_FREE_END == 0x200AB800 <= dsp.PERC_L2_LOAD
+    assert dsp.SMP_L2_LOAD + dsp.SMP_L2_SPAN <= dsp.L2_OURS_END == 0x200EA000 <= dsp.L2_NOCACHE
+    assert len(dsp.objects()["perc"]) + dsp.PERC_PAD <= dsp.PERC_L2_SPAN
+
+
 def test_the_block_counter_goes_on_to_perc():
     spec = json.loads((SHARC / "block_count.json").read_text(encoding="utf-8"))
     assert int(spec["load_sw"], 16) == dsp.COUNT_SW == 0x16F600
     be = bytes.fromhex(spec["object_parcels_be"])
-    assert be[spec["instruction_offsets"][-1]:].hex() == "063e00be0000"   # JUMP 0xbe0000, PERC in L2 (v0.11)
+    assert be[spec["instruction_offsets"][-1]:].hex() == f"063e00{dsp.PERC_SW:06x}"   # JUMP PERC_SW, PERC in L2
     src = [ln.split("//", 1)[0].strip() for ln in (SHARC / "block_count.asm").read_text().splitlines()]
     stores = {c for c in src if c.startswith("DM(")}
     assert stores == {"DM(0x2de11c) = R8;", "DM(0x2de120) = R9;", "DM(0x2de118) = R8;",
