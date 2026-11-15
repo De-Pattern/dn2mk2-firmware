@@ -2343,7 +2343,13 @@ def main() -> int:
         # sample / slice, with the track's value on two others; unlocked trigs the track's (v0.39:
         # the lock was a scaled offset from the track's value)
         if "sl_smooth" in lay:
-            sl_cmds = [[a.venv, "-u", "scripts/emu_slides.py", "--build", bdir, "--snapshot", snap,
+            # 2026-11-14 (the 1.12 gate's blind spots): both runs from a snapshot that booted stock (ui1200M, no
+            # section beside it) when there is one, as the jump step: 1.12's per-build snapshot booted THIS build,
+            # and reverted to stock (--stock) its UI composed no frame (no TRIG page 2 to compare)
+            ssnap = snap.parent / "ui1200M.snap"
+            if not ssnap.exists() or pathlib.Path(f"{ssnap}.section_3_MAIN_OS.bin").exists():
+                ssnap = snap
+            sl_cmds = [[a.venv, "-u", "scripts/emu_slides.py", "--build", bdir, "--snapshot", ssnap,
                         "--json", work / f"slides-{k}.json",
                         *(["--stock"] if k == "stock" else ["--png-dir", work / "slides-png"])]
                        for k in ("build", "stock")]

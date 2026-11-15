@@ -58,6 +58,8 @@ def key(code):
     return ((code - 1) // 8, (code - 1) % 8)
 
 
+PASTE_REST = 60_000_000                 # instructions after a paste before its UNDO (see combo)
+
 class Paths:
     def __init__(self, machine, panel, lay, check, report):
         from unicorn import m68k_const as K
@@ -108,6 +110,8 @@ class Paths:
         return self.call(TRACK_CTX, self.call(APP))
 
     # ---- the panel ---------------------------------------------------------------------------
+    # 2026-11-14 (the 1.12 gate): a rest after a paste before its UNDO (paste again). Without it 1.12's page paste
+    # again pasted (its UNDO site never ran); with 60 M it is the UNDO (measured on a clean 1.12 build)
     def combo(self, mod, k):
         """MOD held, K pressed and released (a key of MOD's group keeps MOD in its mask)"""
         p, m = self.panel, self.m
@@ -116,7 +120,7 @@ class Paths:
         held = (1 << mb) if mc == kc else 0
         p.hold((mc, mb), 5_000_000)
         m.pc = p.panelin.press(m.m, p.profile, kc, kb, held=held)
-        p.settle(2_000_000)
+        p.settle(10_000_000)                    # (2026-11-14: 2 M is under one UI pass, ~4.5 M; a second paste missed its UNDO)
         m.pc = p.panelin.release(m.m, p.profile, kc, kb, held=held)
         p.settle(10_000_000)
         p.let_go((mc, mb))
@@ -248,6 +252,7 @@ class Paths:
         hp, hu, n0 = self.hits["track paste"], self.hits["track undo"], pasted()
         self.combo(FUNC, STOP)                                  # paste
         got_paste, n1 = self.now(), pasted()
+        self.panel.settle(PASTE_REST)
         self.combo(FUNC, STOP)                                  # paste again: UNDO
         got_undo, n2 = self.now(), pasted()
         self.report["track_undo"] = {"copied": self.describe(copied), "changed": self.describe(changed),
@@ -287,6 +292,7 @@ class Paths:
         hp, hu, n0 = self.hits["page paste"], self.hits["page undo"], pasted()
         self.combo(PAGE, STOP)                                  # paste
         got_paste, n1 = self.now(), pasted()
+        self.panel.settle(PASTE_REST)
         self.combo(PAGE, STOP)                                  # paste again: UNDO
         got_undo, n2 = self.now(), pasted()
         self.report["page"] = {"copied": self.describe(copied), "changed": self.describe(changed),

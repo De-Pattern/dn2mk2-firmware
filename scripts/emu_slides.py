@@ -46,6 +46,7 @@ UNDO = 0x400DB0A8                       # (voice, mirror, sound): the locked slo
 BITMAP_CLEAR = 0x400DB1B6               # (voice)
 BUILD, APPLY = 0x400D874C, 0x400DB1F6
 LOAD, SAVE, CLEAR = 0x400DE682, 0x400DE87C, 0x4003D14E
+HELD_PTR = 0x446488C8                   # stock's held-step object (csrc/slides/slide.c HELD_OBJ): +616 a step held
 REC, RECS, INDEX, COUNTS, TABLE_BYTES = 258, 80, 20640, 22256, 22256 + 2048
 LIST_BYTES = 20 + 202 * 8
 FREQ, FDBK = 67, 31                     # FILTER FREQ (shared), FM TONE's FEEDBACK (a machine param)
@@ -253,6 +254,16 @@ def main() -> int:
                 uc.mem_map(page, 0x100000, UC_PROT_ALL)
             except UcError:
                 pass                                          # (already mapped)
+        # 2026-11-14 (the 1.12 gate): and every run-time area the build declares (dnfw.mods.waverider.ram()), for
+        # the same reason: from a snapshot that booted stock, a page the build reads before it writes was not there
+        # (a read-unmapped fault in a build's run-time area). Zeros, as at power-on
+        from dnfw.mods import waverider as Wr                 # noqa: PLC0415
+        for e in Wr.ram():
+            for page in range(e.start & ~0xFFFFF, e.start + e.length, 0x100000):
+                try:
+                    uc.mem_map(page, 0x100000, UC_PROT_ALL)
+                except UcError:
+                    pass                                      # (already mapped)
         machine.flush()
         lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
         print(f"  installed {len(runs)} run(s) from {a.build}")
@@ -654,6 +665,10 @@ def main() -> int:
 
         def own_case(mtype, type_word, locks_from, locks_to, glide, land, tag):
             machine.write(snd + 222, bytes([mtype]))
+            # (2026-11-14: the snapshot sound's LFOs off, as for the SAMP lock checks: a snapshot sound
+            # with one on pitch drifts, so a slot that lands drifted 53 and "steady within 4" failed on 1.11 and 1.12)
+            for d_ in LFO_DESTS:
+                put16(snd + 0x14 + 2 * d_, 0)
             if type_word is not None:
                 put16(snd + 0x14 + 2 * TYPE_S, type_word)
             call(SYNC, snd, V)
@@ -724,6 +739,19 @@ def main() -> int:
 
         def key(code):
             return ((code - 1) // 8, (code - 1) % 8)
+
+        def hold_step(code):
+            """a [TRIG] held as a person holds it, until stock takes the step as held (its flag at HELD_PTR's +616,
+            stock's long press: 26 M instructions after the press here, measured on 1.11 and 1.12), then on.
+            (2026-11-14: 5 + 10 M was before it in the emulator: the first turn went to stock's page, not
+            to the held step's lock.) A step stock never takes as held (no trig) waits 100 M"""
+            panel.hold(key(code), 5_000_000)
+            for _ in range(100):
+                o = machine.long(HELD_PTR)
+                if 0x40000000 <= o < 0x48000000 and machine.read(o + 616, 1)[0]:
+                    return True
+                panel.settle(1_000_000)
+            return False
 
         def turn(enc, delta):
             machine.pc = panel.panelin.encoder(machine.m, panel.profile, enc, delta)
@@ -855,7 +883,7 @@ def main() -> int:
         panel.settle(10_000_000)
         P = machine.long(0x42C5B9A0)                            # the pattern: step flags u16 at +2 step (track 1)
         flags0 = machine.word(P)
-        panel.hold(key(25), 5_000_000)
+        hold_step(25)
         panel.settle(10_000_000)
         turn(4, 1)                                              # E: SLD on
         # v0.41 (the owner): SLEN four detents a choice, as SRC/CHAN and the choice controls:
@@ -887,7 +915,7 @@ def main() -> int:
         check("trig held, E/F turned, released: the trig stays on, its step unchanged",
               tbl == P + 97872 and flags1 == flags0 and flags1 & 1, f"step 1 flags {flags0:#06x} -> {flags1:#06x}")
         flags_e0 = machine.word(P + 2)
-        panel.hold(key(26), 5_000_000)                          # step 2: no trig, nothing to set
+        hold_step(26)                          # step 2: no trig, nothing to set
         panel.settle(10_000_000)
         turn(4, 1)
         panel.screen("trig2_held_other")
@@ -910,7 +938,7 @@ def main() -> int:
         check("a trig removed and placed again starts without SLD/SLEN", got3 == [0xFFFF, 0xFFFF], f"{got3}")
         panel.tap(key(1))                                       # page 1: E is LFO.T's again
         panel.settle(20_000_000)
-        panel.hold(key(25), 5_000_000)
+        hold_step(25)
         before = lock(tbl, 0, 0, 0)
         turn(4, 1)
         panel.let_go(key(25))
@@ -997,12 +1025,12 @@ def main() -> int:
 
         # trig copy and paste: step 6 held, RECORD (copy); step 9 held, STOP (paste): step 9 has
         # step 6's SLD/SLEN, as its stock lock
-        panel.hold(key(30), 5_000_000)
+        hold_step(30)
         panel.tap(key(19))
         panel.settle(10_000_000)
         panel.let_go(key(30))
         panel.settle(10_000_000)
-        panel.hold(key(33), 5_000_000)
+        hold_step(33)
         panel.tap(key(21))
         panel.settle(10_000_000)
         panel.let_go(key(33))
