@@ -82,7 +82,7 @@ What moved to get there:
 - **lfowaves:** its blob is a `CODE` chunk at `0x46780000`, where it was
   assembled to run. Its 46-byte copy stub at `0x402cf52c` is gone, and that cave
   is free again.
-- **bootscreen:** its stamp is a `CODE` chunk at `0x46708000` (not `0x46700000`, which is lfo4's LFO state: the first flash of the three together raised V04 there). The 896-byte cave
+- **bootscreen:** its stamp is a `CODE` chunk at `0x46708000` (on 1.12 since 2026-11-16 `0x4670E000`: 1.12's +Drive bounce buffer covers `0x46708000`, `docs/os112-port.md`; not `0x46700000`, which is lfo4's LFO state: the first flash of the three together raised V04 there). The 896-byte cave
   at `0x402dfa1c`, which lfo4 also uses, is no longer bootscreen's. The stamp's
   bytes are unchanged.
 

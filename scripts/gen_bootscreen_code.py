@@ -63,6 +63,14 @@ was overwritten on the instrument (V04 at `0x46700000`, 2026-09-30). Until
 own; LFO4 uses that cave too, and the start-up hook was the boot screen's alone,
 so the two could not be combined. The stamp itself is unchanged: it was always
 position-independent but for the absolute addresses below.
+
+Not at `0x46708000` on 1.12 either (it was there from 2026-09-30): 1.12 moved stock's uncached
+buffers +0x8000, and its +Drive bounce buffer (64 KiB from `0x4e6f9300`, the `0x4e` alias of
+`0x466f9300`) now covers it. The SD reads at power-on overwrite the stamp, and the intro's next
+call into it is an F-line exception (on the instrument, 2026-11-16: EXCEPTION, vector 0x0B,
+PC `0x46708000`). It is at `0x4670E000`: the top 4 KB of the pages assembly's room
+(`0x4670C000..0x4670F000`, `dnfw.waverider.coldfire.PAGES_END`), RAM the build has used on
+1.12 since v0.42, above stock's last uncached buffer (`test/test_ram_112.py`).
 """
 
 from __future__ import annotations
@@ -85,8 +93,8 @@ RESUME_VA = 0x400D39F2
 SOURCE_DATA_PTR = 0x42C4667C + 16            # the intro's source Bitmap data pointer
 AREA_VA = 0x4030C980                         # where appended data starts
 RUNTIME_VA = 0x46710000                      # where the boot hook copies it
-LOAD_VA = 0x46708000                         # the stamp's CODE chunk, above lfo4's LFO state
-CODE_CAP = 0x8000                            # up to the data window at RUNTIME_VA
+LOAD_VA = 0x4670E000                         # the stamp's CODE chunk: the top of the pages room (1.12, below)
+CODE_CAP = 0x1000                            # up to the pages room's end, 0x4670F000
 MAGIC = b"DNFW"
 BOOT = b"BOOT"
 ANIM = b"ANIM"
@@ -331,7 +339,7 @@ def generate() -> dict:
     code = blob[:-4 * len(LABELS)]
     addrs = dict(zip(LABELS, struct.unpack(f">{len(LABELS)}I", blob[-4 * len(LABELS):])))
     if len(code) > CODE_CAP:
-        raise SystemExit(f"code {len(code)} B does not fit below the data window")
+        raise SystemExit(f"code {len(code)} B does not fit in {CODE_CAP:#x} B at {LOAD_VA:#010x}")
     return {
         "os": "Digitone II 1.12",
         "load": LOAD_VA, "code": code.hex(), "stamp": addrs["stamp"],

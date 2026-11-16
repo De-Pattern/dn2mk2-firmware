@@ -64,7 +64,8 @@ if set(MACHINE_NAMES) != set(NEW_TYPES):
 # what was PING's (0x4670F000..; v0.45: PING removed) and below the platform runtime; the caves are
 # left as stock had them.
 MCHUNK = 0x4670F800
-PAGES_END = 0x4670F000                  # the pages assembly's room ends here (PING's chunk until v0.44)
+PAGES_END = 0x4670E000                  # the pages assembly's room ends here; 0x4670E000..0x4670F000 is the boot-screen
+                                        # stamp's (scripts/gen_bootscreen_code.py LOAD_VA, 1.12)
 MCHUNK_END = 0x46710000
 
 # -- 1. the MACHINE SEL list -------------------------------------------------------------

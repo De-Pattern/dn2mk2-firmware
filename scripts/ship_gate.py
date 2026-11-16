@@ -171,6 +171,7 @@ MNM_EXC_TREES = {"src/dnfw/mnm": "c27c4179af8142a94794fcafac097b5b99edd267",
 MNM_EXC_REST = 8
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
+         "test/test_ram_112.py",                            # 1.12: every RAM chunk above stock's uncached buffers
          "test/test_waverider_pages.py",                    # v0.45: test_ping_coldfire/_live dropped with PING
          "test/test_shft_live.py", "test/test_mnm.py",
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",

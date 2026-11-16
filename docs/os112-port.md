@@ -51,9 +51,14 @@ This agrees with every 1.11↔1.12 pair in `docs/overtone-map.md` §2 (e.g. `0x4
   operand: every absolute-long BSS operand in aligned 1.11 code reappears +0x1000 in 1.12
   (0 exceptions). So the layout inside BSS is unchanged, only shifted.
 - **Fast SRAM `0x80000000..0x80010000`: unchanged** (no aligned operand into it differs).
-- **Our own RAM is still clear.** The lowest address the shipping build uses is
-  `0x46700000` (lfo4's state; then `0x46708000`, `0x4670c000`, `0x46710000` runtime, `0x46ac0000`,
-  `0x46af0000`, `0x46b00000` mirror). 1.12's BSS ends at `0x466b84d0`, 300 KB below.
+- **Above BSS is not all ours: stock's uncached buffers are there too.** 1.12's BSS ends at
+  `0x466b84d0`, but stock's uncached (`0x4e...`) buffers alias RAM above it, and 1.12 moved them
+  +0x8000 (below): the SSI TDM buffers, the eSDHC EXT_CSD, and the +Drive bounce buffer, 64 KiB
+  from `0x4e6f9300`, i.e. up to `0x46709300`. This bullet said "still clear" until 2026-11-16, when
+  the boot-screen stamp at `0x46708000` crashed a 1.12 unit at power-on (below). Our RAM on 1.12:
+  `0x4670c000` (pages), `0x4670e000` (the stamp), `0x4670f800` (machines), `0x46710000` runtime,
+  `0x46ac0000`, `0x46af0000`, `0x46b00000` mirror; `test/test_ram_112.py` keeps every chunk above
+  stock's last uncached buffer and apart from the others.
 
 ## 2. The mod's sites, classified
 
@@ -226,8 +231,15 @@ so `link.c` kept 1.11's TDM bases: every loader command and sample word went int
 1.12 SSI never sends, and the DSP never got a sample (since v0.20 there is no other link).
 The emulator passed because `emu_waverider_menu.py`'s fake DSP hard-coded the same 1.11 constants;
 it now reads the TX base from stock's `addi.l` operand at 0x4002608a and refuses a mismatch.
-The same move put the +Drive bounce buffer over the old boot-screen stamp (0x46708000), the 1.12
-boot crash. Any future port: scan the 0x4e alias too, and check no chunk overlaps a stock buffer.
+The same move put the +Drive bounce buffer over the boot-screen stamp (0x46708000), the 1.12
+boot crash: stock's read (`0x4012c59a` on 1.11) goes through the bounce buffer in 64 KiB pieces
+whenever its destination is unaligned, so the SD reads at power-on overwrite the stamp, and the
+intro's next call into it is an F-line exception (EXCEPTION, vector 0x0B, PC 0x46708000; on a unit,
+2026-11-08 and again 2026-11-16). The emulator's eSDHC never takes that path: from reset, the stamp
+is written only by the loader and is intact at the end (measured with a write watch on
+0x46708000..0x4670869c). The stamp is at 0x4670e000 since (`scripts/gen_bootscreen_code.py`), and
+`test/test_ram_112.py` holds every chunk above 0x4670b000. Any future port: scan the 0x4e alias
+too, and check no chunk overlaps a stock buffer.
 
 ## v0.54's NAME screen on 1.12
 
