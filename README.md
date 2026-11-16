@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.55** | 2026-11-15 | the 8 **FLEX buffers in every sample machine**: SAMP past 127 to B1..B8 (knob, list, p-locks), a track on Bn plays that buffer's take; MUTE SRC waits for the first take (no gap) | `builds/v0.55-FLEXPOOL/` | yes |
+| **v0.56** | 2026-11-15 | DDRW: **TIME** glides between waves (up to ~2 s), **BR1/BR2** heard across the whole knob; the patcher builds test builds | `builds/v0.56-DDRW/` | yes |
+| v0.55 | 2026-11-15 | the 8 **FLEX buffers in every sample machine**: SAMP past 127 to B1..B8 (knob, list, p-locks), a track on Bn plays that buffer's take; MUTE SRC waits for the first take (no gap) | `builds/v0.55-FLEXPOOL/` | yes |
 | v0.54 | 2026-11-15 | our names on the Digitone's **own NAME screen**: a recording's FILE NAME, the browser's RENAME and CREATE FOLDER open stock's naming screen (its keys, FUNC + ARROW edit grid, SETTINGS: RANDOM, copy/paste name) | `builds/v0.54-NAME/` | yes |
 | v0.53 | 2026-11-13 | FLEX polish: FLEX REC's page LEDs follow its page (NiKo); a switch to FLEX sets trig LEN to INF; BUF snaps buffer to buffer, a p-locked BUF shows its number, and BUF locks pick the buffer a trig plays (NiKo); PLAY two detents a mode; FUNC + turn moves R.LEN a bar | `builds/v0.53-PAGES/` | yes |
 | v0.52 | 2026-11-12 | FLEX MUTE SRC: REC SETUP's knob H takes the SRC track out of the mix (its level and FX sends) while FLEX still records it; the RECORDER's R.LEN counts steps at the pattern's scale (impbox) | `builds/v0.52-MUTE/` | yes |
@@ -93,6 +94,45 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.56 — DDRW (TIME glides, BR1/BR2 heard)
+
+`DN2mod_v0.56_DDRW_OS1.11.syx`
+sha256 `820bcb6db96746e1dfcc3ce0c07505b551aaaa33cc4471211907aa5db53c0f29`
+Gate: CLEARED TO FLASH, 2026-11-15 (56 gates; 50 reused, each a pass of this same build whose every input is byte-identical; the run spanned three jobs under the two-hour limit). Source: commit `6a5b274` (branch `ddrw`). Docs: `docs/ddrw-fix.md`.
+
+Everything in v0.55, plus:
+
+**DPRO-DDRW** (owner: "time in ddrw is not working ... BR1 and BR2 controls are 99% inaudible"):
+- Measured on the DSP's own model:
+  - BR followed the Monomachine's exponential curve, so it was inaudible until about 96;
+  - TIME's fade was under 2 ms at any setting.
+- **BR1 / BR2:** 0 is clean, as before. 1..127 now cover the audible part of the bit reduction
+  (9 bits down to 3), so the whole turn is heard.
+- **TIME:** a wave change (WAV1 / WAV2, a p-lock or a turn) now glides over a real time:
+  TIME 16 about 30 ms, 64 about 0.5 s, 127 about 2 s. 0 is still an instant change.
+- The Monomachine model and its 366 reference cases are untouched. The DN2's host maps the two
+  controls on the way in.
+
+**Patcher:** test builds' bundles (dnfw-vX.Y-tN.zip) build in the browser. The site's worker had
+read only X.Y names (NiKo, v0.54-t1: "the mod's version file cannot be read"; fixed on the site
+2026-11-15). web_bundle now refuses a bundle name the worker would not read back.
+
+**Gate:** unit tests (test_mnm: the BR mapping, the glide word, a TIME 16 fade of about 30 ms,
+the model's own instant change; test_patcher: the worker's names); SHARC runner mnm: DDRW with
+every knob at 127, DSP bit-exact to the model.
+
+**Tests**
+1. DDRW, WAV1 and WAV2 different. Turn BR1 from 0 up: grit from the first detents, harsh at
+   127. Same for BR2 (MIX toward WAV2 to hear it).
+2. TIME 64, then turn WAV1 (or p-lock two different WAV1 values on two trigs): the wave morphs
+   over about half a second. TIME 0: instant, as before.
+3. A DDRW patch saved before v0.56 with BR above 0 sounds grittier now: expected.
+4. The regression check (top of this file).
+
+**Known issues**
+- Everything listed for v0.55.
+- DDRW sounds with BR set in older projects change (see test 3).
 
 ## v0.55 — FLEXPOOL (the FLEX buffers in every sample machine)
 
