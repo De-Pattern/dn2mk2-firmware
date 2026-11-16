@@ -108,7 +108,7 @@ def main() -> int:
     p.add_argument("--layout", default=str(HERE.parent / "src/dnfw/mods/waverider_code.json"))
     p.add_argument("--stock", default=str(HERE.parent.parent / "Digitone_II_OS1.11.syx"))
     p.add_argument("--snapshot", default=str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
-    p.add_argument("--break", dest="brk", default=None, choices=("notrig", "nosamp", "wrongbuf", "noclear", "poolsamp"))
+    p.add_argument("--break", dest="brk", default=None, choices=("notrig", "nosamp", "wrongbuf", "noclear", "poolsamp", "nohold"))
     p.add_argument("--pool", action="store_true",
                    help="v0.55: after the take (links 0..4), a ONESHOT track on SAMP B1 plays it (links P1..P3)")
     p.add_argument("--json", default=None)
@@ -602,7 +602,62 @@ def pool(c, a, lay, rep, link, finish, held, tap, key, P, owner, kit, take, SM):
         link("P3. the render is the take at the note's pitch, from its start (within four blocks)",
              rate is not None and corr > 0.95 and lag is not None and lag <= 128,
              f"note {note}, TUNE {tune:+d}: rate {rate}; corr {corr:.4f}, head {lag}")
+    mute_links(c, a, lay, rep, link, held, tap, key, P, T2)
     return finish()
+
+
+def mute_links(c, a, lay, rep, link, held, tap, key, P, T2):
+    """v0.57 (NiKo: "shouldn't it wait for the PLEN to cycle"; "you can't simply unmute them"):
+    with a real take in buffer 1, FLEX track 1's MUTE SRC (SRC: track 2) holds track 2 muted only
+    while track 1 PLAYS: not while it is silent (M1), while a note on it sounds (M2), and not
+    past MS_HOLD after its release (M3). Negative control --break nohold (MUTE OFF): fails at M2."""
+    tap(21)                                                      # STOP: no trig of the pattern's
+    c.periods(4)
+    c.call(lay["fx_set"], T, 0, 2 + T2)                          # FX_SRC: TRK of track 2
+    c.call(lay["fx_set"], T, 6, 0 if a.brk == "nohold" else 1)   # FX_MUTE
+    c.periods(500)                                               # every note released, MS_HOLD past
+    m1 = (c.long(lay["ms_mask"]), c.long(lay["ms_playing_mask"]))
+    link("M1. MUTE SRC ON, a take, track 1 silent: track 2 not muted", m1 == (0, 0),
+         f"ms_mask {m1[0]:#x}, playing {m1[1]:#x}")
+    held(16, True)
+    tap(24 + T + 1)                                              # [TRK] + [TRIG 2]: track 1
+    held(16, False)
+    c.periods(4)
+    if not c.read(KB_ON, 1)[0]:
+        tap(18)
+    masks = []
+
+    def grab(tag, n):
+        for _ in range(n):
+            if not c.period():
+                break
+            fr = c.last_frame
+            w = struct.unpack(">4H", fr[34:42])
+            if any(w):
+                masks.append((tag, c.long(lay["smp_periods"]), w))
+    c.machine.pc = P.press(c.machine.m, c.panel.profile, *key(33))
+    grab("press", 60)
+    m2 = (c.long(lay["ms_mask"]), c.long(lay["ms_playing_mask"]))
+    link("M2. a note on track 1 sounding its take: track 2 muted (ms_mask), track 1 playing",
+         m2 == (1 << T2, 1 << T), f"ms_mask {m2[0]:#x}, playing {m2[1]:#x}")
+    c.machine.pc = P.release(c.machine.m, c.panel.profile, *key(33))
+    grab("release", 40)
+    rep["numbers"]["trig_masks"] = masks[:40]
+    print("  trig masks (34, 36, 38, 40):", masks[:20], flush=True)
+    # (the FLEX voice's take loops on silently after the key, so its DSP play position never ends:
+    # the play is the note's -- the frame's note-on and note-off trigger words, the voice's bit)
+    c.periods(460)                                               # MS_HOLD (300) past the note-off
+    m3 = (c.long(lay["ms_mask"]), c.long(lay["ms_playing_mask"]))
+    vt3 = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
+    rep["numbers"]["m3_voices"] = {"tracks": vt3, "pos": struct.unpack(">16H", c.read(lay["smp_pos"], 32)),
+                                   "pos_age": c.long(lay["smp_periods"]) - c.long(lay["smp_pos_at"]),
+                                   "levels": [struct.unpack(">H", c.last_frame[116 + 2 * v:118 + 2 * v])[0]
+                                              for v in range(16)]}
+    link("M3. the note off (the key released), past MS_HOLD: track 2 heard again, MUTE still ON",
+         m3 == (0, 0),
+         f"ms_mask {m3[0]:#x}, playing {m3[1]:#x}, MUTE {c.call(lay['fx_get'], T, 6)[0]}; "
+         f"{rep['numbers']['m3_voices']}")
+    rep["numbers"]["mute"] = {"M1": m1, "M2": m2, "M3": m3}
 
 
 if __name__ == "__main__":

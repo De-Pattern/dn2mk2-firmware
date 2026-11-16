@@ -655,24 +655,60 @@ u32 ms_frames D = 0;
 typedef void (*copy_fn)(void *, const void *, u32);
 #define STOCK_COPY ((copy_fn)0x40134490u)
 
+/* v0.57 (NiKo, 2026-11-15: "the mute function is activated immediately when recording,
+ * shouldn't it wait for the PLEN to cycle"; "you can't simply unmute them"): the SRC track is
+ * muted only while the FLEX track PLAYS -- a voice of the FLEX track whose note is on (the
+ * frame's note-on trigger word 34 sets it, the note-off word 36 clears it, bit v for voice v:
+ * measured in the coupled emulator, 2026-11-16) and heard (its frame LEVEL above 0: a stock
+ * mute of the FLEX track gives the SRC back) -- held MS_HOLD frames past the note's end (the
+ * amp's release, and a retrigger's gap, without a flicker). The DSP's play positions were the
+ * first try: a FLEX voice's take loops on silently after its release, so they never end. */
+#define FRAME_NOTE_ON 17u                       /* u16 index: byte 34 */
+#define FRAME_NOTE_OFF 18u                      /* u16 index: byte 36 */
+static u32 ms_gate __attribute__((section(".data"))) = 0;      /* voices whose note is on */
+static u32 ms_play_at[16] __attribute__((section(".data"))) = {0};
+#define MS_HOLD 300u                            /* frames: about 0.2 s */
+u32 ms_playing_mask __attribute__((section(".data"))) = 0;   /* (the gate reads it) */
+/* the gate's emu_coupled_mute: FLEX tracks taken as playing (0 on the unit: nothing writes
+ * it); the playing itself is emu_coupled_flex --pool's, with a real take */
+u32 ms_play_force __attribute__((section(".data"))) = 0;
+
+static int ms_track_plays(u32 t)
+{
+    volatile u16 *f = CTL_FRAME;
+    for (u32 v = 0; v < 16; v++)
+        if ((ms_gate >> v & 1u) && VOICE_TRACK[v] == t && f[FRAME_LEVEL(v)] != 0)
+            return 1;
+    return 0;
+}
+
 static u32 ms_mask_now(void)
 {
-    u32 m = 0;
+    u32 m = 0, playing = 0;
+    volatile u16 *f = CTL_FRAME;
+    ms_gate = (ms_gate & ~(u32)f[FRAME_NOTE_OFF]) | f[FRAME_NOTE_ON];
     if (!KIT_POINTER)
         return 0;
     for (u32 t = 0; t < 16; t++) {
         if (!rt_is_bounce(t) || !fx_valid(t) || !fx_get(t, FX_MUTE))
             continue;
-        /* v0.55 (owner: muted at once left a gap; "trigger the mute when the rec trig ends"):
-         * the SRC track is heard while the first take records, and muted once the track's
-         * buffer holds a take (its playing half: rt_buf_samp), so FLEX's loop takes over;
-         * cleared, it is heard again */
-        if (!rt_buf_samp(rt_buf_of(t)))
+        /* v0.55: no take in the track's buffer (its playing half), nothing to take over */
+        if (!rt_buf_samp(rt_buf_of(t))) {
+            ms_play_at[t] = 0;
             continue;
+        }
+        if ((ms_play_force >> t & 1u) || ms_track_plays(t))
+            ms_play_at[t] = ms_frames + 1u;             /* (+ 1: 0 is never) */
+        if (!ms_play_at[t] || ms_frames + 1u - ms_play_at[t] > MS_HOLD) {
+            ms_play_at[t] = 0;
+            continue;
+        }
+        playing |= 1u << t;
         int src = fx_get(t, FX_SRC);
         if (src >= 2 && src < 18 && (u32)(src - 2) != t)
             m |= 1u << (src - 2);
     }
+    ms_playing_mask = playing;
     return m;
 }
 

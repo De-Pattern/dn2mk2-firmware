@@ -35,7 +35,21 @@
     (`smp_samp_direct`), so the stock path after the write (locks, the screen) carries it.
 - MIDI CC on SAMP is unchanged (0..127 as before).
 
-## FLEX MUTE SRC (v0.55)
+## FLEX MUTE SRC (v0.55, reworked in v0.57)
+
+**v0.57** (NiKo, 2026-11-15: the mute came on as soon as a take existed, and stock unmute could
+not bring the SRC back): the SRC track is muted only while the FLEX track **plays**, i.e. a voice
+of the FLEX track has its note on and is heard.
+- The note's state comes from the frame's trigger words: note-on is word 34, note-off is word 36,
+  bit v for voice v (measured in the coupled emulator).
+- The DSP's play positions were tried first. A FLEX voice's take loops on silently after its
+  release, so they never end.
+- "Heard" means its frame LEVEL is above 0.
+- The mute is held 300 frames (about 0.2 s) past the note-off.
+
+So stopping or muting the FLEX track gives the SRC back. Gate: `mute` links 1b..1e; `flexplay` M1..M3, with a real take.
+
+### v0.55
 
 Owner: muting the SRC track as soon as MUTE is ON left a gap until FLEX played a take ("trigger
 the mute when the rec trig ends"). Now the SRC track is muted only once the FLEX track's buffer

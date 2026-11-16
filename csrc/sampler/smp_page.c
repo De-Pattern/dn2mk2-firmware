@@ -255,9 +255,12 @@ static void w_samp(void *c, int x, int y, int slot)
     fill(c, x0, y0 + 1, x0 + 6, y1 - 1);
     /* the bank letter, cut out: the DT2's flat-topped A */
     static const unsigned char bank_a[5] = {7, 5, 7, 5, 5};      /* rows top..bottom, bit 2 = left */
+    static const unsigned char bank_f[5] = {7, 4, 6, 4, 4};      /* v0.57: F, a FLEX buffer's */
+    extern int rt_samp_buf(u32 samp);
+    const unsigned char *bank = rt_samp_buf((u32)slot) >= 0 ? bank_f : bank_a;
     for (int r = 0; r < 5; r++)
         for (int b = 0; b < 3; b++)
-            if (bank_a[r] & (4 >> b))
+            if (bank[r] & (4 >> b))
                 SET_PIXEL(c, x0 + 2 + b, y + 10 - r, 0);
     if (slot == 0) {                            /* OFF: two dashes */
         glyph(c, cx + 0, y + 6, '-', 1);
@@ -291,9 +294,12 @@ static void w_samp_small(void *c, int x, int y, int slot)
     vline(c, x1, y0 + 1, y1 - 1, 0);
     fill(c, x0, y0 + 1, x0 + 5, y1 - 1);
     static const unsigned char bank_a[5] = {7, 5, 7, 5, 5};
+    static const unsigned char bank_f[5] = {7, 4, 6, 4, 4};      /* v0.57: F, a FLEX buffer's */
+    extern int rt_samp_buf(u32 samp);
+    const unsigned char *bank = rt_samp_buf((u32)slot) >= 0 ? bank_f : bank_a;
     for (int r = 0; r < 5; r++)
         for (int b = 0; b < 3; b++)
-            if (bank_a[r] & (4 >> b))
+            if (bank[r] & (4 >> b))
                 SET_PIXEL(c, x0 + 2 + b, y + 10 - r, 0);
     if (slot == 0) {
         glyph(c, cx + 0, y + 6, '-', 1);
@@ -827,7 +833,8 @@ static void slot_name(int k, char *out, int max)   /* SAMP value K (0 OFF) */
     } else if (k <= 0)
         n = "OFF";
     else if (rt_on && k - 1 >= REC_FIRST && k - 1 < REC_FIRST + 4)
-        n = k - 1 == REC_FIRST ? "REC 1" : k - 1 == REC_FIRST + 1 ? "REC 2" : "---";   /* v0.41: the buffers */
+        n = "---";      /* the recorder's own slots (v0.41 named two REC 1, REC 2; since v0.55 the FLEX
+                         * buffers are B1..B8 at the list's end: NiKo, 2026-11-15) */
     else if (cnt >= 0 && k <= cnt && !smp_slot_empty(k - 1))
         n = smp_long_name(k - 1);
     if (k > 0 && !(n && n[0]) && !smp_slot_empty(k - 1))

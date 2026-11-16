@@ -2446,7 +2446,8 @@ def main() -> int:
                     return False, out[-900:]
                 return True, ("on the ColdFire and the DSP together: a take recorded into buffer 1; a ONESHOT "
                               "track on SAMP B1: its voice sent buffer 1's playing half (SAMP 129), the DSP "
-                              "renders it, the render is the take at the note's pitch")
+                              "renders it, the render is the take at the note's pitch; v0.57: MUTE SRC holds "
+                              "its SRC muted only while the FLEX track plays the take (M1..M3)")
             later("flexplay", "FLEX buffers played by a ONESHOT track, on both processors (coupled)",
                   "FLEX buffers played by a ONESHOT track, on both processors (coupled)",
                   [fp_cmd, sorted(EMU_ENV.items())], fp_body)
@@ -2467,7 +2468,8 @@ def main() -> int:
                 return True, ("on the ColdFire and the DSP together: knob H on FLEX REC SETUP turns MUTE ON; the "
                               "SRC track's voices get LEVEL and FX sends 0 in the frame and the DSP, the other "
                               "voices' LEVEL unchanged, its block after the chain (the TRK source) as loud; OFF "
-                              "gives LEVEL and the sends back")
+                              "gives LEVEL and the sends back; v0.57: none of it without a take, or while the "
+                              "FLEX track is not playing (1b..1e)")
             later("mute", "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)",
                   "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)",
                   [mu_cmd, sorted(EMU_ENV.items())], mu_body)
