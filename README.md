@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.56** | 2026-11-15 | DDRW: **TIME** glides between waves (up to ~2 s), **BR1/BR2** heard across the whole knob; the patcher builds test builds | `builds/v0.56-DDRW/` | yes |
+| **v0.57** | 2026-11-16 | FLEX **MUTE SRC** mutes the source only while the FLEX track plays (no more stuck tracks); REC 1/2 names gone; F bank letter for buffers | `builds/v0.57-FLEXMUTE/` | yes |
+| v0.56 | 2026-11-15 | DDRW: **TIME** glides between waves (up to ~2 s), **BR1/BR2** heard across the whole knob; the patcher builds test builds | `builds/v0.56-DDRW/` | yes |
 | v0.55 | 2026-11-15 | the 8 **FLEX buffers in every sample machine**: SAMP past 127 to B1..B8 (knob, list, p-locks), a track on Bn plays that buffer's take; MUTE SRC waits for the first take (no gap) | `builds/v0.55-FLEXPOOL/` | yes |
 | v0.54 | 2026-11-15 | our names on the Digitone's **own NAME screen**: a recording's FILE NAME, the browser's RENAME and CREATE FOLDER open stock's naming screen (its keys, FUNC + ARROW edit grid, SETTINGS: RANDOM, copy/paste name) | `builds/v0.54-NAME/` | yes |
 | v0.53 | 2026-11-13 | FLEX polish: FLEX REC's page LEDs follow its page (NiKo); a switch to FLEX sets trig LEN to INF; BUF snaps buffer to buffer, a p-locked BUF shows its number, and BUF locks pick the buffer a trig plays (NiKo); PLAY two detents a mode; FUNC + turn moves R.LEN a bar | `builds/v0.53-PAGES/` | yes |
@@ -94,6 +95,54 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.57 — FLEXMUTE (MUTE SRC follows the FLEX track's playing)
+
+`DN2mod_v0.57_FLEXMUTE_OS1.11.syx`
+sha256 `1da1cf2fe354464b83c90127bfb192d113d438f39600f79ddc065c5e2f75bcff`
+Gate: CLEARED TO FLASH, 2026-11-16 (56 gates; 50 reused, each a pass of this same build whose every input is byte-identical; the run spanned five jobs: two container restarts and the two-hour limit). Source: commit `f436d8c` (branch `flexmute`). Docs: `docs/flex-pool.md`.
+
+Everything in v0.56, plus:
+
+**MUTE SRC reworked** (NiKo, 2026-11-15:
+- "the mute function is activated immediately when recording, shouldn't it wait for the PLEN to cycle";
+- tracks he "can't unmute" until a power cycle.)
+
+The changes:
+- With MUTE ON, the SRC track is muted only while the FLEX track **plays** its take (a note on it,
+  heard), and comes back about 0.2 s after the FLEX note ends.
+- Stopping the FLEX track, muting it, or setting MUTE OFF gives the SRC back. Recording no longer
+  mutes anything by itself.
+- How it knows: the frame's own note-on / note-off trigger words, voice by voice, measured in the
+  coupled emulator. The DSP's play positions were tried first: a FLEX voice's take loops on
+  silently after the key, so they never end.
+
+**Tidier pool list and SAMP cell:**
+- The old REC 1 / REC 2 names at slots 124/125 are gone (shown as empty, ---). The FLEX buffers
+  are B1..B8 since v0.55.
+- A sample track on a FLEX buffer shows **F** as its bank letter (was A), beside B1..B8.
+
+**Gate:**
+- `mute` (coupled): links 1b..1e: no take, a take but not playing, playing, and stopped (past the
+  hold). Negative control `--break noplay`.
+- `flexplay` (coupled): M1..M3 with a real recorded take: silent, a note sounding it, note off.
+  Negative control `--break nohold` (MUTE OFF).
+- Screenshots checked for the list, page 1 and page 2: no text overlaps another element.
+
+**Tests**
+1. FLEX track with SRC TRK n and MUTE ON. Record a take. Track n is still heard while recording
+   and after, until the FLEX track plays the take.
+2. Play the FLEX track (a trig or the keyboard): track n drops out. Stop or mute the FLEX track:
+   track n comes back within about 0.2 s.
+3. MUTE OFF: track n back at once, as before.
+4. The sample list around 124..127 shows ---; a sample track on B1 shows F │ B1.
+5. The regression check (top of this file).
+
+**Known issues**
+- Everything listed for v0.56.
+- A FLEX trig with a long gap between notes un-mutes the SRC in the gap (after 0.2 s).
+- Take levels are still reported about 6 dB low against the source (NiKo, Error Kit): next build,
+  measured end to end first.
 
 ## v0.56 — DDRW (TIME glides, BR1/BR2 heard)
 
