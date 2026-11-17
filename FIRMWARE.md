@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.57** | 2026-11-16 | FLEX **MUTE SRC** mutes the source only while the FLEX track plays (no more stuck tracks); REC 1/2 names gone; F bank letter for buffers | `builds/v0.57-FLEXMUTE/` | yes |
+| **v0.58** | 2026-11-17 | two microtonal scales in KB SETUP: **Poole Rod12** and **Poole12 Min** after Locr. bb3 bb7, each note tuned by its cents above ROOT | `builds/v0.58-SCALES/` | yes |
+| v0.57 | 2026-11-16 | FLEX **MUTE SRC** mutes the source only while the FLEX track plays (no more stuck tracks); REC 1/2 names gone; F bank letter for buffers | `builds/v0.57-FLEXMUTE/` | yes |
 | v0.56 | 2026-11-15 | DDRW: **TIME** glides between waves (up to ~2 s), **BR1/BR2** heard across the whole knob; the patcher builds test builds | `builds/v0.56-DDRW/` | yes |
 | v0.55 | 2026-11-15 | the 8 **FLEX buffers in every sample machine**: SAMP past 127 to B1..B8 (knob, list, p-locks), a track on Bn plays that buffer's take; MUTE SRC waits for the first take (no gap) | `builds/v0.55-FLEXPOOL/` | yes |
 | v0.54 | 2026-11-15 | our names on the Digitone's **own NAME screen**: a recording's FILE NAME, the browser's RENAME and CREATE FOLDER open stock's naming screen (its keys, FUNC + ARROW edit grid, SETTINGS: RANDOM, copy/paste name) | `builds/v0.54-NAME/` | yes |
@@ -95,6 +96,43 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.58 — SCALES (two microtonal scales in KB SETUP)
+
+`DN2mod_v0.58_SCALES_OS1.11.syx`
+sha256 `48923daf0c06b339501c77e1cba0d517578b9fd2b6c3f4aafc60a3b65f466d39`
+Gate: CLEARED TO FLASH, 2026-11-17 (57 gates; 53 reused, each a pass of this same build whose every input is byte-identical; the run spanned a container restart and the two-hour job limit, the last steps run one by one). Source: commit `46a0c3d` (branch `microtonal`). Docs: `docs/microtonal.md`.
+
+Everything in v0.57, plus:
+
+**Microtonal scales** (owner, 2026-11-16, his `poole-rod12tone.scl` and `poole12minor.scl`):
+- KB SETUP's SCALE goes on past Locr. bb3 bb7 to **Poole Rod12** (PR12) and **Poole12 Min** (PM12).
+- Poole Rod12 lays out and plays as Chromatic (12 notes); in a chord MODE it builds Ionian's chords.
+  Poole12 Min lays out and plays as Aeolian (1 2 b3 4 5 b6 b7).
+- A track on either plays every note (keyboard and sequencer) at the scale's tuning, by the note's
+  semitone above ROOT: Rod12 0, -46.7, +3.9, -33.1, +17.5, -2.0, -48.7, +2.0, -35.1, +5.9, -31.2,
+  -50.6 cents; Min12 the same on its degrees, other semitones at 12-TET.
+- How: stock's five scale tables copied with two rows more, its SCALE clamps raised to 36; the
+  voice's frame NOTE word moved by the cents (tune.c). Every other scale, track and voice is stock's.
+
+**Gate:** `tune` (ColdFire): stock's setter and getter at 35, 36, 40 (clamped to 36), -1, 34; the
+names; the keys, chord degrees and masks against Chromatic, Ionian and Aeolian; the retune at ROOT D
+on 16 voices (ROD12 every pitch class, MIN12 its degrees only, a stock scale none: the negative
+control); KB SETUP drawn at 34, 35 and 36 (screens checked: the names fit their places).
+
+**Tests**
+1. KEYBOARD, KB SETUP (FUNC + KEYBOARD), SCALE: turn past Locr. bb3 bb7: PR12, then PM12, then it stops.
+2. PR12, ROOT C: play C, C#, D... against a tuner: C in tune, C# about 47 cents flat, E about 17
+   cents sharp, B about 51 cents flat.
+3. PM12: the keyboard shows the minor scale's keys; its b3 and b7 sound noticeably flat.
+4. Back to any stock scale: everything in tune as before.
+5. A sequenced pattern on the track follows the tuning too.
+6. The regression check (top of this file).
+
+**Known issues**
+- A project saved with PR12 or PM12 opened on stock firmware shows Locr. bb3 bb7.
+- The per-track SCALE/ROOT setting path (when KB SETUP's settings are per track) could not be
+  exercised in the emulator; the keyboard-wide setting is tested.
 
 ## v0.57 — FLEXMUTE (MUTE SRC follows the FLEX track's playing)
 
