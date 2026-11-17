@@ -1784,8 +1784,6 @@ int smp_knob_code __attribute__((section(".data"))) = 0;     /* v0.48: which kno
 
 u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock receive returns it */
 {
-    extern void tn_poll(void);                  /* v0.58: each track's SCALE and ROOT for tune.c */
-    tn_poll();
     u8 *it = (u8 *)UI_POP(queue);
     if (!it)
         return (u32)it;

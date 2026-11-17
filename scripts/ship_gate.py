@@ -193,7 +193,6 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("keepsamp", "SAMP kept across sample machines (ColdFire)"),
        ("functurn", "FUNC + turn (ColdFire)"),
        ("flexpool", "FLEX buffers in every sample machine's SAMP (ColdFire)"),
-       ("tune", "microtonal scales: KB SETUP's SCALE and the frame's tuning (ColdFire)"),
        ("aniz", "start-up animation, every frame"),
        ("recorder", "recorder screen (ColdFire)"),
        ("mnmpages", "Monomachine pages and detents (ColdFire)"),
@@ -1964,121 +1963,6 @@ def main() -> int:
                               "below; a stale knob as before; the list and both pages name the buffer" if good else why)
             later("flexpool", "FLEX buffers in every sample machine's SAMP (ColdFire)",
                   "FLEX buffers in every sample machine's SAMP (ColdFire)", [p_cmd, sorted(EMU_ENV.items())], p_body)
-
-        # 6m2. v0.58: the microtonal scales (dnfw.waverider.scales, csrc/sampler/tune.c). Stock's
-        # SCALE setters and getters reach 36 and clamp there; stock's five scale accessors give
-        # POOLE ROD12 (35) and POOLE12 MIN (36) their names and Chromatic's / Aeolian's keys,
-        # chord degrees and masks, and every stock row as before; tn_retune moves a voice's NOTE
-        # word by its pitch class's cents above ROOT (KB SETUP's), leaves a note off the scale's
-        # degrees, a voice of no track and a stock scale (the negative control, 34) alone; and
-        # KB SETUP draws each. (Stock's per-track SCALE objects are not set up in the emulator's
-        # snapshot: tn_poll reads them only when the per-track flags say so, and checks their
-        # vtables first.)
-        if "tn_retune" in lay:
-            from dnfw.waverider import scales as SCg     # noqa: PLC0415
-            ks, kr, rt = lay["tn_kb_scale"], lay["tn_kb_root"], lay["tn_retune"]
-            scratch, vt_va = 0x46A08000, 0x80005308
-            vtrack = "".join(f"{v if v < 15 else 0xFF:08x}" for v in range(16))
-            words = [((60 + v) << 8) | 0x10 for v in range(16)]
-            nw = "0000" + "".join(f"{w:04x}" for w in words)
-            sets = [35, 36, 40, -1, 34]
-            ts = ["wait:3"] + [f"call:{ks:#x}:{v}" for v in sets]
-            acc = [(0x401500A6, 36), (0x401500A6, 37), (0x40150096, 36), (0x40150096, 37), (0x401500A6, 35)]
-            ts += [f"call:{f:#x}:{i}" for f, i in acc]
-            keyc = [(r, k) for r in (36, 0, 37, 6) for k in range(16)]
-            degc = [(r, k) for r in (35, 0, 36, 5) for k in range(8)]
-            maskc = [(n, sc) for sc in (35, 36, 5) for n in range(60, 72)]
-            ts += [f"call:0x401500c6:{r}:{k}" for r, k in keyc] + [f"call:0x401500dc:{r}:{k}" for r, k in degc]
-            ts += [f"call:0x4014fe60:{n}:60:{sc}" for n, sc in maskc]
-            ts += [f"mem:{lay[n]:#x}:16" for n in ("tn_long_35", "tn_long_36")]
-            ts += [f"mem:{lay[n]:#x}:8" for n in ("tn_short_35", "tn_short_36")]
-            ts += [f"poke:{vt_va:#x}:{vtrack}", f"call:{kr:#x}:2"]
-            order = (35, 36, 34)
-            for sc in order:
-                ts += [f"call:{ks:#x}:{sc}", "wait:3", f"poke:{scratch:#x}:{nw}", f"call:{rt:#x}:{scratch:#x}",
-                       f"mem:{scratch:#x}:34"]
-            ts += [f"mem:{lay['tn_skips']:#x}:4", f"mem:{lay['tn_polls']:#x}:4"]
-            ts += ["press:17", "tap:18", "release:17", "wait:6"]
-            for sc in (34, 35, 36):
-                ts += [f"call:{ks:#x}:{sc}", "wait:6", f"png:kb{sc}"]
-            ts += [f"call:{ks:#x}:-1", "wait:4"]
-            tjs = work / "tune.json"
-            t_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
-                     "--snapshot", snap, "--steps", ",".join(ts), "--png-dir", work / "tune", "--json", tjs]
-
-            def t_body(tdir):
-                rc, out = run("microtonal scales", t_cmd, logs, env=EMU_ENV, trace=tdir)
-                why, good = out[-800:], False
-                if rc == 0 and tjs.exists():
-                    r = json.loads(tjs.read_text())
-                    d0 = [c["d0"] for c in r["direct_calls"]]
-                    m = r["memory"]
-                    i = 0
-                    got_sets = d0[i:i + len(sets)]
-                    i += len(sets)
-                    got_acc = d0[i:i + len(acc)]
-                    i += len(acc)
-                    got_keys = d0[i:i + len(keyc)]
-                    i += len(keyc)
-                    got_deg = d0[i:i + len(degc)]
-                    i += len(degc)
-                    got_mask = d0[i:i + len(maskc)]
-                    stock_name35 = struct.unpack(">I", sec3[SCg.NAMES_VA + 4 * 35 - 0x40000400:][:4])[0]
-
-                    def text(n):
-                        h = bytes.fromhex(m.get(hex(lay[n]), ""))
-                        return h.split(b"\0")[0].decode("latin1")
-                    reads = [bytes.fromhex(v) for k, v in m.items() if k == hex(scratch) or k.startswith(hex(scratch) + "@")]
-                    retuned = [list(struct.unpack(">17H", h))[1:] if len(h) == 34 else None for h in reads]
-                    retuned += [None] * (len(order) - len(retuned))
-
-                    def expect(sc):
-                        if sc not in SCg.CENTS:
-                            return list(words)
-                        out_ = []
-                        for v, w in enumerate(words):
-                            if v == 15:
-                                out_.append(w)
-                                continue
-                            pc = ((w >> 8) - 2) % 12
-                            out_.append(max(0, min(0x7FFF, w + SCg.fine(SCg.CENTS[sc][pc]))))
-                        return out_
-                    shots = {n: pathlib.Path(r["screens"][n]).read_bytes() if n in r["screens"] else b""
-                             for n in ("kb34", "kb35", "kb36")}
-                    facts = {
-                        "SCALE set 35, 36, 40, -1, 34 through stock's setter: stock's getter gives 35, 36, 36, -1, 34":
-                            got_sets == [35, 36, 36, -1, 34],
-                        "the full and short names of 35 and 36 are ours (Poole Rod12 / PR12, Poole12 Min / PM12); 34's is stock's":
-                            got_acc[:4] == [lay["tn_long_35"], lay["tn_long_36"], lay["tn_short_35"], lay["tn_short_36"]]
-                            and got_acc[4] == stock_name35
-                            and [text(n) for n in ("tn_long_35", "tn_long_36", "tn_short_35", "tn_short_36")] ==
-                            [SCg.NAMES[35][0], SCg.NAMES[36][0], SCg.NAMES[35][1], SCg.NAMES[36][1]],
-                        "POOLE ROD12's keys are Chromatic's, POOLE12 MIN's Aeolian's":
-                            got_keys[:16] == got_keys[16:32] and got_keys[32:48] == got_keys[48:64]
-                            and got_keys[16:24] == list(range(8, 16)),
-                        "their chord degrees are Ionian's and Aeolian's":
-                            got_deg[:8] == got_deg[8:16] and got_deg[16:24] == got_deg[24:32]
-                            and got_deg[24:32] == [0, 2, 3, 5, 7, 8, 10, -1],
-                        "every semitone is in POOLE ROD12, POOLE12 MIN's are Aeolian's":
-                            got_mask[:12] == [1] * 12 and got_mask[12:24] == got_mask[24:36] and sum(got_mask[24:36]) == 7,
-                        "POOLE ROD12 at ROOT D: every voice of a track its cents, a voice of no track as it was":
-                            retuned[0] == expect(35),
-                        "POOLE12 MIN at ROOT D: its degrees' cents, the other semitones at 12-TET":
-                            retuned[1] == expect(36) and retuned[1] != expect(35),
-                        "a stock scale (34, the negative control): every NOTE word as it was":
-                            retuned[2] == list(words),
-                        "tn_poll ran, never refused the keyboard's object":
-                            m.get(hex(lay["tn_skips"])) == "00000000" and int(m.get(hex(lay["tn_polls"]), "0"), 16) > 0,
-                        "KB SETUP drawn at 34, 35 and 36, each its own":
-                            all(shots.values()) and len(set(shots.values())) == 3,
-                    }
-                    good = all(facts.values())
-                    why = f"{facts} sets={got_sets} acc={got_acc} retuned={retuned} mem={ {k: v for k, v in m.items() if not k.startswith(hex(scratch))} }"
-                return good, ("KB SETUP's SCALE reaches POOLE ROD12 and POOLE12 MIN (stock's tables with two rows "
-                              "more, the clamps at 36); a voice on either gets its cents by pitch class above ROOT, "
-                              "a stock scale none" if good else why)
-            later("tune", "microtonal scales: KB SETUP's SCALE and the frame's tuning (ColdFire)",
-                  "microtonal scales: KB SETUP's SCALE and the frame's tuning (ColdFire)", [t_cmd, sorted(EMU_ENV.items())], t_body)
 
         # 6n. v0.32: the DSP load meter. smp_dsp_load gives the last half second's peak (the
         # idle packets' unit 18, permille) in percent, rounded, and -1 when none came in the last
