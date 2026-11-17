@@ -34,8 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.58** | 2026-11-17 | two microtonal scales in KB SETUP: **Poole Rod12** and **Poole12 Min** after Locr. bb3 bb7, each note tuned by its cents above ROOT | `builds/v0.58-SCALES/` | yes |
-| v0.57 | 2026-11-16 | FLEX **MUTE SRC** mutes the source only while the FLEX track plays (no more stuck tracks); REC 1/2 names gone; F bank letter for buffers | `builds/v0.57-FLEXMUTE/` | yes |
+| ~~v0.58~~ PULLED | 2026-11-17 | two microtonal scales in KB SETUP: **Poole Rod12** and **Poole12 Min** after Locr. bb3 bb7, each note tuned by its cents above ROOT | `builds/v0.58-SCALES/` | yes |
+| **v0.57** | 2026-11-16 | FLEX **MUTE SRC** mutes the source only while the FLEX track plays (no more stuck tracks); REC 1/2 names gone; F bank letter for buffers | `builds/v0.57-FLEXMUTE/` | yes |
 | v0.56 | 2026-11-15 | DDRW: **TIME** glides between waves (up to ~2 s), **BR1/BR2** heard across the whole knob; the patcher builds test builds | `builds/v0.56-DDRW/` | yes |
 | v0.55 | 2026-11-15 | the 8 **FLEX buffers in every sample machine**: SAMP past 127 to B1..B8 (knob, list, p-locks), a track on Bn plays that buffer's take; MUTE SRC waits for the first take (no gap) | `builds/v0.55-FLEXPOOL/` | yes |
 | v0.54 | 2026-11-15 | our names on the Digitone's **own NAME screen**: a recording's FILE NAME, the browser's RENAME and CREATE FOLDER open stock's naming screen (its keys, FUNC + ARROW edit grid, SETTINGS: RANDOM, copy/paste name) | `builds/v0.54-NAME/` | yes |
@@ -97,7 +97,11 @@ Every flash, every version:
 
 ---
 
-## v0.58 — SCALES (two microtonal scales in KB SETUP)
+## v0.58 — SCALES — PULLED 2026-11-17
+
+**Pulled from the patcher (owner):** PR12/PM12 crash the unit in a chord MODE (zuzsw: EXCEPTION at P 40034BA6, a division by an empty chord list: the chord MODEs keep a sixth per-scale table, built in RAM at runtime, that v0.58 did not extend). v0.57 is the latest again; the scales' code is reverted on `main`. A fix (the chord lists extended, a chord-MODE gate test still to write) is on branch `scalefix`.
+
+### What it was
 
 `DN2mod_v0.58_SCALES_OS1.11.syx`
 sha256 `48923daf0c06b339501c77e1cba0d517578b9fd2b6c3f4aafc60a3b65f466d39`
