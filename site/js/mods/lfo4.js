@@ -49,7 +49,7 @@ const put32 = (d, at, v) => {
 /** An edit the platform makes: the start-up call or the loader in its cave. */
 const platformOwned = (e) => {
   const lo = e.va - BASE, hi = lo + e.new.length / 2;
-  return platform.extents().some((x) => x.start < hi && lo < x.start + x.length);
+  return platform.extents(0, platform.SPEC_111).some((x) => x.start < hi && lo < x.start + x.length);
 };
 const OWN = CODE.edits.filter((e) => !platformOwned(e));
 
@@ -62,7 +62,7 @@ export function extents() {
   return [
     ...OWN.map((e) => ({ section: SECTION, start: e.va - BASE,
                          length: e.new.length / 2, what: "LFO4 edit" })),
-    ...platform.extents(APPENDED),
+    ...platform.extents(APPENDED, platform.SPEC_111),
   ];
 }
 

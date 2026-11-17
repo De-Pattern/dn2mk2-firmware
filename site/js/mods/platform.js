@@ -10,6 +10,12 @@
  */
 
 import { CODE } from "./platform-code.js";
+// Stock 1.11's platform: upstream v0.57's generated platform-code.js as it was.
+import { CODE as CODE_111 } from "./platform-code-111.js";
+
+export { CODE_111 as SPEC_111 };
+export const SPEC = CODE;
+const SPECS = [CODE, CODE_111];
 
 export const ID = "platform";
 export const SECTION = 3;
@@ -39,15 +45,34 @@ const concat = (parts) => {
 };
 const pad4 = (n) => (4 - (n % 4)) % 4;
 
-export function extents(areaLength = 0) {
+/**
+ * The platform spec for MAIN OS CONTENT, as `spec_for` in platform.py: by its
+ * length when it is stock's (1.11 or 1.12); a longer image by the loader call it
+ * carries, else by the loader cave still empty. 1.12's when nothing tells.
+ */
+export function specFor(content) {
+  for (const spec of SPECS) if (content.length === spec.stock_length) return spec;
+  const longer = SPECS.filter((s) => content.length > s.stock_length);
+  const at = CODE.calls_va - BASE;
+  for (const spec of longer) {
+    if (toHex(content.subarray(at, at + spec.hook.length / 2)) === spec.hook) return spec;
+  }
+  for (const spec of longer) {
+    const cave = spec.cave_va - BASE;
+    if (!content.subarray(cave, cave + spec.cave_cap).some((b) => b !== 0)) return spec;
+  }
+  return CODE;
+}
+
+export function extents(areaLength = 0, spec = CODE) {
   const out = [
-    { section: SECTION, start: CODE.calls_va - BASE, length: CODE.calls_stock.length / 2,
+    { section: SECTION, start: spec.calls_va - BASE, length: spec.calls_stock.length / 2,
       what: "start-up calls -> the platform loader", owner: ID },
-    { section: SECTION, start: CODE.cave_va - BASE, length: CODE.cave_cap,
+    { section: SECTION, start: spec.cave_va - BASE, length: spec.cave_cap,
       what: "the platform loader's cave", owner: ID },
   ];
   if (areaLength) {
-    out.push({ section: SECTION, start: STOCK_LENGTH, length: areaLength,
+    out.push({ section: SECTION, start: spec.stock_length, length: areaLength,
                what: "the appended DNFW area", owner: ID });
   }
   return out;
@@ -100,43 +125,46 @@ export function unpackCode(data) {
 // ---- the loader and the area in MAIN OS
 
 export function installed(content) {
-  const at = CODE.calls_va - BASE;
-  return toHex(content.subarray(at, at + CODE.hook.length / 2)) === CODE.hook;
+  const spec = specFor(content);
+  const at = spec.calls_va - BASE;
+  return toHex(content.subarray(at, at + spec.hook.length / 2)) === spec.hook;
 }
 
 /** MAIN OS -> [MAIN OS without the area, the chunks already in it]. */
 export function split(content) {
-  if (content.length < STOCK_LENGTH) {
-    throw new ModError(`MAIN OS is ${grouped(content.length)} B, shorter than ${grouped(STOCK_LENGTH)}: `
-      + "not Digitone II 1.11");
+  const length = specFor(content).stock_length;
+  if (content.length < length) {
+    throw new ModError(`MAIN OS is ${grouped(content.length)} B, shorter than ${grouped(length)}: `
+      + "not Digitone II 1.11 or 1.12");
   }
-  if (content.length === STOCK_LENGTH) return [content.slice(), []];
+  if (content.length === length) return [content.slice(), []];
   if (!installed(content)) {
     throw new ModError("MAIN OS carries appended data but not the platform loader: "
-      + "it was built by something else; start from stock 1.11");
+      + "it was built by something else; start from stock 1.11 or 1.12");
   }
-  return [content.slice(0, STOCK_LENGTH), parseArea(content.subarray(STOCK_LENGTH))];
+  return [content.slice(0, length), parseArea(content.subarray(length))];
 }
 
 /** MAIN OS without an area + chunks -> MAIN OS with the loader and the area. */
 export function join(base, chunks) {
-  if (base.length !== STOCK_LENGTH) {
-    throw new ModError(`MAIN OS is ${grouped(base.length)} B, not ${grouped(STOCK_LENGTH)}`);
+  const spec = specFor(base);
+  if (base.length !== spec.stock_length) {
+    throw new ModError(`MAIN OS is ${grouped(base.length)} B, not ${grouped(spec.stock_length)}`);
   }
   const content = base.slice();
-  const calls = CODE.calls_va - BASE, cave = CODE.cave_va - BASE, link = CODE.link_va - BASE;
-  const loader = hex(CODE.loader);
+  const calls = spec.calls_va - BASE, cave = spec.cave_va - BASE, link = spec.link_va - BASE;
+  const loader = hex(spec.loader);
   if (!installed(content)) {
-    if (toHex(content.subarray(calls, calls + CODE.calls_stock.length / 2)) !== CODE.calls_stock) {
-      throw new ModError(`${h8(CODE.calls_va)} holds neither the stock start-up calls `
+    if (toHex(content.subarray(calls, calls + spec.calls_stock.length / 2)) !== spec.calls_stock) {
+      throw new ModError(`${h8(spec.calls_va)} holds neither the stock start-up calls `
         + "nor the platform loader's call: another mod has changed it");
     }
-    if (content.subarray(cave, cave + CODE.cave_cap).some((b) => b !== 0)) {
-      throw new ModError(`the platform loader's cave at ${h8(CODE.cave_va)} is in use`);
+    if (content.subarray(cave, cave + spec.cave_cap).some((b) => b !== 0)) {
+      throw new ModError(`the platform loader's cave at ${h8(spec.cave_va)} is in use`);
     }
     content.set(loader, link);
-    content.set(hex(CODE.hook), calls);
-  } else if (toHex(content.subarray(link, link + loader.length)) !== CODE.loader) {
+    content.set(hex(spec.hook), calls);
+  } else if (toHex(content.subarray(link, link + loader.length)) !== spec.loader) {
     throw new ModError("the start-up call reaches a loader that is not this platform's");
   }
   const ordered = [...chunks.filter(([c]) => c !== CODE_ID), ...chunks.filter(([c]) => c === CODE_ID)];
@@ -216,7 +244,7 @@ export function write(content, chunks, va, stock, next, what = "") {
   const at = va - BASE;
   if (toHex(content.subarray(at, at + stock.length)) !== toHex(stock)) {
     throw new ModError(`${label} is not stock (${toHex(content.subarray(at, at + 12))}...); another `
-      + "mod has changed it, or this is not Digitone II 1.11");
+      + "mod has changed it, or this is not stock Digitone II 1.11 or 1.12");
   }
   content.set(next, at);
 }

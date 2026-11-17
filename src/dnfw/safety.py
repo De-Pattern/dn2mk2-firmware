@@ -14,8 +14,9 @@ metadata (5) and the Outbox 8 firmware (8) have no reason to change either.
 
 So, as rules:
 
-1. The input is stock Digitone II OS 1.12, by the hash of every section
-   (1.11 until the port, docs/os112-port.md).
+1. The input is stock Digitone II OS 1.12 or 1.11, by the hash of every section
+   of that version (1.11 only until the port, docs/os112-port.md). Each mod then
+   refuses a version it was not made for by its own stock-bytes guards.
 2. The build has exactly stock's sections, in stock's order, with stock's
    product, version and build string (a different version string could make
    the device decide its bootstrap needs upgrading).
@@ -63,6 +64,9 @@ STOCK_112 = {
     8: "764f169834ac9ebcdbc1fd883e9f941be1eb43c2d57e4ff02e04685550838b06",
 }
 STOCK = STOCK_112            # what this build targets
+# Every stock input the preflight accepts: version -> (build string, section hashes).
+# 1.11 stays for upstream's 1.11 mods (lfo4, lfowaves, bootscreen, fxmod, ...).
+STOCKS = {VERSION: (BUILD, STOCK_112), "1.11": ("0059", STOCK_111)}
 ORDER = (5, 2, 3, 4, 7, 8)
 
 MAY_CHANGE = {3: "MAIN OS", 7: "DSP program"}
@@ -112,16 +116,19 @@ def _sha(b: bytes) -> str:
 
 
 def stock_checks(stock) -> list[Check]:
-    """Rule 1: the input is the stock file this build targets, section by section."""
+    """Rule 1: the input is a stock file (1.12, or 1.11), section by section,
+    against that version's hashes; any other version is checked against 1.12's."""
     c = stock.container
-    out = [Check(f"input is Digitone II OS {VERSION}",
-                 c.product == PRODUCT and c.version == VERSION and c.build == BUILD,
+    version = c.version if c.version in STOCKS else VERSION
+    build, hashes = STOCKS[version]
+    out = [Check(f"input is Digitone II OS {version}",
+                 c.product == PRODUCT and c.version == version and c.build == build,
                  f"product {c.product}, version {c.version}, build {c.build}")]
     ids = tuple(s.id for s in c.sections)
-    out.append(Check(f"input has stock {VERSION}'s sections", ids == ORDER, f"{ids}"))
+    out.append(Check(f"input has stock {version}'s sections", ids == ORDER, f"{ids}"))
     for s in c.sections:
-        want = STOCK.get(s.id)
-        out.append(Check(f"input section {s.id} is stock {VERSION}'s",
+        want = hashes.get(s.id)
+        out.append(Check(f"input section {s.id} is stock {version}'s",
                          want is not None and _sha(s.raw_payload) == want,
                          _sha(s.raw_payload)[:16]))
     return out
