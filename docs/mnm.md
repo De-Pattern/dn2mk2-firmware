@@ -42,6 +42,9 @@ bit for bit (`mnm_models.py`).
 | VO-6 | 11 | VOC1 VOC2 V-SW VOIC CONS CLEN CVOL TUNE | a band-limited pulse train (32-tap pulses, the kernel's table) and noise (VOIC mixes them) through four formant resonators in series (F1, F2 from VOC1, VOC2; F3, F4 fixed), the same four in parallel on the unvoiced source; an AGC, three internal envelopes (onset, the consonant's transition, the vowel gate), 21 consonants (CONS: their set-ups and renderers, CLEN, CVOL), a fixed output biquad. No oversampling |
 | DPRO-DDRW | 32 | WAV1 MIX WAV2 TIME BR1 WID BR2 TUNE | two Digibank waves at 2x, each at its own pitch (WID detunes them up to -/+53 cents, scaled by 1 - abs(2 MIX - 1)), crossfading from the previous wave on a change (TIME), bit-reduced (BR1/BR2: 15 bits at 0 down to 3 at 127), each read at two mip levels crossfaded over the octave's top 1/16; MIX ramped over the block; the kernel's 2:1 allpass decimator |
 | DPRO-DENS | 33 | PCH2 PCH3 PCH4 WAVE --- CHRL CHRW TUNE | four oscillators on one Digibank wave at 2x, three at PCH2..4's ratios (-12..+12 semitones and 2/3 3/4 4/5 5/6 6/5 5/4 4/3 3/2; the middle, 1.0, is OFF), band-limited by mip level with a crossfade over each octave's top 1/16 toward a partner sample held in the finer level's low bytes; mixed at 0.633 each (silent at 20 kHz and up, or at the first one's Hz); the 2:1 decimator. CHRL/CHRW are the Monomachine's chorus after the machine (not here) |
+| FM+ STAT | 8 | 1FRQ 1FIN 1ENV 1FB 2FRQ 2VOL TONE TUNE | (v0.59) at 2x: operator 2 (an interpolated sine at 2FRQ's listed ratio, ramped over the block; differentiated, TONE's one-pole lowpass, amplitude feedback from 2VOL above 64; level sat(4 2VOL^2)) and operator 1 (the sine's word at 1FRQ's ratio x the fine tune 1FIN, its phase offset by its own last output x 1FB: self feedback; differentiated, TONE; level sat(4 1ENV^2) x an envelope that decays above 64); their mix lowpassed moves the carrier's phase; the 2:1 decimator of two allpass pairs |
+| FM+ PAR | 9 | 1FRQ 1ENV 2FRQ 2ENV 3FRQ 3ENV TONE TUNE | (v0.59) three ramped operators as STAT's operator 2, each its own envelope and feedback from xENV above 64, summed into the carrier |
+| FM+ DYN | 10 | 1FRQ 1FEN 1VOL 1VEN 2FRQ 2ENV 2FB TUNE | (v0.59) operator 1 ramped at the carrier's increment plus a decaying frequency envelope (1FEN) x 1FRQ, its level 1VOL plus a volume envelope (1VEN) that also sets its feedback; operator 2 at 2FRQ^2 with self feedback 2FB and 2ENV's envelope; a fixed 0.5 lowpass for TONE's |
 
 **DPRO-BBOX** (24 drum samples, 63,049 words: about 189 KB) does not fit the firmware: the
 whole image has about 50 KB to spare under the 2 MiB the USB upgrade takes. **DDRW and DENS** read
@@ -97,6 +100,18 @@ machines. The ColdFire's type range, names, MACHINE SEL list and group, its page
 - **The increments**: on the DSP each machine's `pitch` computes them in float from the
   DN2's pitch; `dnfw.mnm.exact` computes them in the Monomachine's integer arithmetic.
 
+**FM+ (v0.59, `dnfw.mnm.fm`).** The three share one copy of each loop (leaf subroutines: the
+ramped and the feedback operator, the carrier with two or three operators, the decimator), their
+state at I2. Phases are 32-bit (the 8192-word sine's index << 19); signals float32. What they read
+from the owner's OS (`rom.fm_words`): the sine, made at power-on on the Monomachine by a 48-bit
+recursion (P:0x100077), here by the same recursion from its immediates (word for word); the 24
+listed ratios (y:0x141A80, by knob (6 k + 3) >> 5), TONE's 128 coefficients (y:0x144AC7) and DYN's
+envelope multipliers (y:0x141880, by 128 - 2 |k - 64|). Three of the Monomachine's truncations are
+kept because they integrate: each lowpass's state is floored to a Q23 word at the block's end (it
+is stored as a word; without it -0.5 LSB a block reaches the carrier's phase: TONE 0 fell to 57 dB),
+and the envelopes decay by floored products (`K.mpy_floor`). The goldens: 240 cases
+(`tools/goldens/mnm`, ids 8..10). PERC's L2 span grew to 144 KB for them (`dsp.PERC_L2_SPAN`).
+
 ## The tables, over the fast link
 
 The DSP image had about 50 KB to spare, so the tables no longer ride in it. The ColdFire
@@ -121,4 +136,4 @@ The shipped tables came to 65 KB (94 KB with the words as they are).
 
 `test/test_mnm.py`: every golden case of every machine in run mode, with the increments
 exactly the Monomachine's, at 60 dB signal-to-error or better (DPRO-WAVE 63.8..99 dB, SID
-94..110 dB so far); each machine's float `pitch` within 1e-4 of the exact increments.
+94..110 dB so far); each machine's float `pitch` within 1e-4 of the exact increments. FM+ (v0.59): 69..99 dB, but its self feedback at 32 and up (STAT's 1FB, DYN's 2FB): chaotic on the Monomachine itself (any LSB, even 37-bit phases with five bits off the increments, sends it elsewhere), so those cases are held to `bench.likeness` (level, octave bands), and that test refuses the same output 6 dB down.
