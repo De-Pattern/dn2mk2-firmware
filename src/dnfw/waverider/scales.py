@@ -1,0 +1,115 @@
+"""v0.58: two microtonal scales in KB SETUP's SCALE list (owner, 2026-11-16).
+
+Stock OS 1.11 keeps 35 scales (index 0 Ionian .. 34 Locrian bb3 bb7; -1 Chromatic) in five
+tables, each read through one accessor (docs/microtonal.md):
+
+- full names, index + 1 (0x402a0e28, 36 pointers; scale_name 0x401500a6);
+- short names, index + 1 (0x402a0eb8, 36 pointers; 0x40150096);
+- the keys, index + 1 (0x4020e320, 16 words a row: key k -> semitone; 0x401500c6);
+- the degrees, index (0x4020dea0, 8 words a row, -1 ends: chord MODEs; 0x401500dc);
+- the membership masks, index (0x4020ec20, 13 bytes a row: semitone 0..12 in the scale;
+  0x4014fe60).
+
+and four getters/setters clamp the stored byte to -1..34. The build copies the five tables
+(stock rows, as stock has them) into the C chunk with two rows more, points the five accessors
+at the copies and raises the clamps to 36:
+
+- 35 POOLE ROD12: a 12-note scale, so it lays out and plays as Chromatic (keys and mask);
+  in a chord MODE (Chromatic has none) it builds Ionian's chords.
+- 36 POOLE12 MIN: Aeolian's degrees (1 2 b3 4 5 b6 b7), every row Aeolian's.
+
+What makes them microtonal is the tuning: tune.c adds each note's cents (by its pitch class
+above the track's ROOT) to the voice's frame NOTE word (note + fine/256)."""
+
+from __future__ import annotations
+
+import struct
+
+BASE = 0x40000400
+N_STOCK = 35                       # indices 0..34 (-1 Chromatic)
+ROD12, MIN12 = 35, 36
+LAST = MIN12
+
+NAMES_VA, SHORT_VA = 0x402A0E28, 0x402A0EB8
+KEYS_VA, DEG_VA, MASK_VA = 0x4020E320, 0x4020DEA0, 0x4020EC20
+KEYS_ROW, DEG_ROW, MASK_ROW = 16, 8, 13
+AEOLIAN, IONIAN = 5, 0
+
+NAMES = {ROD12: ("Poole Rod12", "PR12"), MIN12: ("Poole12 Min", "PM12")}
+
+# cents against 12-TET, by semitone above the root (owner's .scl files, 2026-11-16);
+# None: not a degree of the scale (a note there is played as 12-TET)
+CENTS = {
+    ROD12: (0.0, -46.7, 3.9, -33.1, 17.5, -2.0, -48.7, 2.0, -35.1, 5.9, -31.2, -50.6),
+    MIN12: (0.0, None, 3.9, -33.1, None, -2.0, None, 2.0, -35.1, None, -31.2, None),
+}
+
+# the accessors' table operands (the absolute after the opcode) and the clamps (moveq #34)
+SITES = (  # va of the 32-bit operand, opcode bytes before it, stock table, label
+    (0x4015009C, "41f9", SHORT_VA, "kb_short"),
+    (0x401500AC, "41f9", NAMES_VA, "kb_names"),
+    (0x401500CC, "41f9", KEYS_VA, "kb_keys"),
+    (0x401500E2, "41f9", DEG_VA, "kb_deg"),
+    (0x4014FEBA, "d1fc", MASK_VA, "kb_mask"),
+)
+CLAMPS = (  # va, register byte, what
+    (0x4003AA34, 0x72, "KB SCALE getter: bound"), (0x4003AA3A, 0x70, "KB SCALE getter: clamp"),
+    (0x4003AA6E, 0x74, "KB SCALE setter: bound"), (0x4003AA74, 0x72, "KB SCALE setter: clamp"),
+    (0x4005076E, 0x72, "track SCALE getter: bound"), (0x40050774, 0x70, "track SCALE getter: clamp"),
+    (0x400507B0, 0x74, "track SCALE setter: bound"), (0x400507B6, 0x72, "track SCALE setter: clamp"),
+)
+
+
+def _rd(stock: bytes, va: int, n: int) -> bytes:
+    return bytes(stock[va - BASE:va - BASE + n])
+
+
+def _words(stock: bytes, va: int, n: int) -> list[int]:
+    return list(struct.unpack(f">{n}i", _rd(stock, va, 4 * n)))
+
+
+def tables(stock: bytes) -> dict:
+    """-> the five tables' new rows: stock's rows, then ROD12's and MIN12's."""
+    keys = [_words(stock, KEYS_VA + 4 * KEYS_ROW * r, KEYS_ROW) for r in range(N_STOCK + 1)]
+    deg = [_words(stock, DEG_VA + 4 * DEG_ROW * r, DEG_ROW) for r in range(N_STOCK)]
+    mask = [list(_rd(stock, MASK_VA + MASK_ROW * r, MASK_ROW)) for r in range(N_STOCK)]
+    chromatic = keys[0]
+    if chromatic != [8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7]:
+        raise ValueError("the stock key table's Chromatic row is not where it was")
+    if deg[AEOLIAN] != [0, 2, 3, 5, 7, 8, 10, -1] or deg[IONIAN] != [0, 2, 4, 5, 7, 9, 11, -1]:
+        raise ValueError("the stock degree table's Ionian/Aeolian rows are not where they were")
+    keys += [list(chromatic), list(keys[AEOLIAN + 1])]
+    deg += [list(deg[IONIAN]), list(deg[AEOLIAN])]
+    mask += [list(range(1, 14)), list(mask[AEOLIAN])]
+    # the minor's degrees are Aeolian's: its tuning names exactly those semitones
+    if [s for s, c in enumerate(CENTS[MIN12]) if c is not None] != deg[AEOLIAN][:7]:
+        raise ValueError("POOLE12 MIN's degrees are not Aeolian's")
+    names = [struct.unpack(">I", _rd(stock, NAMES_VA + 4 * i, 4))[0] for i in range(N_STOCK + 1)]
+    short = [struct.unpack(">I", _rd(stock, SHORT_VA + 4 * i, 4))[0] for i in range(N_STOCK + 1)]
+    return {"keys": keys, "deg": deg, "mask": mask, "names": names, "short": short}
+
+
+def fine(c: float | None) -> int:
+    """cents -> the NOTE word's fine units (1/256 semitone)."""
+    return 0 if c is None else int(round(c * 256 / 100))
+
+
+def c_header(stock: bytes) -> str:
+    t = tables(stock)
+
+    def rows(rs, fmt="{}"):
+        return ",\n ".join("{" + ", ".join(fmt.format(v) for v in r) + "}" for r in rs)
+    names = ", ".join(f"(const char *){p:#010x}u" for p in t["names"]) + ", tn_long_35, tn_long_36"
+    short = ", ".join(f"(const char *){p:#010x}u" for p in t["short"]) + ", tn_short_35, tn_short_36"
+    strings = "".join(f'const char tn_long_{i}[] = "{NAMES[i][0]}";\nconst char tn_short_{i}[] = "{NAMES[i][1]}";\n'
+                      for i in (ROD12, MIN12))
+    tune = ",\n ".join("{" + ", ".join(str(fine(c)) for c in CENTS[i]) + "}" for i in (ROD12, MIN12))
+    n = LAST + 2
+    return (f"\n/* v0.58 microtonal scales (dnfw.waverider.scales) */\n#ifdef TUNE_C\n"
+            f"#define TN_FIRST {ROD12}\n#define TN_LAST {LAST}\n" + strings +
+            f"const char *const kb_names[{n}] = {{{names}}};\n"
+            f"const char *const kb_short[{n}] = {{{short}}};\n"
+            f"const int kb_keys[{n}][{KEYS_ROW}] = {{\n {rows(t['keys'])}}};\n"
+            f"const int kb_deg[{n - 1}][{DEG_ROW}] = {{\n {rows(t['deg'])}}};\n"
+            f"const unsigned char kb_mask[{n - 1}][{MASK_ROW}] = {{\n {rows(t['mask'])}}};\n"
+            f"static const short tn_fine[{LAST - ROD12 + 1}][12] = {{\n {tune}}};\n#endif\n")
