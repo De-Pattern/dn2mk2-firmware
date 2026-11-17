@@ -821,8 +821,11 @@ def main() -> int:
         # drawing throughout (scripts/emu_waverider_menu.py, keys and knob as the panel)
         if "rec_overlay" in lay:
             ov, src = hex(lay["rec_overlay"]), hex(lay["rec_src"])
+            # v0.59: then C (MON) on and off, each time the next command's channel word read
+            mon, sch = hex(lay["rec_mon"]), hex(lay["rec_sent_chan"])
             steps = (f"wait:5,png:p0,mem:{ov}:4,press:17,wait:3,tap:49,wait:3,release:17,"
-                     f"wait:30,mem:{ov}:4,png:a1,spin:0:3,wait:5,mem:{src}:4,spin:0:9,wait:5,mem:{src}:4,png:a2,no,"
+                     f"wait:30,mem:{ov}:4,png:a1,spin:0:3,wait:5,mem:{src}:4,spin:0:9,wait:5,mem:{src}:4,png:a2,"
+                     f"spin:2:3,wait:10,mem:{mon}:4,mem:{sch}:4,png:m1,spin:2:-3,wait:10,mem:{mon}:4,mem:{sch}:4,no,"
                      f"wait:30,mem:{ov}:4,png:a3,wait:5,png:a4")
             js = work / "recorder.json"
             rec_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
@@ -836,14 +839,18 @@ def main() -> int:
                 if rc == 0 and js.exists():
                     r = json.loads(js.read_text())
                     m = r["memory"]
-                    seen = [int(m[k], 16) for k in (ov, f"{ov}@1", f"{ov}@4")]
+                    seen = [int(m[k], 16) for k in (ov, f"{ov}@1", f"{ov}@8")]
                     srcs = [int(m[k], 16) for k in (src, f"{src}@3")]     # v0.41: 3 detents, then 9 more
-                    shots = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "a2", "a4")]
-                    good = (seen == [0, 1, 0] and srcs == [0, 3] and not r["setter_writes"]
-                            and r["screen_frames"] > 0 and shots[1] != shots[0] and shots[1] != shots[2])
-                    why = (f"overlay {seen}, src {srcs}, setter writes "
+                    mons = [int(m[k], 16) for k in (mon, f"{mon}@6")]      # v0.59: C on, then off
+                    chans = [int(m[k], 16) >> 30 & 1 for k in (sch, f"{sch}@7")]   # MON's bit in the next command
+                    shots = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "a2", "a4", "m1")]
+                    good = (seen == [0, 1, 0] and srcs == [0, 3] and mons == [1, 0] and chans == [1, 0]
+                            and not r["setter_writes"] and r["screen_frames"] > 0
+                            and shots[1] != shots[0] and shots[1] != shots[2] and shots[3] != shots[1])
+                    why = (f"overlay {seen}, src {srcs}, MON {mons}, its bit sent {chans}, setter writes "
                            f"{len(r['setter_writes'])}, frames {r['screen_frames']}")
-                return good, ("FUNC+VOICE opens it, knob A moves SRC four detents a choice (3: none, 12: three; v0.41) with no write to the sound, NO closes it, "
+                return good, ("FUNC+VOICE opens it, knob A moves SRC four detents a choice (3: none, 12: three; v0.41) with no write to the sound, "
+                 "C turns MON on and off, the next command carrying it (v0.59), NO closes it, "
                  "the screen drawn throughout"
                               if good else why)
             later("recorder", "recorder screen (ColdFire)", "recorder screen (ColdFire)", [rec_cmd, sorted(EMU_ENV.items())], rec_body)

@@ -167,6 +167,11 @@ TRK_ROUTE = 0x257898                       # k = the s16 at TRK_ROUTE + 2t (the 
 TRK_GAIN = 11.627                          # 0x1c244d's gain into that buffer, between triggers
 REC_STAGE = 0x2DF800                       # 32 floats of the block being recorded (dnfw.waverider.dsp)
 REC_GAIN = 0x2E0080                        # v0.50: a FLEX take's GAIN index (0 none) and factor (dnfw.waverider.dsp)
+# v0.59 MON (the RECORDER's C): the command's channel word's bit MON_BIT, kept here by every
+# recorder command (REC_GAIN's gap); with it, SRC IN and the recorder armed or recording, pvmix
+# adds the input (IN_BUF, L and R) to the main mix at unity, after the MAIN tap
+REC_MON = REC_GAIN + 8
+MON_BIT = 30
 # v0.50 (impbox: FLEX takes far quieter than their source): measured on the SHARC runner
 # (2026-11-12, step 3f flexlevel: track 0 ONESHOT looping at its defaults, each track routed to
 # its own slot, RMS past the amp envelope's attack). A take of TRK1 made with the RECORDER's
