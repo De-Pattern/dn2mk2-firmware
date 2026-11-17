@@ -146,3 +146,11 @@ int tn_kb_per_track(int set)                   /* SCALE per track (KB SETUP's fl
         ((set_fn)0x4003AC42u)(KB_OF(x), set);
     return SCALE_PER_TRACK(KB_OF(x)) & 1;
 }
+
+int tn_kb_mode(int set)                        /* the keyboard's MODE (chords), as tn_kb_scale */
+{
+    void *x = (void *)PATTERN_OF(CTX());
+    if (set >= 0)
+        ((set_fn)0x4003AED8u)(KB_OF(x), set);
+    return (signed char)((get_fn)0x4003AEA8u)(KB_OF(x));
+}

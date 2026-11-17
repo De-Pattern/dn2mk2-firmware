@@ -8,7 +8,15 @@ tables, each read through one accessor (docs/microtonal.md):
 - the keys, index + 1 (0x4020e320, 16 words a row: key k -> semitone; 0x401500c6);
 - the degrees, index (0x4020dea0, 8 words a row, -1 ends: chord MODEs; 0x401500dc);
 - the membership masks, index (0x4020ec20, 13 bytes a row: semitone 0..12 in the scale;
-  0x4014fe60).
+  0x4014fe60);
+- (v0.59) the chord MODEs' degree lists, index: 35 std::vectors of 12 bytes (begin, end, cap) at
+  0x405c6b98 in RAM, built on the keyboard's first chord from constant int arrays in flash
+  (0x40034770..0x40034af0: one constructor call a scale, 5 to 8 degrees), read by the chord code at
+  0x40034b44 (base + 12 x scale), which divides by the list's length. v0.58 left this one out: on
+  POOLE ROD12 / POOLE12 MIN a chord read past the 35th list, found an empty one and divided by zero
+  (zuzsw, 2026-11-17: EXCEPTION at P 40034BA6). The build now gives the chord code a const table
+  of 37 lists, each pointing straight at stock's own constant array (the same ints stock copies),
+  ROD12's Ionian's and MIN12's Aeolian's.
 
 and four getters/setters clamp the stored byte to -1..34. The build copies the five tables
 (stock rows, as stock has them) into the C chunk with two rows more, points the five accessors
@@ -31,6 +39,8 @@ ROD12, MIN12 = 35, 36
 LAST = MIN12
 
 NAMES_VA, SHORT_VA = 0x402A0E28, 0x402A0EB8
+CHORDVEC_RAM = 0x405C6B98                  # stock's 35 runtime lists (12 bytes each)
+CHORD_INIT = (0x40034770, 0x40034AF0)      # the code that builds them
 KEYS_VA, DEG_VA, MASK_VA = 0x4020E320, 0x4020DEA0, 0x4020EC20
 KEYS_ROW, DEG_ROW, MASK_ROW = 16, 8, 13
 AEOLIAN, IONIAN = 5, 0
@@ -51,6 +61,7 @@ SITES = (  # va of the 32-bit operand, opcode bytes before it, stock table, labe
     (0x401500CC, "41f9", KEYS_VA, "kb_keys"),
     (0x401500E2, "41f9", DEG_VA, "kb_deg"),
     (0x4014FEBA, "d1fc", MASK_VA, "kb_mask"),
+    (0x40034B46, "d9fc", CHORDVEC_RAM, "kb_chordvec"),  # v0.59: addal #lists,a4
 )
 CLAMPS = (  # va, register byte, what
     (0x4003AA34, 0x72, "KB SCALE getter: bound"), (0x4003AA3A, 0x70, "KB SCALE getter: clamp"),
@@ -89,6 +100,39 @@ def tables(stock: bytes) -> dict:
     return {"keys": keys, "deg": deg, "mask": mask, "names": names, "short": short}
 
 
+def chord_lists(stock: bytes) -> list[tuple[int, int]]:
+    """-> stock's 35 chord degree lists as (flash address, count), read from the code that
+    builds them: each constructor call is `moveq #n,d1`, `movel #array,d0`, `pea list`,
+    `jsr (a4)`, list i at CHORDVEC_RAM + 12 i."""
+    lo, hi = CHORD_INIT
+    code = _rd(stock, lo, hi - lo)
+    out, n, arr, vec = [], None, None, None
+    i = 0
+    while i < len(code) - 1:
+        w = code[i:i + 2]
+        if w[0] == 0x72:                                   # moveq #n,d1
+            n = w[1]
+        elif w == b"\x20\x3c":                             # movel #imm,d0
+            arr = struct.unpack(">I", code[i + 2:i + 6])[0]
+        elif w == b"\x48\x79":                             # pea abs.l
+            vec = struct.unpack(">I", code[i + 2:i + 6])[0]
+        elif w == b"\x4e\x94":                             # jsr (a4)
+            out.append((vec, arr, n))
+        i += 2
+    lists = []
+    for k, (vec, arr, cnt) in enumerate(out):
+        if vec != CHORDVEC_RAM + 12 * k or not cnt or not 0 < cnt <= 12 or not arr:
+            raise ValueError(f"stock's chord list {k} is not where it was ({vec:#x}, {arr}, {cnt})")
+        lists.append((arr, cnt))
+    if len(lists) != N_STOCK:
+        raise ValueError(f"{len(lists)} chord lists in stock's builder, not {N_STOCK}")
+    for arr, cnt in lists:                                  # degrees 0..11, ascending
+        d = _words(stock, arr, cnt)
+        if not all(0 <= x < 12 for x in d) or d != sorted(d):
+            raise ValueError(f"stock's chord list at {arr:#x} is not a scale: {d}")
+    return lists
+
+
 def fine(c: float | None) -> int:
     """cents -> the NOTE word's fine units (1/256 semitone)."""
     return 0 if c is None else int(round(c * 256 / 100))
@@ -103,6 +147,9 @@ def c_header(stock: bytes) -> str:
     short = ", ".join(f"(const char *){p:#010x}u" for p in t["short"]) + ", tn_short_35, tn_short_36"
     strings = "".join(f'const char tn_long_{i}[] = "{NAMES[i][0]}";\nconst char tn_short_{i}[] = "{NAMES[i][1]}";\n'
                       for i in (ROD12, MIN12))
+    lists = chord_lists(stock)
+    lists += [lists[IONIAN], lists[AEOLIAN]]
+    chord = ",\n ".join(f"{{{a:#010x}u, {a + 4 * c:#010x}u, {a + 4 * c:#010x}u}}" for a, c in lists)
     tune = ",\n ".join("{" + ", ".join(str(fine(c)) for c in CENTS[i]) + "}" for i in (ROD12, MIN12))
     n = LAST + 2
     return (f"\n/* v0.58 microtonal scales (dnfw.waverider.scales) */\n#ifdef TUNE_C\n"
@@ -112,4 +159,5 @@ def c_header(stock: bytes) -> str:
             f"const int kb_keys[{n}][{KEYS_ROW}] = {{\n {rows(t['keys'])}}};\n"
             f"const int kb_deg[{n - 1}][{DEG_ROW}] = {{\n {rows(t['deg'])}}};\n"
             f"const unsigned char kb_mask[{n - 1}][{MASK_ROW}] = {{\n {rows(t['mask'])}}};\n"
+            f"const unsigned int kb_chordvec[{LAST + 1}][3] = {{\n {chord}}};\n"
             f"static const short tn_fine[{LAST - ROD12 + 1}][12] = {{\n {tune}}};\n#endif\n")
