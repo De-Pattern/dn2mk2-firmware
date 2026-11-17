@@ -135,7 +135,12 @@ MNM_LONG = {"PW": "Pulse Width", "PWAD": "PW Sweep", "PWRS": "PW Restart", "WAVE
             "PCH2": "Pitch 2", "PCH3": "Pitch 3", "PCH4": "Pitch 4",
             # VO-6 (v0.26)
             "VOC1": "Vocal Freq 1", "VOC2": "Vocal Freq 2", "V-SW": "Vowel Switch",
-            "VOIC": "Voice Type", "CONS": "Consonant", "CLEN": "Cons Length", "CVOL": "Cons Volume"}
+            "VOIC": "Voice Type", "CONS": "Consonant", "CLEN": "Cons Length", "CVOL": "Cons Volume",
+            # FM+ STAT, PAR, DYN (v0.59)
+            "1FRQ": "Op1 Freq", "1FIN": "Op1 Fine", "1ENV": "Op1 Env", "1FB": "Op1 Feedback",
+            "2FRQ": "Op2 Freq", "2VOL": "Op2 Volume", "2ENV": "Op2 Env", "3FRQ": "Op3 Freq",
+            "3ENV": "Op3 Env", "1FEN": "Op1 Freq Env", "1VOL": "Op1 Volume", "1VEN": "Op1 Vol Env",
+            "2FB": "Op2 Feedback"}
 # parameters the port does not run (DENS's chorus is the Monomachine's effect after the
 # machine): drawn as "-", as an unused one
 MNM_UNPORTED = {"CHRL", "CHRW"}

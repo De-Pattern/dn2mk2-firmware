@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from dnfw.mnm import bench, ddrw, dens, rom, sid, vo6, wave
+from dnfw.mnm import bench, ddrw, dens, fm, rom, sid, vo6, wave
 from dnfw.mnm import core as C
 
-MACHINES = {"WAVE": wave, "SID": sid, "DENS": dens, "DDRW": ddrw, "VO6": vo6}
+MACHINES = {"WAVE": wave, "SID": sid, "DENS": dens, "DDRW": ddrw, "VO6": vo6,
+            "FMSTAT": fm.Stat, "FMPAR": fm.Par, "FMDYN": fm.Dyn}       # v0.59: FM+
 pytestmark = pytest.mark.skipif(not (rom.available() and bench.GOLDEN.is_dir()),
                                 reason="needs the owner's Monomachine OS and the golden runs")
 
@@ -59,7 +60,32 @@ def test_against_the_monomachine(name, case):
         assert r["ok"], {k: v for k, v in r.items() if k != "ok"}
         return
     r = bench.compare(ours, theirs)
+    if _chaotic(M, g):
+        # v0.59: FM+'s self feedback at 32 and above (dnfw.mnm.fm): within 60 dB, or held by its
+        # level and spectrum as the trimmed machines are
+        assert r["snr_db"] >= 60.0 or bench.likeness(ours, theirs)["ok"], r
+        return
     assert r["snr_db"] >= 60.0 or r["rms_err"] < 2.0 ** -20, r
+
+
+def _chaotic(M, g) -> bool:
+    k = getattr(M, "FB_KNOB", None)
+    return k is not None and any(e[1] and e[1][k] >= 32 for e in g["events"])
+
+
+def test_fm_chaotic_cases_are_only_the_self_feedback_ones():
+    """the negative control for the FM+ rule: the likeness test refuses a chaotic case 6 dB
+    down, and a case without self feedback (FM+ PAR's all; STAT's, DYN's at FB 0) is held to
+    60 dB"""
+    for name in ("FMSTAT", "FMDYN"):
+        M = MACHINES[name]
+        cases = bench.golden(name)["cases"]
+        hot = [c for c in cases if _chaotic(M, c)]
+        cold = [c for c in cases if not _chaotic(M, c)]
+        assert hot and cold
+        ours, theirs = bench.run_case(M, hot[-1])
+        assert not bench.likeness([v * 0.5 for v in ours], theirs)["ok"]
+    assert not any(_chaotic(fm.Par, c) for c in bench.golden("FMPAR")["cases"])
 
 
 @pytest.mark.parametrize("name", [n for n, M in MACHINES.items() if _trimmed(M)])

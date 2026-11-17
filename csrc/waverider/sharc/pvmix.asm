@@ -34,11 +34,11 @@ wr_pv_pv_1.:
       R0 = DM(0x2df768);
       R12 = 0x40;
       COMP(R0, R12);
-      IF LT JUMP 0xbf461d;                   // -> wr_pv_pv_1.
+      IF LT JUMP 0xbf4e1d;                   // -> wr_pv_pv_1.
       R0 = DM(0x2df764);
       R12 = 0x0;
       COMP(R0, R12);
-      IF LE JUMP 0xbf46d9;                   // -> wr_pv_else_2.
+      IF LE JUMP 0xbf4ed9;                   // -> wr_pv_else_2.
       R0 = 0x0;
       DM(0x2df768) = R0;
 .GLOBAL wr_pv_pv_3.;
@@ -46,7 +46,7 @@ wr_pv_pv_3.:
       R1 = DM(0x2df768);
       R2 = DM(0x2df764);
       COMP(R1, R2);
-      IF GE JUMP 0xbf4693;                   // -> wr_pv_else_4.
+      IF GE JUMP 0xbf4e93;                   // -> wr_pv_else_4.
       R12 = LSHIFT R1 BY 2;
       R13 = DM(0x2df760);
       R13 = R13 + R12;
@@ -84,7 +84,7 @@ wr_pv_else_4.:
       R0 = DM(0x2df768);
       R12 = 0x10;
       COMP(R0, R12);
-      IF LT JUMP 0xbf4651;                   // -> wr_pv_pv_3.
+      IF LT JUMP 0xbf4e51;                   // -> wr_pv_pv_3.
       R0 = DM(0x2df764);
       R12 = 0x10;
       R1 = MIN(R0, R12);
@@ -96,12 +96,12 @@ wr_pv_else_4.:
       DM(0x2df760) = R13;
       R0 = DM(0x2df764);
       R0 = PASS R0;
-      IF NE JUMP 0xbf46d9;                   // -> wr_pv_else_5.
+      IF NE JUMP 0xbf4ed9;                   // -> wr_pv_else_5.
       R1 = DM(0x2df790);
       R12 = 0x40000000;
       R2 = R1 AND R12;
       R2 = PASS R2;
-      IF EQ JUMP 0xbf46d9;                   // -> wr_pv_else_6.
+      IF EQ JUMP 0xbf4ed9;                   // -> wr_pv_else_6.
       R12 = 0x3fffffff;
       R1 = R1 AND R12;
       DM(0x2df764) = R1;
