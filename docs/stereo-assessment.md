@@ -305,3 +305,31 @@ sample.
 **Known for the test build:** the comb filters play a stereo sample's L on both sides (the
 fallback); the sends (reverb, delay, chorus) take L only; that R reaches the right output is the
 hardware test.
+
+## Field reports on v0.54-t1 (Error Kit, NiKo, Discord #bug-reports, 2026-11-15): the bug list
+
+The test build was pulled (owner) after these. Worked: the import page's "keep stereo", the size
+doubled, ST in the browser. Failed:
+
+1. **Preview** of a stereo sample: nothing.
+2. **A track on a stereo sample is silent**: the waveform is drawn, the playhead moves, no sound
+   (an 8 s sample; NiKo the same).
+3. **SLICE**: YES for 16 slices says **NO SAMPLE**.
+4. **Other tracks stall**: an FM Tone track needs 2-3 trig presses before it sounds.
+5. **A loud click** when the stereo sample's track is triggered again.
+6. **After a power cycle**: a click on that track, then **nothing on any track**, synths included
+   (NiKo). The DSP's audio stops: the worst of them.
+
+**Why the gate passed:** every stereo check ran in test mode (R made on the DSP from L's render).
+No step took a real stereo WAV through the import page, the sample link, the pool and the DSP's
+load, nor previewed, sliced or power-cycled one.
+
+**Before any new stereo work:** a coupled gate step of the field route: a real stereo WAV imported
+(keep stereo), loaded, previewed, played on a note beside an FM Tone track, sliced (16), then the
+project saved and loaded again (the power cycle). It passes only when the stereo sample sounds with
+L and R its own channels, the FM Tone track sounds on its first trig, no voice clicks (a jump
+limit), PREVIEW sounds and SLICE finds the sample. Negative control: v0.54-t1 must fail it (items 2
+and 4 at least). Then fix each item until it passes; then the sends and CHAN STEREO.
+
+Also (Error Kit, 2026-11-17, an idea, not for now): an FX machine on the input or another track,
+"like the Analog Heat": FLEX's routing into a track of effects, the source muted or mixed wet/dry.
