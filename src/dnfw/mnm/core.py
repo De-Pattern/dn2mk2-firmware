@@ -104,6 +104,11 @@ class Layout:
         for name, n in VO_TABLES:
             self.VO[name] = t
             t += 4 * n
+        # v0.59, FM+ (dnfw.mnm.fm): its tables after VO-6's (rom.fm_words)
+        self.FM = {}
+        for name, n in FM_TABLES:
+            self.FM[name] = t
+            t += 4 * n
 
 
 # v0.43: the bytes of the render scratch Layout lays out (IN .. DG), what dsp.MNM_RENDER_BYTES holds
@@ -117,6 +122,9 @@ DP_TABLES = (("interp", 320), ("dec2", 9), ("hb", 7), ("pch", 128), ("wid", 256)
 # renderers (40 words each), these two field-major
 VO_TABLES = (("c1", 4 * 0x620), ("cos", 0x614), ("blit", 0x333 - 0x131 + 1), ("log", 256),
              ("clen", 128), ("trig", 21 * 16), ("cons", 21 * 40))
+# v0.59, FM+'s after VO-6's (dnfw.mnm.rom.fm_words): its sine (8192 words and the first again),
+# the listed ratios, TONE's coefficients, DYN's envelope multipliers
+FM_TABLES = (("sine", 8193), ("flist", 24), ("tone", 128), ("envt", 129))
 DIGI_WORDS = 32 * 2048
 DIGI_OFF = 0x46000
 """The stand-in's 256 KB (32 x 2048 words, built by the DSP: dnfw.mnm.dpro.build), from the

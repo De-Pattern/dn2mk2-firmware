@@ -106,6 +106,22 @@ part that plays solid, LOOP's point marked in the loop modes, GRID's slices tick
   the track's AMP envelope, as on the DT2 (its manual: "constrained by the AMP page
   envelope parameters HLD and DEC").
 
+## MON (v0.59)
+
+The RECORDER's knob C (niko_24956: "a monitor switch to choose if input src can be heard or not
+while recording"; the DT2's MON, which is only for SRC IN too). With MON ON and SRC IN, the input
+is heard through the main out while the recorder is armed or recording, at unity, as it is
+recorded (EXT MIX's own input level unchanged and still adding its share). MAIN and the tracks
+are heard anyway, so MON leaves them alone. Not saved; OFF at power-on. FLEX REC has its own page
+and never sets it.
+
+How: `rec_mon` (rec.c) rides on every recorder command as bit 30 of the channel word
+(`SM.MON_BIT`); the DSP keeps it at `SM.REC_MON` (REC_GAIN's gap) from the recorder's own
+commands only (v0.39's rule); `pvmix`, at the master mix call, after the MAIN tap, adds
+`IN_BUF` (32 floats L, then R) to `MIX_BUF` when REC_MON, rsrc 0 and rst 1 or 2.
+Checked by `test_mon`, the SHARC runner's `pvmix` (seven MON cases), the `recorder` step (C on
+and off, the bit in the next command) and `rectext` (the label inside its corner in every state).
+
 ## Page 3: the RECORDER (v0.15..v0.21; v0.22 below)
 
 The third SYN page of every sample machine, laid out as the DT2's RECORDER (its manual
@@ -115,7 +131,7 @@ The third SYN page of every sample machine, laid out as the DT2's RECORDER (its 
 |---|---|---|
 | A | **SRC** | IN, MAIN, TRK1..TRK16, with the channel under it |
 | B | **CHAN** | MONO L+R, MONO L, MONO R (the DN2's tracks are mono: no STEREO) |
-| C | **RECORD NOW** | the dotted box: **YES** records at once; YES again stops |
+| C | **RECORD NOW** / **MON** | the dotted box: **YES** records at once; YES again stops. v0.59: the knob is MON (OFF / ON), "MON" in the box's top right when on |
 | D | **THRES** | 0..120, ticked on the meter |
 | E | **DEST** | SAMP 124..127 (the DT2 has MON here; the DN2 monitors its inputs itself) |
 | F | **R.LEN** | MAX (21.8 s, the slot) or 1..127 sixteenth steps at the tempo |

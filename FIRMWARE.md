@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.59 | 2026-11-18 | the Monomachine's **FM+ STAT / PAR / DYN** machines; **MON** on the RECORDER (hear the input while armed or recording) | `builds/v0.59-FMPLUS/` | yes |
 | ~~v0.58~~ PULLED | 2026-11-17 | two microtonal scales in KB SETUP: **Poole Rod12** and **Poole12 Min** after Locr. bb3 bb7, each note tuned by its cents above ROOT | `builds/v0.58-SCALES/` | yes |
 | **v0.57** | 2026-11-16 | FLEX **MUTE SRC** mutes the source only while the FLEX track plays (no more stuck tracks); REC 1/2 names gone; F bank letter for buffers | `builds/v0.57-FLEXMUTE/` | yes |
 | v0.56 | 2026-11-15 | DDRW: **TIME** glides between waves (up to ~2 s), **BR1/BR2** heard across the whole knob; the patcher builds test builds | `builds/v0.56-DDRW/` | yes |
@@ -96,6 +97,61 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.59 — FMPLUS (the Monomachine's FM+ machines, MON on the recorder)
+
+`DN2mod_v0.59_FMPLUS_OS1.11.syx`
+sha256 `1c1c62d80910966aa365a995030fb50736ab4f2d2dfd75747999d8953763d594`
+Gate: CLEARED TO FLASH, 2026-11-18 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `aee05a8` (branch `fmplus`). Docs: `docs/mnm.md` (FM+), `docs/sampler.md` (MON).
+
+Everything in v0.57, plus (v0.58 SCALES was pulled; it is not in this build):
+
+**FM+ STAT, FM+ PAR, FM+ DYN** (MACHINE SEL, after VO-6): the Monomachine's three FM machines.
+- **FM+ STAT**: 1FRQ 1FIN 1ENV 1FB 2FRQ 2VOL TONE TUNE. Operator 2 at its listed ratio (2VOL above 64
+  feeds it back); operator 1 at its ratio and fine tune with self feedback (1FB) and a decaying
+  envelope (1ENV).
+- **FM+ PAR**: 1FRQ 1ENV 2FRQ 2ENV 3FRQ 3ENV TONE TUNE. Three operators in parallel, each with its
+  own decaying envelope (xENV; above 64 it also feeds the operator back).
+- **FM+ DYN**: 1FRQ 1FEN 1VOL 1VEN 2FRQ 2ENV 2FB TUNE. Operator 1 with a frequency envelope (1FEN)
+  and a volume envelope (1VEN); operator 2 with self feedback (2FB) and its envelope (2ENV).
+- All three: the carrier at the note (note 60 = 261.6 Hz, as the other Monomachine machines), at twice
+  the rate, then the Monomachine's own decimator. TONE is a lowpass on the operators (STAT, PAR).
+- Built from the owner's Monomachine OS file at build time: its sine (the same 48-bit recursion,
+  word for word), its ratio, TONE and envelope tables.
+- How close: held to the Monomachine's own DSP code (an emulator) on 240 cases: within 60 dB
+  (69..99 dB), except high self feedback (STAT 1FB, DYN 2FB at 32 and up), which is chaotic on the
+  Monomachine itself: there the level and spectrum match.
+
+**MON** (the RECORDER's knob C; niko_24956's request): OFF / ON. With MON ON and SRC IN, you hear the
+input through the main out while the recorder is armed or recording, at the level it is recorded.
+"MON" shows in the top right of the record box when on. MAIN and TRK sources are already heard, so MON
+leaves them alone. OFF at power-on; FLEX REC is unchanged.
+
+**Gate (new checks):**
+- `unit`: every FM+ golden case (`test_mnm`), the chaotic-case rule with its negative control (6 dB
+  down is refused); FM+ costs (`test_perc_live`); MON (`test_mon`: heard armed, recording, any CHAN;
+  not heard OFF, MAIN, TRK1, idle, after STOP; the link's commands leave it).
+- `sharc:pvmix`: seven MON cases on the assembled code, bit for bit to the model, every other word as
+  stock's.
+- `recorder`: knob C turns MON on and off; the next command carries it.
+- `rectext`: "MON" inside its corner in every state of the box, over nothing else.
+
+**Tests**
+1. MACHINE SEL: FM+ Stat, FM+ Par, FM+ Dyn after VO-6. Each plays at its defaults, in tune with
+   another Monomachine machine at the same note.
+2. FM+ STAT: 1FB up to 127: noisier, harsher. 1ENV over 64: the modulation decays. TONE darkens it.
+3. FM+ PAR: turn 1ENV/2ENV/3ENV over 64: each operator decays at its own rate.
+4. FM+ DYN: 1FEN away from 64: a pitch sweep at the note's start. 1VEN: the brightness rises or falls.
+5. FUNC held on an FM+ page: the DSP load (each is lighter than SID).
+6. RECORDER, SRC IN, an instrument on the input, EXT MIX's input level down: MON OFF, ARM: silent;
+   MON ON: heard while armed and while recording; after the take: silent again.
+7. MON ON with SRC MAIN or a TRK: nothing changes.
+8. The regression check (top of this file).
+
+**Known issues**
+- Everything listed for v0.57.
+- FM+ at high self feedback is not sample for sample the Monomachine's (chaotic); it sounds the same.
+- MON is not saved; it is OFF after power-on.
 
 ## v0.58 — SCALES — PULLED 2026-11-17
 

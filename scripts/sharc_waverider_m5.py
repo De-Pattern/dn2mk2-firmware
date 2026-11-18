@@ -2606,8 +2606,22 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
 
     mix_in = [struct.unpack("<I", struct.pack("<f", 0.01 * k - 0.3))[0] for k in range(64)]
 
-    def run(image, words_left, mix0=mix_in, loop=False):
+    # v0.59 MON: the input block, and (mon, rsrc, rst) as the recorder leaves them
+    in_blk = [struct.unpack("<I", struct.pack("<f", 0.003 * k - 0.07))[0] for k in range(64)]
+
+    def poke_mon(put, mon):
+        if mon is None:
+            return
+        on, src, st = mon
+        put(SM.REC_MON, on)
+        put(C["rsrc"], src)
+        put(C["rst"], st)
+        for k in range(64):
+            put(SM.IN_BUF + 4 * k, in_blk[k])
+
+    def run(image, words_left, mix0=mix_in, loop=False, mon=None):
         r = init_on(snap, m2mach, image).fresh_call(dsp.PVMIX_SITE_SW, regs=regs)
+        poke_mon(lambda a, v: m2.poke(r.state, a, v), mon)
         for k in range(64):
             m2.poke(r.state, SM.MIX_BUF + 4 * k, mix0[k])
         for k, w in enumerate(pairs):
@@ -2633,9 +2647,10 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
     def mix(r):
         return [m2.word(r.state, SM.MIX_BUF + 4 * k) or 0 for k in range(64)]
 
-    def model(words_left, mix0, loop=False):
+    def model(words_left, mix0, loop=False, mon=None):
         from dnfw.perc.dsl import Mem
         mem = Mem(lambda a: 0)
+        poke_mon(mem.put, mon)
         for k in range(64):
             mem.put(SM.MIX_BUF + 4 * k, mix0[k])
         for k, w in enumerate(pairs):
@@ -2652,10 +2667,26 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
                           "pvl0", "pvln")}
     own |= {SM.MAIN_TAP + 4 * k for k in range(64)}     # v0.37: the MAIN tap is the preview's too
     out, checks = {}, {}
-    for name, left, loop in (("none", 0, False), ("full", 40, False), ("tail", 5, False), ("loop", 5, True)):
-        want, pva, pvn = model(left, mix_in, loop)
-        rs, hs, _ = run(stock, 0, want)        # stock, given the mix the preview makes
-        rm, hm, _ = run(m5, left, loop=loop)
+    # v0.59 MON: on, IN, armed (1) / recording (2): the input added; off, MAIN (1), a track (2),
+    # idle (0) or done (3): nothing (each its own case, so a MON that ignored any of them fails)
+    MON_CASES = (("mon armed", 0, False, (1, 0, 1)), ("mon recording", 5, False, (1, 0, 2)),
+                 ("mon off", 0, False, (0, 0, 2)), ("mon MAIN", 0, False, (1, 1, 2)),
+                 ("mon TRK1", 0, False, (1, 2, 2)), ("mon idle", 0, False, (1, 0, 0)),
+                 ("mon done", 0, False, (1, 0, 3)))
+    from dnfw.perc.dsl import f32
+    added = [struct.unpack("<I", struct.pack("<f", f32(struct.unpack("<f", struct.pack("<I", a))[0]
+                                                            + struct.unpack("<f", struct.pack("<I", b))[0])))[0]
+             for a, b in zip(mix_in, in_blk)]
+    for name, left, loop, *mon in (("none", 0, False), ("full", 40, False), ("tail", 5, False), ("loop", 5, True),
+                                   *MON_CASES):
+        mon = mon[0] if mon else None
+        want, pva, pvn = model(left, mix_in, loop, mon)
+        if mon is not None and left == 0:
+            hears = mon[0] == 1 and mon[1] == 0 and mon[2] in (1, 2)
+            checks[f"{name}: the model's mix {'is the mix + the input' if hears else 'untouched'}"] = (
+                want == (added if hears else mix_in))
+        rs, hs, _ = run(stock, 0, want, mon=mon)   # stock, given the mix the preview makes (v0.59: MON's words too)
+        rm, hm, _ = run(m5, left, loop=loop, mon=mon)
         ok = hs[0] == "stop" and hm[0] == "stop"
         same_regs = ok and rm.state.uregs == rs.state.uregs
         diff = sorted(a for a in set(rm.state.overlay) | set(rs.state.overlay)
@@ -2670,7 +2701,7 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         checks[f"{name}: the mix as the model's ({min(left, 16)} words added)"] = ok and got == want
         tap = [m2.word(rm.state, SM.MAIN_TAP + 4 * k) or 0 for k in range(64)]
         checks[f"{name}: v0.37: the MAIN tap holds the mix as it came, before the preview"] = ok and tap == mix_in
-        if left == 0:
+        if left == 0 and mon is None:
             checks["none: the mix untouched"] = ok and got == mix_in
         if loop:                                # v0.30: at its end it starts again
             checks["loop: at its end the preview starts again (pva back at its start, pvn its length)"] = (

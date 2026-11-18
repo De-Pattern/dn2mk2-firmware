@@ -156,6 +156,7 @@ def main() -> int:
     ]
     border0, bad = None, {}
     for name, v in states:
+        v = dict(v)                                       # (v0.59: kept for MON's pass below)
         heard = v.pop("heard", True)
         px = show("rec_" + name, heard, **v)
         border = {p for p in px if on_border(*p)}
@@ -167,6 +168,30 @@ def main() -> int:
             bad[name] = (out[:6], len(border ^ border0))
     check("every centre-box message of the RECORDER stays inside its box (no pixel in the gutters, "
           "the dotted border untouched) in all " + str(len(states)) + " states", not bad, bad)
+
+    # v0.59 MON (C): "MON" in the box's top right corner (x 82..96, y 43..47: screen rows 16..20)
+    # when on, in every state: drawn there and only there, over nothing any state draws there, the
+    # box and the gutters as above; off (every state above) nothing there. (The label's first
+    # column is x 82, inside the box: BX0 29 < 82, the border at 97 untouched.)
+    MX0, MX1, MR0, MR1 = 82, 96, 63 - 47, 63 - 43
+    mon_bad, mon_seen, base = {}, 0, {}
+    for name, v in states:
+        v = dict(v)
+        heard = v.pop("heard", True)
+        off = show("mon0_" + name, heard, rec_mon=0, **v)
+        on = show("mon1_" + name, heard, rec_mon=1, **v)
+        added = on - off
+        corner = {q for q in off if MX0 <= q[0] <= MX1 and MR0 <= q[1] <= MR1}
+        outside = sorted(q for q in added if not (MX0 <= q[0] <= MX1 and MR0 <= q[1] <= MR1))
+        mon_seen += bool(added)
+        border = {q for q in on if on_border(*q)}
+        if not added or outside or corner or (off - on) or border != border0:
+            mon_bad[name] = (len(added), outside[:4], sorted(corner)[:4], len(off - on))
+        base[name] = len(added)
+    put32(lay["rec_mon"], 0)
+    check("v0.59: MON drawn in the box's top right corner in all " + str(len(states)) + " states, over "
+          "nothing else, the border untouched; nothing there with MON off", not mon_bad and mon_seen == len(states),
+          mon_bad or base)
 
     # R.LEN (x 47, its 32-pixel column 31..62): MAX and step counts on one line
     rows, cols = {}, {}

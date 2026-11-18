@@ -133,6 +133,12 @@ int trim_zoom __attribute__((section(".data"))) = 0;      /* v0.33: TRIM's zoom,
 u32 trim_pos __attribute__((section(".data"))) = 0;       /* v0.33: its window's first frame */
 int rec_rlen __attribute__((section(".data"))) = 0;         /* 0 MAX, else steps */
 int rec_rstrt __attribute__((section(".data"))) = 0;        /* 0 THRES, 1 PLAY */
+/* v0.59 MON (the RECORDER's C, owner 2026-11-17): hear SRC IN through the main out while armed or
+ * recording (the DSP's pvmix adds it at unity); every recorder command carries it (bit 30 of the
+ * channel word); FLEX REC never sets it. OFF at power-on. */
+int rec_mon __attribute__((section(".data"))) = 0;
+#define MON_BIT (1u << 30)
+u32 rec_sent_chan __attribute__((section(".data"))) = 0;   /* the last command's channel word (the gate's) */
 /* v0.50 FLEX REC's G: a buffer take's GAIN in dB, -24..+38 (0: unity at the FLEX track's defaults).
  * Sent as the record command's channel word bits 24..29, GAIN + 25 (1..63); 0 there, the RECORDER's
  * own commands, keeps the DSP's v0.49 scaling exactly (dnfw.sampler.program settings()) */
@@ -286,15 +292,18 @@ static void send(int cmd)
         extern u32 smp_command_words(u32 *w, u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames);
         extern void rt_q_set(const u32 *w);
         u32 w[6];
-        sent_seq = smp_command_words(w, (u32)cmd, src, chan | (place / 512u) << 8, thr,
-                                     (u32)rec_dest << 24 | len);
+        extern int bn_active(void);
+        u32 m = rec_mon && !bn_active() ? MON_BIT : 0u;   /* v0.59 MON */
+        rec_sent_chan = chan | (place / 512u) << 8 | m;
+        sent_seq = smp_command_words(w, (u32)cmd, src, rec_sent_chan, thr, (u32)rec_dest << 24 | len);
         rt_q_set(w);
     } else {
         /* v0.50: FLEX REC's monitoring carries GAIN, so H's meter is the take's level */
         extern int bn_active(void);
         u32 g = cmd == CMD_MONITOR && bn_active() ? rec_gain_bits() : 0u;
-        sent_seq = smp_command((u32)cmd, src, chan | (place / 512u) << 8 | g, thr,
-                               (u32)rec_dest << 24 | len);
+        u32 m = rec_mon && !bn_active() ? MON_BIT : 0u;   /* v0.59 MON */
+        rec_sent_chan = chan | (place / 512u) << 8 | g | m;
+        sent_seq = smp_command((u32)cmd, src, rec_sent_chan, thr, (u32)rec_dest << 24 | len);
     }
     sent_at = FRAMES;
     mon_thres = rec_thres;
@@ -824,6 +833,10 @@ __attribute__((optimize("no-jump-tables"))) static void knob(int index, int delt
         rec_rstrt = delta > 0 ? 1 : 0;
     else if (index == 8)
         rec_arm_turn(delta);
+    else if (index == 3 && delta) {             /* v0.59: C MON, OFF / ON (as R.STRT) */
+        rec_mon = delta > 0 ? 1 : 0;
+        mon_known = 0;                          /* the DSP hears it with the next MONITOR */
+    }
 }
 
 static int closes(u32 code)

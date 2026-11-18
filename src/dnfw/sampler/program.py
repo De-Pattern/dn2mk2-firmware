@@ -1848,6 +1848,12 @@ def recorder(p: Prog, L: Layout) -> None:
             p.iop(6, 4, "AND", 12)
             p.ifz(6, "NE", lambda bit=bit: (p.fconst(12, 10.0 ** ((1 << bit) / 20.0)), p.fop(5, 5, "*", 12)))
         p.st(SM.REC_GAIN + 4, 5)
+        # v0.59 MON: bit MON_BIT of the channel word (the RECORDER's C; FLEX REC sends 0)
+        p.ld(4, cmd + 12)
+        p.lsh(4, 4, -SM.MON_BIT)
+        p.iconst(12, 1)
+        p.iop(4, 4, "AND", 12)
+        p.st(SM.REC_MON, 4)
 
     def new_command():
         p.ld(0, cmd)
@@ -3141,6 +3147,7 @@ def pvmix(p: Prog, L: Layout) -> None:
         p.iop(1, 12, "+", 1)
         p.st(C["pvk"], 1)
     _loop16(p, C, tap_word, 64)
+    mon(p, L)
     p.ld(0, C["pvn"])
     p.iconst(12, 0)
 
@@ -3213,6 +3220,46 @@ def pvmix(p: Prog, L: Layout) -> None:
             p.ifz(2, "NE", loop)
         p.ifz(0, "EQ", again)
     p.if_(0, "GT", 12, some, kind="i")
+
+
+def mon(p: Prog, L: Layout) -> None:
+    """v0.59 MON: with REC_MON on, SRC IN (rsrc 0) and the recorder armed or recording (rst 1,
+    2), MIX_BUF[k] += IN_BUF[k] for the block's 32 frames, L and R (both laid out as 32 floats
+    then 32): the input heard at unity, as it is recorded. Uses R0..R3, R12, R13, I1, pvk."""
+    C = L.C
+
+    def live():
+        p.iconst(1, 0)
+        p.st(C["pvk"], 1)
+
+        def word():
+            p.ld(1, C["pvk"])
+            p.lsh(12, 1, 2)
+            p.iconst(13, SM.IN_BUF)
+            p.iop(13, 13, "+", 12)
+            p.seti(1, 13)
+            p.ldi(2, 0, 1)
+            p.iconst(13, SM.MIX_BUF)
+            p.iop(13, 13, "+", 12)
+            p.seti(1, 13)
+            p.ldi(3, 0, 1)
+            p.fop(3, 3, "+", 2)
+            p.sti(0, 1, 3)
+            p.iconst(12, 1)
+            p.iop(1, 12, "+", 1)
+            p.st(C["pvk"], 1)
+        _loop16(p, C, word, 64)
+
+    def armed_or_recording():
+        p.ld(0, C["rst"])
+        p.iconst(12, 1)
+        p.if_(0, "GE", 12, lambda: (p.iconst(12, 2), p.if_(0, "LE", 12, live, kind="i")), kind="i")
+
+    def src_in():
+        p.ld(0, C["rsrc"])
+        p.ifz(0, "EQ", armed_or_recording)
+    p.ld(0, SM.REC_MON)
+    p.ifz(0, "NE", src_in)
 
 
 def _loop16(p: Prog, C, body, n: int = 16) -> None:

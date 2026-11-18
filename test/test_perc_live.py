@@ -290,7 +290,10 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
     # vowel with no consonant; TUNE 64
     knobs = {"SID 6581": (64, 0, 0, 0, 0, 0, 64, 64), "DPRO-WAVE": (0, 0, 0, 0, 0, 0, 0, 64),
              "DPRO-DDRW": (0, 0, 0, 0, 0, 0, 0, 64), "DPRO-DENS": (63, 63, 63, 0, 0, 0, 0, 64),
-             "VO-6": (64, 64, 127, 0, 0, 0, 0, 64)}
+             "VO-6": (64, 64, 127, 0, 0, 0, 0, 64),
+             # v0.59 FM+: the carrier alone (every operator's level 0)
+             "FM+STAT": (0, 64, 0, 0, 0, 0, 64, 64), "FM+PAR": (0, 0, 0, 0, 0, 0, 64, 64),
+             "FM+DYN": (0, 64, 0, 64, 0, 0, 0, 64)}
     for typ, k in PP.MNM_TYPES.items():
         name = MNM.NAMES[k]
         f = []

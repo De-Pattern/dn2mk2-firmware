@@ -2705,6 +2705,12 @@ void rec_screen_draw(void *c)
         }
     }
 
+    {                                           /* v0.59: C MON, in the box's top right corner, when on */
+        extern int rec_mon;
+        if (rec_mon)
+            LABEL(c, bx1 - 8, by1 - 5, "%s", "MON");
+    }
+
     /* THRES, on the right */
     LABEL(c, 113, 34, "%d", rec_thres);
     LABEL(c, 113, 22, "%s", "THRES");

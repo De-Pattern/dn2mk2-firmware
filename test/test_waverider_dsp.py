@@ -226,7 +226,7 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
         if b.count and 0x20000000 <= b.target < 0x20100000:
             assert b.target + b.count <= dsp.L2_IMAGE_END
     assert dsp.PERC_SW == 0xBE0000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
-    assert dsp.SMP_SW == 0xBF1800 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
+    assert dsp.SMP_SW == 0xBF2000 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD   # v0.59 (0xbf1800 before)
 
 
 def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
