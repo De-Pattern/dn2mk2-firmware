@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.60 | 2026-11-18 | fixes: **FM+** pages (knobs on the right parameters, the frequency bars drawn); **GRID** ALLOCATE SLICE RANDOM keeps its locks on NO | `builds/v0.60-FIXES/` | yes |
 | v0.59 | 2026-11-18 | the Monomachine's **FM+ STAT / PAR / DYN** machines; **MON** on the RECORDER (hear the input while armed or recording) | `builds/v0.59-FMPLUS/` | yes |
 | ~~v0.58~~ PULLED | 2026-11-17 | two microtonal scales in KB SETUP: **Poole Rod12** and **Poole12 Min** after Locr. bb3 bb7, each note tuned by its cents above ROOT | `builds/v0.58-SCALES/` | yes |
 | **v0.57** | 2026-11-16 | FLEX **MUTE SRC** mutes the source only while the FLEX track plays (no more stuck tracks); REC 1/2 names gone; F bank letter for buffers | `builds/v0.57-FLEXMUTE/` | yes |
@@ -97,6 +98,38 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.60 — FIXES (FM+ pages, GRID's ALLOCATE SLICE)
+
+`DN2mod_v0.60_FIXES_OS1.11.syx`
+sha256 `e52b56157c89e4ef69d03610e390d06301a7d96679c6793f7108fa1e760eae53`
+Gate: CLEARED TO FLASH, 2026-11-18 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `a4fbca6` (branch `microtuning`; no microtuning code is in the firmware yet). Docs: `docs/mnm.md` (FM+).
+
+Everything in v0.59, plus:
+
+**FM+ pages fixed** (zuzsw, Thos Grol): on FM+ STAT, PAR and DYN the knobs moved the wrong
+parameters and some showed "unused". The page lookup skipped over BOUNCE's machine number, so STAT
+got PAR's page, PAR got DYN's, and DYN read past the table. Each Monomachine machine now finds its
+page by an explicit test.
+- FM+'s listed frequencies (1FRQ, 2FRQ, 3FRQ) are drawn as the Monomachine's bar with the ratio
+  under it; DYN's 1FRQ / 2FRQ as its meter with the value as x.x / x.xx.
+- The sound was not affected: only which knob reached which parameter, and the drawing.
+
+**GRID: ALLOCATE SLICE, RANDOM** (impbox): RANDOM seemed to do nothing, because NO afterwards put
+the old locks back. As on the DT2, NO now leaves the menu keeping the locks RANDOM made.
+
+**Gate (changed checks):**
+- `mnmpages`: each Monomachine type's page record is its own (none shared, none past the table).
+- `alloc`: after RANDOM and NO, the slice locks are RANDOM's (any of the sample's slices).
+
+**Tests**
+1. FM+ STAT, PAR, DYN: each knob on each page moves the parameter its name says; none says "unused".
+2. 1FRQ / 2FRQ / 3FRQ: the bar and ratio follow the knob; on DYN the meter and value.
+3. A GRID track, a sliced sample: ALLOCATE SLICE, RANDOM, then NO: the steps keep the random slices.
+4. The regression check (top of this file).
+
+**Known issues**
+- Everything listed for v0.59.
 
 ## v0.59 — FMPLUS (the Monomachine's FM+ machines, MON on the recorder)
 
