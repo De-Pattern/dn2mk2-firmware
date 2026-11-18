@@ -22,20 +22,20 @@ sl_pre_hook:
         move.l  64(%a0), %d0
         rts
 
-| 0x4002717e (was: jsr 0x400db12a, the smoother; now jsr sl_smooth, its argument on the
+| 0x4002717e (was: jsr 0x400db28e, the smoother; now jsr sl_smooth, its argument on the
 | stack as before): see slide.c. The smoother leaves d1/a0/a1 as scratch; d0 its base.
 
-| 0x400db092, the lock applier (was: lea -44(%sp),%sp ; move.l 48(%sp),%d0; now jmp sl_apply)
+| 0x400db1f6, the lock applier (was: lea -44(%sp),%sp ; move.l 48(%sp),%d0; now jmp sl_apply)
         .globl  sl_apply_stock
 sl_apply_stock:
         .word   0x4fef, 0xffd4, 0x202f, 0x0030
-        jmp     0x400db09a
+        jmp     0x400db1fe
 
-| 0x400d85e8, the lock-list builder (was: lea -24(%sp),%sp ; moveq #101,%d0)
+| 0x400d874c, the lock-list builder (was: lea -24(%sp),%sp ; moveq #101,%d0)
         .globl  sl_build_stock
 sl_build_stock:
         .word   0x4fef, 0xffe8, 0x7065
-        jmp     0x400d85ee
+        jmp     0x400d8752
 
 | 0x4003d14e, clear a step's locks (was: lea -40(%sp),%sp ; movem.l %d2-%d7/%a2-%a5,(%sp))
         .globl  sl_clear_stock
@@ -43,17 +43,17 @@ sl_clear_stock:
         .word   0x4fef, 0xffd8, 0x48d7, 0x3cfc
         jmp     0x4003d156
 
-| 0x400de51e, a pattern's lock table loaded (was: lea -32(%sp),%sp ; movem.l %d2-%d5/%a2-%a5,(%sp))
+| 0x400de682, a pattern's lock table loaded (was: lea -32(%sp),%sp ; movem.l %d2-%d5/%a2-%a5,(%sp))
         .globl  sl_load_stock
 sl_load_stock:
         .word   0x4fef, 0xffe0, 0x48d7, 0x3c3c
-        jmp     0x400de526
+        jmp     0x400de68a
 
-| 0x400de718, a pattern's lock table saved (was: lea -28(%sp),%sp ; movem.l %d2-%d4/%a2-%a5,(%sp))
+| 0x400de87c, a pattern's lock table saved (was: lea -28(%sp),%sp ; movem.l %d2-%d4/%a2-%a5,(%sp))
         .globl  sl_save_stock
 sl_save_stock:
         .word   0x4fef, 0xffe4, 0x48d7, 0x3c1c
-        jmp     0x400de720
+        jmp     0x400de884
 
 | ---- v0.40: copy and paste carry SLD/SLEN (docs/slides.md) --------------------------------
 | The shapes are the arp p-locks' (scripts/build_arp_plocks.py, each path driven under the
@@ -76,8 +76,8 @@ sl_copy_cmp2:
         cmp.l   60(%a2), %d0
         rts
 
-| Track clear 0x400e745c (FUNC + PLAY: the track's records freed by their track byte, at
-| 0x400e752c; was: mvs.b 1(%a0),%d1 ; cmp.l %d1,%d2): the tag cleared, ours are freed with
+| Track clear 0x400e75c0 (FUNC + PLAY: the track's records freed by their track byte, at
+| 0x400e7690; was: mvs.b 1(%a0),%d1 ; cmp.l %d1,%d2): the tag cleared, ours are freed with
 | the track's stock locks. (Found under the emulator: v0.39 kept a cleared track's slides.)
         .globl  sl_clr_cmp
 sl_clr_cmp:

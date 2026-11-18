@@ -6,12 +6,12 @@ pattern cued with PTN + TRIG, ticked through stock's own sequencer ISR.
         --build out/jump-build --snapshot ../digikit/out/snapshots/dn2-1.11/ui800M-v014.snap \\
         --scenario on --variant pp [--stock] --json OUT
 
-The sequencer's timer ISR (0x400d987a, vector 121) does not fire by itself here (the timers
+The sequencer's timer ISR (0x400d99de, vector 121) does not fire by itself here (the timers
 are deferred), so the harness enters it as the interrupt would (an exception frame, its rte
 returns to a sentinel), four entries a tick at the snapshot's tempo; the UI runs between, as
 the panel drives it. Every entry's sequencer state is recorded: the playing pattern, the
 change counter, the tick, each track's current and next step, and a digest of the whole
-sequencer block (0x42c5a900..0x42c5ab00, 0x446483d0..0x446484c4).
+sequencer block (0x42c5b900..0x42c5bb00, 0x446493d0..0x446494c4).
 
 Two patterns are set up in RAM first (`--variant`): pp, A01 16 steps and A02 12, both per
 pattern at 1x; pt, A02 per track (master 16; tracks 16, 5, 7, 3, then 16); odd, A01 12 steps
@@ -25,7 +25,7 @@ steps since) wrapped by its new length. Scenarios:
 - `on`: PTN + YES first (the message, the setting, the sector written), then as `off`.
 - `ref`: A02 cued while stopped, then PLAY: stock playing A02 from PLAY, the control for
   where the jump must land.
-- `pc`: the setting on, A02 cued through the sequencer's cue routine directly (0x400d93f0,
+- `pc`: the setting on, A02 cued through the sequencer's cue routine directly (0x400d9554,
   as program changes, chains and songs cue): stock's timing.
 - `persist`: PTN + YES, then a power-on (the setting's RAM back to its boot values; the UI
   reads the sector); PTN + NO, a power-on again.
@@ -53,6 +53,7 @@ import os
 import pathlib
 import struct
 import sys
+import types
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -64,18 +65,35 @@ from emulib.panel import NO, YES, Panel                 # noqa: E402
 
 PLAY, PTN = (2, 3), (2, 6)
 TRIG = [(3 + k // 8, k % 8) for k in range(16)]         # codes 25..40
-SEQ_ISR, SEQ_VECTOR = 0x400D987A, 121
-CUE = 0x400D93F0
+SEQ_ISR, SEQ_VECTOR = 0x400D99DE, 121
+CUE = 0x400D9554
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
-P0, PSTRIDE = 0x4121898C, 122478                         # pattern n at P0 + n * PSTRIDE (0x400fa17c)
-K0, KSTRIDE = 0x4210C08C, 23921                          # its kit
+P0, PSTRIDE = 0x4121998C, 122478                         # pattern n at P0 + n * PSTRIDE (0x400fa348)
+K0, KSTRIDE = 0x4210D08C, 23921                          # its kit
 LEN, MODE, SCALE, TRK, TLEN = 122196, 122201, 122202, 1701, 1164
-FAULT_REPORTER = 0x4011EA6A
-BLK_READ, BLK_WRITE = 0x4012C59A, 0x4012C780
-BLK_READY, BLK_SECTORS = 0x4461B68C, 0x4461B6B0
+FAULT_REPORTER = 0x4011ED4A
+BLK_READ, BLK_WRITE = 0x4012C87A, 0x4012CA60
+BLK_READY, BLK_SECTORS = 0x4461C68C, 0x4461C6B0
 SET_SECTOR = 0x6FF000
 CALLS_A_TICK = 4                                         # ISR entries a tick here (measured)
 CUE_STEP, END_STEP = 3, 36
+# the sequencer's state a trace row keeps (record(); emu_jump_coupled.py reads it through seq_row)
+SEQ_STATE, SEQ_STATE_BYTES = 0x42C5B900, 0x200
+SEQ_NODES, SEQ_NODES_BYTES = 0x446493D0, 0xF4
+SEQ_PATTERN = 0x42C5B9A0                                 # the playing pattern: P0 + n * PSTRIDE
+SEQ_A91C, SEQ_TICK = 0x42C5B91C, 0x42C5B91E
+SEQ_GLOBAL, SEQ_SUB = 0x42C5B9D0, 0x42C5B9D4             # the global step, its sixths
+TRACK_CUR, TRACK_NEXT = 0x42C5B984, 0x42C5B964           # each track's step, and its next
+
+
+def seq_row(read, n: int, tag: str = "") -> dict:
+    """one trace row: the sequencer as record() keeps it (READ(va, n) -> bytes)"""
+    def u(va, k):
+        return int.from_bytes(read(va, k), "big")
+    return {"n": n, "tag": tag, "pat": (u(SEQ_PATTERN, 4) - P0) // PSTRIDE, "a91c": u(SEQ_A91C, 2),
+            "tick": u(SEQ_TICK, 1), "t6": u(SEQ_GLOBAL, 4) * 6 + u(SEQ_SUB, 4),
+            "cur": list(read(TRACK_CUR, 16)), "next": list(read(TRACK_NEXT, 16)),
+            "digest": hashlib.sha256(read(SEQ_STATE, SEQ_STATE_BYTES) + read(SEQ_NODES, SEQ_NODES_BYTES)).hexdigest()[:16]}
 
 
 def main() -> int:
@@ -148,32 +166,6 @@ def main() -> int:
     def sym(name, n=1):
         return int.from_bytes(m.read(syms[name], n), "big") if name in syms else None
 
-    # the patterns
-    A01, A02 = P0, P0 + PSTRIDE
-    m.write(A01 + LEN, struct.pack(">h", 12 if a.variant == "odd" else 16))
-    m.write(A01 + MODE, b"\0")
-    cue_step, end_step = (18, 50) if a.variant == "odd" else (CUE_STEP, END_STEP)
-    if a.variant == "odd":
-        m.write(A02 + LEN, struct.pack(">h", 16))
-        m.write(A02 + MODE, b"\0")
-        track_len = [16] * 16
-        master_len = 16
-    elif a.variant == "pp":
-        m.write(A02 + LEN, struct.pack(">h", 12))
-        m.write(A02 + MODE, b"\0")
-        track_len = [12] * 16
-        master_len = 12
-    else:
-        m.write(A02 + LEN, struct.pack(">h", 16))
-        m.write(A02 + MODE, b"\1")
-        track_len = [16, 5, 7, 3] + [16] * 12
-        master_len = 16
-        for t, n in enumerate(track_len):
-            m.write(A02 + TRK * t + TLEN, struct.pack(">h", n))
-            m.write(A02 + TRK * t + TLEN + 3, b"\2")    # +1167: 1x
-    for pat in (A01, A02):
-        m.write(pat + SCALE, b"\2")                      # 1x
-
     regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
 
     def isr():
@@ -204,29 +196,60 @@ def main() -> int:
                 uc.reg_write(r, v)
             uc.reg_write(K.UC_M68K_REG_PC, pc)
 
+    E = types.SimpleNamespace(m=m, panel=panel, isr=isr, guest=guest, u8=u8, u16=u16, u32=u32, sym=sym, syms=syms,
+                              disk=disk, io=io, faults=faults, ui_share=lambda k: panel.settle(200_000) if k % 8 == 7 else None)
+    return run(a, E)
+
+
+def run(a, E) -> int:
+    """the scenario A names on the machine E gives (emu_jump's own, or emu_jump_coupled.py's): the patterns, the
+    cues, the checks and the trace digest, the same whichever runs them"""
+    m, panel, isr, guest, u8, u32, sym, syms = E.m, E.panel, E.isr, E.guest, E.u8, E.u32, E.sym, E.syms
+    disk, io, faults = E.disk, E.io, E.faults
+    # the patterns
+    A01, A02 = P0, P0 + PSTRIDE
+    m.write(A01 + LEN, struct.pack(">h", 12 if a.variant == "odd" else 16))
+    m.write(A01 + MODE, b"\0")
+    cue_step, end_step = (18, 50) if a.variant == "odd" else (CUE_STEP, END_STEP)
+    if a.variant == "odd":
+        m.write(A02 + LEN, struct.pack(">h", 16))
+        m.write(A02 + MODE, b"\0")
+        track_len = [16] * 16
+        master_len = 16
+    elif a.variant == "pp":
+        m.write(A02 + LEN, struct.pack(">h", 12))
+        m.write(A02 + MODE, b"\0")
+        track_len = [12] * 16
+        master_len = 12
+    else:
+        m.write(A02 + LEN, struct.pack(">h", 16))
+        m.write(A02 + MODE, b"\1")
+        track_len = [16, 5, 7, 3] + [16] * 12
+        master_len = 16
+        for t, n in enumerate(track_len):
+            m.write(A02 + TRK * t + TLEN, struct.pack(">h", n))
+            m.write(A02 + TRK * t + TLEN + 3, b"\2")    # +1167: 1x
+    for pat in (A01, A02):
+        m.write(pat + SCALE, b"\2")                      # 1x
+
     trace = []
 
     def pat_index():
-        return (u32(0x42C5A9A0) - P0) // PSTRIDE
+        return (u32(SEQ_PATTERN) - P0) // PSTRIDE
 
     def record(tag=""):
-        block = m.read(0x42C5A900, 0x200) + m.read(0x446483D0, 0xF4)
-        row = {"n": len(trace), "tag": tag, "pat": pat_index(), "a91c": u16(0x42C5A91C), "tick": u8(0x42C5A91E),
-               "t6": u32(0x42C5A9D0) * 6 + u32(0x42C5A9D4),
-               "cur": list(m.read(0x42C5A984, 16)), "next": list(m.read(0x42C5A964, 16)),
-               "digest": hashlib.sha256(block).hexdigest()[:16]}
+        row = seq_row(m.read, len(trace), tag)
         trace.append(row)
         return row
 
     def ticks(n, tag=""):
         for k in range(n * CALLS_A_TICK):
             isr()
-            if k % 8 == 7:
-                panel.settle(200_000)
+            E.ui_share(k)
             record(tag)
 
     def global_step():
-        return u32(0x42C5A9D0)
+        return u32(SEQ_GLOBAL)
 
     out = {"scenario": a.scenario, "variant": a.variant, "stock": a.stock}
 
@@ -252,7 +275,7 @@ def main() -> int:
         out.update(on=sym("jmp_on"), sector_after_yes=sector(), writes_after_yes=list(io["writes"]))
 
     if a.scenario == "rapid":
-        return rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with_ptn)
+        return rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with_ptn, E.ui_share)
 
     if a.scenario == "persist":
         # power-on: the setting's RAM as the loader leaves it (.data: off, unread), the
@@ -292,11 +315,11 @@ def main() -> int:
     ticks(3)
     cue_at = len(trace)
     out["cue_global_step"] = global_step()
-    out["cue_tick"] = u8(0x42C5A91E)
+    out["cue_tick"] = u8(SEQ_TICK)
     if a.scenario in ("off", "on"):
         cue_a02()
     elif a.scenario == "pc":
-        entry = struct.pack(">IIhhh2xib3x", A02, K0 + KSTRIDE, -1, -1, 0, -1, -1)   # as 0x400fa11e builds it
+        entry = struct.pack(">IIhhh2xib3x", A02, K0 + KSTRIDE, -1, -1, 0, -1, -1)   # as 0x400fa2ea builds it
         buf = STACK_TOP + 0x2000
         m.write(buf, entry[:24])
         guest(CUE, buf, 1)
@@ -346,7 +369,7 @@ def main() -> int:
     return 0 if not faults else 1
 
 
-def rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with_ptn) -> int:
+def rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with_ptn, ui_share) -> int:
     """the rapid-fire sweep (the module's docstring, `rapid`)"""
     pats = [P0 + n * PSTRIDE for n in range(4)]
     lens = [16, 12, 7, 5]
@@ -357,15 +380,14 @@ def rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with
         m.write(pat + SCALE, bytes([sc]))
 
     def pat_index():
-        v = u32(0x42C5A9A0)
+        v = u32(SEQ_PATTERN)
         return (v - P0) // PSTRIDE if v >= P0 else -1
     count = [0]
 
     def entry():
         isr()
+        ui_share(count[0])
         count[0] += 1
-        if count[0] % 8 == 0:
-            panel.settle(200_000)
         return record()
 
     def cue(keys):

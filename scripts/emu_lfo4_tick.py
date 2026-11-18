@@ -11,7 +11,7 @@ asked directly rather than through a flash and a listen.
 
 A snapshot is restored, the build's bytes are written in -- only where they
 differ from stock, so what runs is the patched firmware and nothing else -- and
-evaluator A (`0x40137726`) is entered with a laid-out parameter mirror and the
+evaluator A (`0x40137a06`) is entered with a laid-out parameter mirror and the
 relocated state arrays zeroed. Its own code runs from there: the generator, the
 MAC-unit apply, the state walk.
 
@@ -46,7 +46,7 @@ ROOT = "/mnt/d/01_Code/Z_Personal/dn2_firmware"
 BUILT = f"{ROOT}/out/lfo4-tick7/section_3_MAIN_OS.bin"
 BASE = 0x40000400
 
-EVAL_A = 0x40137726
+EVAL_A = 0x40137a06
 MIRROR_SLOTS, MIRROR_BYTES = 101, 202
 STATE = (0x46700000, 0x46701000, 0x46702000)   # live, second, backup (v6a's relocation)
 STATE_LEN, STATE_STRIDE = 2560, 160
@@ -57,15 +57,15 @@ MIRROR_AT = 34                                  # the prologue's `lea %a0@(34),%
 
 # The seven arguments, read off the firmware's own call at 0x400272a4:
 #   1 the parameter mirror           5 a scratch pointer (an out-parameter)
-#   2 [0x402a0dec], a global scale   6 another
+#   2 [0x402a132c], a global scale   6 another
 #   3 a per-track enable mask        7 a flag whose low byte asks for a state
 #   4 a second mask                    backup before the walk
-RATE = 0x402A0DEC
+RATE = 0x402A132C
 
 # The evaluator asserts `GET_MACSR_MODE() == MACF_FRAC` (../../../lib/shared/sm/
 # fade.c:16, getFadeStep) -- it expects its caller to have put the EMAC in
 # fractional mode, which the audio-frame function does and a bare snapshot has
-# not. Evaluator B sets it itself at 0x401373f0. Unicorn does not expose MACSR,
+# not. Evaluator B sets it itself at 0x401376d0. Unicorn does not expose MACSR,
 # so it is set the way the firmware sets it: by running the instruction.
 SET_FRAC = bytes.fromhex("a93c000000204e75")      # movel #32,%macsr ; rts
 

@@ -29,7 +29,7 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-#define FRAMES (*(volatile u32 *)0x4058E8D4u)                         /* frames since boot, 1,500 a second */
+#define FRAMES (*(volatile u32 *)0x4058F8D4u)                         /* frames since boot, 1,500 a second */
 #define REC_THR_FLOOR 33u                       /* v0.30: THRES 0's level, -60 dB, under any real input */
 #define CTL_FRAME ((volatile u16 *)0x80005E60u)
 #define FLEX_TRIG_LEN_AT 1153u                  /* v0.54: the pattern's per-track trig LEN byte (+1701 a track) */
@@ -88,7 +88,7 @@ extern void smp_discard(int k);
 static void rename_start(int slot);
 static void sn_poll(void);                     /* v0.54: the stock NAME screen */
 static int lst_func __attribute__((section(".data"))) = 0;
-#define UI_TRACK_NOW (*(volatile unsigned char *)0x42431A6Cu)
+#define UI_TRACK_NOW (*(volatile unsigned char *)0x42432A6Cu)
 int smp_set_samp(int track, int value);
 int smp_samp_of(int track);
 extern u32 smp_frames(int k);
@@ -192,11 +192,11 @@ static u32 rec_length(void)
      * step at 1x; 2x 3, 1/2x 12 ...). v0.15..v0.51 counted 1x sixteenths: at 2x, 64 steps took
      * twice the pattern's 64 */
     u32 ticks = 6;
-    const u8 *pat = (const u8 *)*(volatile u32 *)0x42C5A9A0u;   /* the pattern playing */
+    const u8 *pat = (const u8 *)*(volatile u32 *)0x42C5B9A0u;   /* the pattern playing */
     if (pat) {
         signed char i = (signed char)pat[122202];
         if (i >= 0 && i <= 6) {
-            u32 n = ((const u8 *)0x401F6B08u)[4 * i + 3];
+            u32 n = ((const u8 *)0x401F6F18u)[4 * i + 3];
             if (n >= 3 && n <= 48)
                 ticks = n;
         }
@@ -340,10 +340,10 @@ extern int rt_is_bounce(u32 t);
 extern unsigned char *sl_ui_table_now(void);
 extern u32 rt_trig_toggle(unsigned char *table, u32 t, u32 step, int oneshot);
 extern u32 rt_rearm(unsigned char *table, u32 t);
-#define UI_TRACK_B (*(volatile unsigned char *)0x42431A6Cu)
-#define TRACK_CUR_B ((volatile unsigned char *)0x42C5A984u)
-#define SEQ_PLAYING_B (*(volatile u32 *)0x42C5A918u)
-#define SEQ_PATTERN_B (*(volatile u32 *)0x42C5A9A0u)
+#define UI_TRACK_B (*(volatile unsigned char *)0x42432A6Cu)
+#define TRACK_CUR_B ((volatile unsigned char *)0x42C5B984u)
+#define SEQ_PLAYING_B (*(volatile u32 *)0x42C5B918u)
+#define SEQ_PATTERN_B (*(volatile u32 *)0x42C5B9A0u)
 
 void bn_save(void);                             /* FUNC + YES: the take into a pool slot (below) */
 
@@ -369,7 +369,7 @@ u32 bn_pages(void)
 /* v0.45 (owner: "Can't we just do a different color for rec trigs ... only visible when rec
  * window is open?"): while the BOUNCE REC panel is up, the 16 [TRIG] LEDs show the page's
  * recorder trigs (stock's LED path, docs/leds.md): the per-refresh compose (0x4002c854)
- * clears the LedManager's arrays, then walks the views (jsr 0x4011d3b2, LED_SITE), each
+ * clears the LedManager's arrays, then walks the views (jsr 0x4011d692, LED_SITE), each
  * view claiming the LEDs it sets, the first write winning (0x4002c318 returns at once for an
  * LED already set this refresh). bn_led_walk is that jsr: it claims the 16 trig LEDs (logical
  * ids 26..41) first, then the walk runs as stock's, so no stock view can light them while
@@ -377,10 +377,10 @@ u32 bn_pages(void)
  * palette indices (2..17 red, 50..65 yellow, 98..113 white, 16 levels each, brightest last):
  * a recorder trig red, a one-shot armed yellow, spent dim yellow, the playing step white,
  * an empty step or one past the pattern unlit (stock's mode 1). */
-#define LED_WALK ((void (*)(void *))0x4011D3B2u)
-#define LED_MGR ((u32 (*)(void))0x4018AABCu)
+#define LED_WALK ((void (*)(void *))0x4011D692u)
+#define LED_MGR ((u32 (*)(void))0x4018AD9Cu)
 #define LED_SET ((void (*)(u32, u32, u32, u32))0x4002C318u)
-#define LED_DIRTY ((void (*)(void *))0x4011D314u)
+#define LED_DIRTY ((void (*)(void *))0x4011D5F4u)
 #define LED_TRIG0 26u
 #define LED_REC 17u
 #define LED_ONE 65u
@@ -620,7 +620,7 @@ void rec_poll(void)
     static int val_shown __attribute__((section(".data"))) = 0;
     extern int smp_knob_code;
     extern u32 smp_knob_at;
-    if (smp_knob_code && *(volatile u32 *)0x4058E8D4u - smp_knob_at < 1500u)
+    if (smp_knob_code && *(volatile u32 *)0x4058F8D4u - smp_knob_at < 1500u)
         val_shown = 1;
     else if (val_shown) {
         val_shown = 0;
@@ -752,7 +752,7 @@ static u32 rk_at __attribute__((section(".data"))) = 0;
 
 static int rec_choice_step(int index, int delta)    /* -> the choices to move */
 {
-    u32 now = *(volatile u32 *)0x4058E8D4u;
+    u32 now = *(volatile u32 *)0x4058F8D4u;
     if (rk_index != index || now - rk_at > 3000u || (rk_acc > 0 && delta < 0) || (rk_acc < 0 && delta > 0))
         rk_acc = 0;
     rk_index = index;
@@ -842,7 +842,7 @@ static int closes(u32 code)
  * setValue(set, id, value << 8, track, rec 0, midi 0, announce 1) as the knob path, and
  * MACHINE SEL's commit(model, track, type, 1, 1), which resets the sound to the machine's
  * defaults (so SAMP is set after it) */
-#define UI_OWNER   ((u32 (*)(void))0x4018A97Au)
+#define UI_OWNER   ((u32 (*)(void))0x4018AC5Au)
 #define PARAM_SET  ((u32 (*)(u32, u32, u32))0x40041A40u)
 #define SET_VALUE  ((u32 (*)(u32, u32, u32, u32, u32, u32, u32))0x40037326u)
 #define MACHINE_COMMIT ((u32 (*)(u32, u32, u32, u32, u32))0x40031880u)
@@ -858,7 +858,7 @@ static u32 bt_at __attribute__((section(".data"))) = 0;
 static void buf_turn(int delta)
 {
     extern u32 rt_buf_of(u32 t);
-    u32 t = UI_TRACK_B, now = *(volatile u32 *)0x4058E8D4u;     /* rectrig.c's FRAMES */
+    u32 t = UI_TRACK_B, now = *(volatile u32 *)0x4058F8D4u;     /* rectrig.c's FRAMES */
     if (now - bt_at > 3000u || (bt_acc > 0 && delta < 0) || (bt_acc < 0 && delta > 0))
         bt_acc = 0;
     bt_at = now;
@@ -869,7 +869,7 @@ static void buf_turn(int delta)
         return;
     int b = (int)rt_buf_of(t) + n;
     b = b < 0 ? 0 : b > 7 ? 7 : b;
-    const int *rw = (const int *)(0x401F7F94u + 60u * SMP_BUF_ID);
+    const int *rw = (const int *)(0x401F83A4u + 60u * SMP_BUF_ID);
     int lo = rw[2] >> 8, top = rw[3] >> 8, span = top - lo + 1;
     if (span < 8)
         span = 8;
@@ -979,7 +979,7 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
          * pattern + 1153 + 1701 x track; stock's default 14 is 1/16) at INF (127, the knob's
          * top), so a note plays the whole take. Only here, on a switch to FLEX: a loaded
          * pattern, an existing FLEX track and a trig's own LEN lock are left as they are */
-        u32 pat = *(volatile u32 *)0x42C5A9A0u;
+        u32 pat = *(volatile u32 *)0x42C5B9A0u;
         if (pat)
             *(volatile unsigned char *)(pat + FLEX_TRIG_LEN_AT + 1701u * track) = FLEX_TRIG_LEN;
     }
@@ -1020,16 +1020,16 @@ int smp_trig_track(u32 code)
  * (smp_question_up) and none of our screens draws (page.c's wr_screen). Anything not as
  * expected (no main screen view yet, or one whose controller is not the screen we draw over)
  * leaves our own naming screen in use. */
-#define SN_NEW       ((u32 (*)(u32))0x40120264u)    /* operator new (as u32: stock returns in d0; a pointer return here would read a0) */
-#define SN_STR       ((void (*)(void *, const char *, void *))0x401CE69Eu)   /* std::string(const char *, alloc) */
-#define SN_STR_FREE  ((void (*)(void *))0x401CCBEEu)                    /* ~std::string */
-#define SN_FN_FREE   ((void (*)(void *))0x40188086u)                    /* ~std::function */
-#define SN_VIEW      ((void (*)(void *, void *, void *, int, int, int, void *, void *))0x40119156u)
-#define SN_OPEN      ((void (*)(void *, void *, int))0x4011C8BEu)       /* View::open(child shared_ptr, 0) */
-#define SN_COUNT_FREE ((void (*)(void *))0x401880CCu)                  /* ~__shared_count */
-#define SN_MAIN_VIEW 0x44647980u                                        /* MainScreenView's shared_ptr */
-#define SN_BLOCK_VT  0x401E0BC8u                                        /* _Sp_counted_ptr_inplace<NameView> */
-#define SN_VIEW_VT   0x40206AC0u                                        /* NameView */
+#define SN_NEW       ((u32 (*)(u32))0x40120544u)    /* operator new (as u32: stock returns in d0; a pointer return here would read a0) */
+#define SN_STR       ((void (*)(void *, const char *, void *))0x401CEAB8u)   /* std::string(const char *, alloc) */
+#define SN_STR_FREE  ((void (*)(void *))0x401CD008u)                    /* ~std::string */
+#define SN_FN_FREE   ((void (*)(void *))0x40188366u)                    /* ~std::function */
+#define SN_VIEW      ((void (*)(void *, void *, void *, int, int, int, void *, void *))0x40119436u)
+#define SN_OPEN      ((void (*)(void *, void *, int))0x4011CB9Eu)       /* View::open(child shared_ptr, 0) */
+#define SN_COUNT_FREE ((void (*)(void *))0x401883ACu)                  /* ~__shared_count */
+#define SN_MAIN_VIEW 0x44648980u                                        /* MainScreenView's shared_ptr */
+#define SN_BLOCK_VT  0x401E0FD8u                                        /* _Sp_counted_ptr_inplace<NameView> */
+#define SN_VIEW_VT   0x40206F78u                                        /* NameView */
 #define SN_BYTES     0xB0u                                              /* the block (16) and the view (160) */
 static char sn_name[NM_LONG + 1] __attribute__((section(".data")));
 static int sn_state __attribute__((section(".data"))) = 0;     /* 1 open, 2 named (YES) */
@@ -1123,7 +1123,7 @@ static int sn_open(const char *title, const char *text, int max)
     SN_COUNT_FREE(&sp[1]);
     sn_state = 1;
     sn_seen = 0;
-    sn_at = *(volatile u32 *)0x4058E8D4u;
+    sn_at = *(volatile u32 *)0x4058F8D4u;
     sn_opens++;
     return 1;
 }
@@ -1283,7 +1283,7 @@ static void sn_poll(void)
         smp_overlay_dirty = 1;
         return;
     }
-    if (!up && (sn_seen || *(volatile u32 *)0x4058E8D4u - sn_at > 3000u)) {
+    if (!up && (sn_seen || *(volatile u32 *)0x4058F8D4u - sn_at > 3000u)) {
         sn_state = 0;
         if (rec_phase == PH_SNAME) {
             rec_phase = PH_NAME;
@@ -1485,7 +1485,7 @@ static void grid_move(u32 code)
 
 /* v0.27: LEFT/RIGHT held on FILE NAME repeat (owner: as the DN2's own naming screen), a
  * short wait and then a steady step; rec_poll steps them, the key's release stops them */
-#define RPT_WAIT 600u                           /* 0.4 s, in the 1.5 kHz ticks of 0x4058e8d4 */
+#define RPT_WAIT 600u                           /* 0.4 s, in the 1.5 kHz ticks of 0x4058f8d4 */
 #define RPT_STEP 120u                           /* then 12.5 a second */
 static u32 rpt_code __attribute__((section(".data"))) = 0;
 static u32 rpt_next __attribute__((section(".data"))) = 0;
@@ -1495,7 +1495,7 @@ static void rpt_start(u32 code)
 {
     rpt_code = code;
     rpt_grid = smp_func_held;
-    rpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
+    rpt_next = *(volatile u32 *)0x4058F8D4u + RPT_WAIT;
 }
 
 /* v0.30: UP/DOWN held in the sample list or the folder browser step on by themselves, as
@@ -1510,7 +1510,7 @@ static void lst_press(u32 code)
 {
     lst_step(code);
     lrpt_code = code;
-    lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
+    lrpt_next = *(volatile u32 *)0x4058F8D4u + RPT_WAIT;
 }
 #define FB_PAGE 6                               /* v0.39: the browser's rows: FUNC + an arrow, a pushed knob */
 
@@ -1562,7 +1562,7 @@ static void lrpt_poll(void)
     if (no_at && smp_fb_open) {                 /* v0.31: NO held half a second: the top */
         if (!(smp_held_lo & (1u << K_NO)))
             no_at = 0;
-        else if (*(volatile u32 *)0x4058E8D4u - no_at > 750u) {
+        else if (*(volatile u32 *)0x4058F8D4u - no_at > 750u) {
             no_at = 0;
             smp_fb_store = -1;
             smp_fb_folder = -1;
@@ -1573,7 +1573,7 @@ static void lrpt_poll(void)
     }
     if (!lrpt_code)
         return;
-    u32 now = *(volatile u32 *)0x4058E8D4u;
+    u32 now = *(volatile u32 *)0x4058F8D4u;
     if ((int)(now - lrpt_next) < 0)
         return;
     lrpt_next = now + RPT_STEP;
@@ -1589,7 +1589,7 @@ static void rpt_poll(void)
         rpt_code = 0;
         return;
     }
-    u32 now = *(volatile u32 *)0x4058E8D4u;
+    u32 now = *(volatile u32 *)0x4058F8D4u;
     if ((int)(now - rpt_next) < 0)
         return;
     rpt_next = now + RPT_STEP;
@@ -1717,21 +1717,21 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
  * list. A taken item's type becomes IT_DROP, which the loop passes over. */
 /* v0.30: a stock question up (a user's report: on a SLICE track, the OS update's "UPGRADE
  * OS NOW?" answered by our page: "NO SAMPLE ON SAMP"; and FUNC + SETTINGS's save question,
- * v0.29). The screen (0x4011d32a's first argument, page.c's wr_screen_obj) keeps its views
+ * v0.29). The screen (0x4011d60a's first argument, page.c's wr_screen_obj) keeps its views
  * in a list: node +0 the next, +8 the view; the sentinel at screen + 20, the first node at
- * screen + 28 (0x4011d32a's own walk). A question (0x40112a2e: "SAVE ALL PATTERNS AND
- * PROJ SETTINGS? Y/N", "UPGRADE OS NOW?") is a view of class 0x40206264 put at the list's
+ * screen + 28 (0x4011d60a's own walk). A question (0x40112d0e: "SAVE ALL PATTERNS AND
+ * PROJ SETTINGS? Y/N", "UPGRADE OS NOW?") is a view of class 0x4020671c put at the list's
  * end while it is up (measured: FUNC + SETTINGS in the emulator, the list grows from 7 to
  * 8 views, the question's NO takes it out again). While one is up every key is stock's. */
-#define QUESTION_VTABLE 0x40206264u
+#define QUESTION_VTABLE 0x4020671cu
 /* v0.41 (the owner, v0.40: on a SLICE/GRID track, FUNC + SETTINGS, then "YES opens the slice
  * menu, sometimes"): the question is seen, but a YES while stock's SAVING bar is up (a second
  * or more on the unit), or on the message after it (PROJECT SAVED, ERROR), found the page
  * under it and opened the menu over the save. Those are views of their own classes, put at
  * the list's end as the question is (measured in the emulator: the harness's walk: step).
  * While any of them is up every key is stock's */
-#define PROGRESS_VTABLE 0x40206E94u
-#define MESSAGE_VTABLE 0x40206DDCu
+#define PROGRESS_VTABLE 0x4020734Cu
+#define MESSAGE_VTABLE 0x40207294u
 static int ram_ok(u32 a)
 {
     return a >= 0x40000000u && a < 0x48000000u && !(a & 3);
@@ -1767,7 +1767,7 @@ u32 smp_trig_at[16] __attribute__((section(".data"), aligned(4)));
 int smp_trig_held(void)
 {
     extern u32 smp_held_hi;
-    u32 now = *(volatile u32 *)0x4058E8D4u;
+    u32 now = *(volatile u32 *)0x4058F8D4u;
     for (int k = 0; k < 16; k++) {
         u32 code = 25u + (u32)k;
         u32 on = code < 32 ? (smp_held_lo >> code) & 1u : (smp_held_hi >> (code - 32)) & 1u;
@@ -1790,7 +1790,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
     if (it[0] == IT_KNOB && code >= 1 && code <= 8) {           /* A..H */
         smp_knob_d = (signed char)it[8];
-        smp_knob_at = *(volatile u32 *)0x4058E8D4u;
+        smp_knob_at = *(volatile u32 *)0x4058F8D4u;
         smp_knob_code = (int)code;
         /* v0.55: SAMP at 127 turned up on a sample machine's SRC page: on to the FLEX buffers
          * (the stock knob stops at the record's 127, so this turn never reaches the setter) */
@@ -1818,7 +1818,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         u32 bit = 1u << (code & 31);
         *h = down ? *h | bit : *h & ~bit;
         if (down && code >= 25 && code <= 40)   /* v0.33: when each [TRIG] went down */
-            smp_trig_at[code - 25] = *(volatile u32 *)0x4058E8D4u;
+            smp_trig_at[code - 25] = *(volatile u32 *)0x4058F8D4u;
     }
     if (it[0] == IT_KEY && code == K_SRC) {     /* v0.35: SYN held: the pages' values (O14) */
         if (down && (flags & F_REPEAT))
@@ -2197,7 +2197,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             } else if (code == K_LEFT) {        /* up a folder; at the top it stays (v0.26) */
                 smp_fb_up();                    /* v0.40: to the folder it is in */
             } else if (code == K_NO) {          /* v0.31: NO goes up a level: a folder to its */
-                no_at = *(volatile u32 *)0x4058E8D4u;   /* store's top, a store's top to the two */
+                no_at = *(volatile u32 *)0x4058F8D4u;   /* store's top, a store's top to the two */
                 if (smp_fb_up()) {              /* stores; held, straight to them (lrpt_poll); */
                     /* v0.40: a folder inside a folder to that folder */
                 } else {
@@ -2237,7 +2237,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             if (code == K_UP || code == K_DOWN) {
                 lst_step(code);
                 lrpt_code = code;               /* v0.30: held, it goes on */
-                lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
+                lrpt_next = *(volatile u32 *)0x4058F8D4u + RPT_WAIT;
             } else if (code == K_YES && lst_func) {
                 smp_fb_open = 1;
                 fb_knob_reset();               /* v0.41: each knob's hysteresis afresh */
@@ -2305,7 +2305,7 @@ static void lst_step(u32 code)
     lrpt_code = 0;                              /* neither up: the repeat ends */
 }
 
-/* the parameter page's key handler (its vtable slot at 0x401d49a8 points here): stock's,
+/* the parameter page's key handler (its vtable slot at 0x401d4db8 points here): stock's,
  * as it was before v0.15 (the recorder's keys arrive through smp_ui_pop now) */
 int smp_key(void *view, void *ev)
 {

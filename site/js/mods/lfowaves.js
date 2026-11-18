@@ -35,7 +35,7 @@ const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 const own = (e) => {
   const lo = e.va - BASE, hi = lo + e.new.length / 2, stub = STUB[0] - BASE;
-  return !(platform.extents().some((x) => x.start < hi && lo < x.start + x.length)
+  return !(platform.extents(0, platform.SPEC_111).some((x) => x.start < hi && lo < x.start + x.length)
            || (stub < hi && lo < stub + STUB[1]));
 };
 const EDITS = CODE.edits.filter(own);
@@ -49,7 +49,7 @@ export function extents(blobLength = CODE.blob.length / 2) {
   return [
     ...EDITS.map((e) => ({ section: SECTION, start: e.va - BASE, length: e.new.length / 2,
                            what: "LFO waves edit", displaced: e.va === SHORT_NAME })),
-    ...platform.extents(16 + blobLength),
+    ...platform.extents(16 + blobLength, platform.SPEC_111),
   ];
 }
 

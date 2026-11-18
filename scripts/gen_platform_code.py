@@ -36,13 +36,29 @@ def generate() -> dict:
     linked = loader.build()
     hook = b"\x4e\xb9" + struct.pack(">I", linked["dnfw_boot"]) + b"\x4e\x71"
     return {
-        "os": "Digitone II 1.11",
+        "os": "Digitone II 1.12",
         "stock_length": STOCK_LENGTH,
         "calls_va": loader.CALLS_VA, "calls_stock": loader.CALLS_STOCK.hex(), "hook": hook.hex(),
         "cave_va": loader.CAVE_VA, "cave_cap": loader.CAVE_CAP,
         "link_va": loader.LINK_VA, "loader": linked.image.hex(),
         "area_va": area.AREA_VA, "runtime_va": area.RUNTIME_VA, "data_limit": DATA_LIMIT,
     }
+
+
+# lfo4_code.json is the 1.11 build that passed on the instrument. On 1.12 (docs/os112-port.md)
+# the same loader differs in exactly two addresses: where it is linked (the cave moved +0x540)
+# and the end of MAIN OS (+0x1000). Those are moved in lfo4's bytes before comparing.
+FROM_111 = {0x4028DA70: 0x4028DFB0,        # the loader's cave
+            0x4030B980: 0x4030C980}        # the end of MAIN OS: the appended area
+
+
+def _relocate(data: bytes) -> bytes:
+    out = bytearray(data)
+    for k in range(0, len(out) - 3, 2):
+        w = struct.unpack_from(">I", out, k)[0]
+        if w in FROM_111:
+            struct.pack_into(">I", out, k, FROM_111[w])
+    return bytes(out)
 
 
 def check_against_lfo4(spec: dict) -> None:
@@ -54,11 +70,11 @@ def check_against_lfo4(spec: dict) -> None:
         at = e["va"] - loader.BASE
         new = bytes.fromhex(e["new"])
         image[at:at + len(new)] = new
-    link = spec["link_va"] - loader.BASE
+    link_111 = {v: k for k, v in FROM_111.items()}.get(spec["link_va"], spec["link_va"]) - loader.BASE
     loader_bytes = bytes.fromhex(spec["loader"])
-    if image[calls:calls + 8].hex() != spec["hook"]:
+    if _relocate(bytes(image[calls:calls + 8])).hex() != spec["hook"]:
         raise SystemExit("the start-up call differs from the one lfo4 installs")
-    if bytes(image[link:link + len(loader_bytes)]) != loader_bytes:
+    if _relocate(bytes(image[link_111:link_111 + len(loader_bytes)])) != loader_bytes:
         raise SystemExit("the loader differs from the one lfo4 installs")
 
 

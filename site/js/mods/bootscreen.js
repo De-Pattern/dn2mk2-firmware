@@ -15,13 +15,15 @@
  * - the tunnel's texture scale, stock 128 x 64.
  *
  * All of it lands in a `BOOT` (or `ANIM`) chunk of the platform's area past the
- * end of MAIN OS, and the stamp that shows it in a CODE chunk at 0x46708000; the
+ * end of MAIN OS, and the stamp that shows it in a CODE chunk at 0x4670E000 (1.12); the
  * platform loader copies both up before the BSS clear (`platform.js`). The mark
  * was proven on the instrument on 2026-09-17 by `intro-bang`, with the stamp in
  * a cave and a copy stub of its own; the stamp's bytes are unchanged.
  */
 
 import { CODE } from "./bootscreen-code.js";
+// Stock 1.11's addresses: upstream v0.57's generated bootscreen-code.js as it was.
+import { CODE as CODE_111 } from "./bootscreen-code-111.js";
 import * as platform from "./platform.js";
 import { W as GW, frames as glitchFrames, GlitchError } from "../asciiglitch.js";
 import { frames as spinGrids, SpinError } from "../batspin.js";
@@ -132,20 +134,25 @@ export function spinFrames(lit, options = {}) {
 }
 
 /** The shared appended area: 'DNFW', total length, a directory, the chunks. */
-export function extents(areaLength = 0) {
+/** This mod's addresses for MAIN OS CONTENT: 1.11's on a 1.11 image, else 1.12's. */
+export function specFor(content) {
+  return platform.specFor(content) === platform.SPEC_111 ? CODE_111 : CODE;
+}
+
+export function extents(areaLength = 0, spec = CODE) {
   const off = (va) => va - BASE;
   return [
-    { section: SECTION, start: off(CODE.intro_va), length: 8, what: "intro hook: the mark" },
-    { section: SECTION, start: off(CODE.tunnel_x_va) + 2, length: 4, what: "tunnel scale x" },
-    { section: SECTION, start: off(CODE.tunnel_y_va) + 2, length: 4, what: "tunnel scale y" },
-    ...platform.extents(areaLength),
+    { section: SECTION, start: off(spec.intro_va), length: 8, what: "intro hook: the mark" },
+    { section: SECTION, start: off(spec.tunnel_x_va) + 2, length: 4, what: "tunnel scale x" },
+    { section: SECTION, start: off(spec.tunnel_y_va) + 2, length: 4, what: "tunnel scale y" },
+    ...platform.extents(areaLength, spec === CODE_111 ? platform.SPEC_111 : platform.SPEC),
   ];
 }
 
 /**
  * -> `{ content, notes, extents }`. `content` is the whole new MAIN OS, with the
  * mark's chunks and the stamp's CODE chunk added to the platform's area.
- * Refuses anything that is not stock Digitone II 1.11 at every site it writes.
+ * Refuses anything that is not stock Digitone II 1.11 or 1.12 at every site it writes.
  */
 export function apply(firmware, images, {
   slow = 4, fast = 3, rush = 48, stop = 72, tunnel = STOCK_TUNNEL, ascii = null,
@@ -155,33 +162,34 @@ export function apply(firmware, images, {
   const original = section.unpack();
   if (original === null) throw new ModError("MAIN OS did not depack");
   const [base, others] = platform.split(original);
+  const spec = specFor(base);          // every address below is this image's
 
-  const have = toHex(base.subarray(CODE.intro_va - BASE, CODE.intro_va - BASE + 8));
-  if (have !== CODE.intro_stock) {
-    throw new ModError(`0x${CODE.intro_va.toString(16).padStart(8, "0")} holds ${have}, not `
-      + `${CODE.intro_stock} (intro copy routine); this mod is for Digitone II 1.11, or the `
+  const have = toHex(base.subarray(spec.intro_va - BASE, spec.intro_va - BASE + 8));
+  if (have !== spec.intro_stock) {
+    throw new ModError(`0x${spec.intro_va.toString(16).padStart(8, "0")} holds ${have}, not `
+      + `${spec.intro_stock} (intro copy routine); this mod is for Digitone II 1.11 or 1.12, or the `
       + "boot screen is already applied");
   }
-  for (const [va, stock] of [[CODE.tunnel_x_va, STOCK_TUNNEL[0]], [CODE.tunnel_y_va, STOCK_TUNNEL[1]]]) {
+  for (const [va, stock] of [[spec.tunnel_x_va, STOCK_TUNNEL[0]], [spec.tunnel_y_va, STOCK_TUNNEL[1]]]) {
     if (toHex(base.subarray(va - BASE + 2, va - BASE + 6)) !== toHex(f32(stock))) {
       throw new ModError("the tunnel scale is not stock");
     }
   }
 
   const chunks = [];
-  if (ascii) chunks.push([CODE.anim_chunk, animChunk(...ascii)]);
-  if (images && images.length) chunks.push([CODE.boot_chunk, bootChunk(images, { slow, fast, rush, stop })]);
+  if (ascii) chunks.push([spec.anim_chunk, animChunk(...ascii)]);
+  if (images && images.length) chunks.push([spec.boot_chunk, bootChunk(images, { slow, fast, rush, stop })]);
   if (!chunks.length) throw new ModError("give a mark (images) or an ASCII animation");
-  chunks.push([platform.CODE, platform.codeChunk(CODE.load, hex(CODE.code))]);
+  chunks.push([platform.CODE, platform.codeChunk(spec.load, hex(spec.code))]);
 
   const edited = base.slice();
-  edited.set(cat(new Uint8Array([0x4e, 0xf9]), be32(CODE.stamp), new Uint8Array([0x4e, 0x71])), CODE.intro_va - BASE);
-  for (const [va, scale] of [[CODE.tunnel_x_va, tunnel[0]], [CODE.tunnel_y_va, tunnel[1]]]) {
+  edited.set(cat(new Uint8Array([0x4e, 0xf9]), be32(spec.stamp), new Uint8Array([0x4e, 0x71])), spec.intro_va - BASE);
+  for (const [va, scale] of [[spec.tunnel_x_va, tunnel[0]], [spec.tunnel_y_va, tunnel[1]]]) {
     if (!(scale >= 1 && scale <= 65536)) throw new ModError(`tunnel scale ${scale} is outside 1..65536`);
     edited.set(f32(scale), va - BASE + 2);
   }
   const content = platform.join(edited, [...others, ...chunks]);
-  const areaBytes = content.length - platform.STOCK_LENGTH;
+  const areaBytes = content.length - base.length;
 
   const notes = [
     ascii ? `animation: ${ascii[0].length} frames, looping from ${ascii[1]}`
@@ -189,5 +197,5 @@ export function apply(firmware, images, {
       : `flashing every 2^${slow} then 2^${fast} frames from ${rush}, held from ${stop}`),
     `the platform's area ${areaBytes.toLocaleString()} B; MAIN OS ${content.length.toLocaleString()} B`,
   ];
-  return { content, notes, extents: extents(areaBytes) };
+  return { content, notes, extents: extents(areaBytes, spec) };
 }

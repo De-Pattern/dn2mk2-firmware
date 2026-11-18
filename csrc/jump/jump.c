@@ -7,21 +7,21 @@
  * Stock 1.11's sequencer tick (the timer ISR 0x400d987a) already does everything a pattern
  * change needs; this only moves WHEN it arms and WHERE the new pattern starts:
  *
- *   the cue (0x400fa1da, the PTN view's single-pattern cue, jsr 0x400d93f0)
+ *   the cue (0x400fa3a6, the PTN view's single-pattern cue, jsr 0x400d9554)
  *       -> jmp_cue: stock's cue, then jmp_cued() arms if the setting is on and it plays
- *   the tick's "tick 2 of the step" test (0x400da406, moveb 0x42c5a91e,%d1)
+ *   the tick's "tick 2 of the step" test (0x400da56a, moveb 0x42c5b91e,%d1)
  *       -> jmp_tick: armed, on tick 2 (stock's) or a tick past it, takes the tick-2 path;
  *          already armed (ours, or stock's own change at the end), the switch is made ours
- *   that path's change-length test (0x400da45a, mvsw 0x42c5aab4,%d1)
+ *   that path's change-length test (0x400da5be, mvsw 0x42c5bab4,%d1)
  *       -> jmp_arm: armed and the queue's head is another pattern: straight to stock's
- *          arming (0x400da4d2), skipping the "is this the last step" test
- *   the switch, at the next step boundary (0x400da6e6, lea 0x42c5a9c4,%a1)
- *       -> jmp_switch: for our jump, the start step (0x42c5a9c4) from jmp_position(), and
+ *          arming (0x400da636), skipping the "is this the last step" test
+ *   the switch, at the next step boundary (0x400da84a, lea 0x42c5b9c4,%a1)
+ *       -> jmp_switch: for our jump, the start step (0x42c5b9c4) from jmp_position(), and
  *          stock's per-track position code reads the new pattern (a5)
- *   that code's end (0x400da8cc, pea 0x401f6b25)
+ *   that code's end (0x400daa30, pea 0x401f6f35)
  *       -> jmp_tracks: each track goes on from its own step, wrapped by its new length
  *
- * Chains, songs and MIDI program changes cue through other callers of 0x400d93f0 and never
+ * Chains, songs and MIDI program changes cue through other callers of 0x400d9554 and never
  * arm, so they keep stock's behaviour; with the setting off nothing here changes what stock
  * does. Everything here is RAM in .data (the chunk has no BSS) and one 512-byte sector. */
 
@@ -36,34 +36,34 @@ typedef signed char s8;
 #endif
 
 /* -- stock 1.11 ----------------------------------------------------------------------- */
-#define PTN_VIEW_KEY ((int (*)(void *, void *))0x400FA6BEu)   /* the PTN view's key handler */
-#define KEY_HELD ((int (*)(u32))0x4011F7E4u)                  /* (code) -> 1 while held */
-#define EV_PRESSED ((int (*)(void *))0x401160BCu)              /* a fresh press, not a repeat */
-#define EV_FUNC ((int (*)(void *))0x401160ACu)                 /* FUNC held with it */
-#define STR_NEW ((void (*)(void *, const char *, void *))0x401CE69Eu)   /* std::string(s, alloc) */
-#define STR_FREE ((void (*)(void *))0x401CCBEEu)
+#define PTN_VIEW_KEY ((int (*)(void *, void *))0x400FA88Au)   /* the PTN view's key handler */
+#define KEY_HELD ((int (*)(u32))0x4011FAC4u)                  /* (code) -> 1 while held */
+#define EV_PRESSED ((int (*)(void *))0x4011639Cu)              /* a fresh press, not a repeat */
+#define EV_FUNC ((int (*)(void *))0x4011638Cu)                 /* FUNC held with it */
+#define STR_NEW ((void (*)(void *, const char *, void *))0x401CEAB8u)   /* std::string(s, alloc) */
+#define STR_FREE ((void (*)(void *))0x401CD008u)
 #define SAY ((void (*)(void *, void *))0x4005628Cu)            /* the PTN screen's message line */
 #define K_YES 10u
 #define K_NO 12u
 #define K_FUNC 17u
 #define K_PTN 23u
 
-#define SEQ_PLAYING (*(volatile u32 *)0x42C5A918u)             /* 1 while it plays */
-#define SEQ_PATTERN (*(volatile u32 *)0x42C5A9A0u)             /* the playing pattern */
-#define SEQ_PREVIOUS (*(volatile u32 *)0x42C5A9A8u)            /* the one before the switch */
-#define TRACK_NEXT ((volatile u16 *)0x42C5A9EAu)               /* each track's start step at a switch */
-#define TRACK_CUR ((volatile u8 *)0x42C5A984u)                 /* each track's step now playing */
-#define SEQ_COUNTER (*(volatile u16 *)0x42C5A91Cu)             /* the master counter, advanced at the boundary */
+#define SEQ_PLAYING (*(volatile u32 *)0x42C5B918u)             /* 1 while it plays */
+#define SEQ_PATTERN (*(volatile u32 *)0x42C5B9A0u)             /* the playing pattern */
+#define SEQ_PREVIOUS (*(volatile u32 *)0x42C5B9A8u)            /* the one before the switch */
+#define TRACK_NEXT ((volatile u16 *)0x42C5B9EAu)               /* each track's start step at a switch */
+#define TRACK_CUR ((volatile u8 *)0x42C5B984u)                 /* each track's step now playing */
+#define SEQ_COUNTER (*(volatile u16 *)0x42C5B91Cu)             /* the master counter, advanced at the boundary */
 #define PAT_LENGTH 122196                                      /* s16: the pattern's (master) length */
 #define PAT_MODE 122201                                        /* u8: 0 per pattern, else per track */
 #define TRK_STRIDE 1701                                        /* the pattern's tracks, from +0 */
 #define TRK_LENGTH 1164                                        /* s16: a track's length */
 
 /* -- the +Drive -------------------------------------------------------------------------- */
-#define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
-#define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
-#define BLK_READY (*(volatile u32 *)0x4461B68Cu)
-#define BLK_SECTORS (*(volatile u32 *)0x4461B6B0u)
+#define BLK_READ  ((int (*)(u32, u32, void *))0x4012C87Au)          /* (sector, bytes, buf) -> 0 ok */
+#define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012CA60u)
+#define BLK_READY (*(volatile u32 *)0x4461C68Cu)
+#define BLK_SECTORS (*(volatile u32 *)0x4461C6B0u)
 /* our region (link.c, lib.c): the stock store ends below 0x458000; the pool's image is
  * 0x600000 .. POOL_STORE_END; the library starts at 0x700000. The sector between them is
  * written by nothing else */
@@ -145,7 +145,7 @@ static void say(void *view, const char *text)
     STR_FREE(s);
 }
 
-/* the PTN view's key handler (its vtable slot 0x402008cc points here): PTN held, a fresh
+/* the PTN view's key handler (its vtable slot 0x40200cdc points here): PTN held, a fresh
  * YES or NO without FUNC sets DIRECT JUMP on or off (stock: either closes the PTN view);
  * everything else is stock's */
 int jmp_key(void *view, void *ev)
@@ -179,8 +179,8 @@ void jmp_cued(void)
  * replaces the first in stock's list, and the switch takes it). Elektron's DIRECT JUMP rule: the new pattern
  * goes on from where the playing one was. The switch is at a step boundary, after this
  * boundary's step of the playing pattern has been taken, so the step that starts is the one
- * after it: per pattern, the playing pattern's step (each track's, 0x42c5a984) + 1; per
- * track, its master counter (0x42c5a91c, already advanced: 0 after a wrap is its length).
+ * after it: per pattern, the playing pattern's step (each track's, 0x42c5b984) + 1; per
+ * track, its master counter (0x42c5b91c, already advanced: 0 after a wrap is its length).
  * Wrapped by the new pattern's length (stock: 1 or less is no wrap, INF). Each track's own
  * start comes after (jmp_wrap_tracks). The cue is taken: nothing stays armed */
 int jmp_position(void)

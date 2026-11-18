@@ -34,7 +34,7 @@ The one hit that survives the baseline on step 4b's builds is worth spelling
 out, because it is what a false positive looks like all the way down:
 `05b3 4690` at 19,430 bytes into the relocated parameter table's chunk is
 **record 323, straddling fields +48 and +52** -- the `Destination` string
-pointer `0x402105b3` and LFO4's page label `0x46904d58`. Two pointers in a data
+pointer `0x40210a6b` and LFO4's page label `0x46904d58`. Two pointers in a data
 table, read as an instruction by a disassembler with no way to know better.
 
 The build-time guard in `dnfw.patch.cbuild` needs none of this: it disassembles

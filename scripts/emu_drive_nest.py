@@ -100,7 +100,7 @@ def fit(n, w):
 
 
 def steps(lay):
-    kit = 0x4210C08C
+    kit = 0x4210D08C
     snd0, M = kit + 52, SMx.MIRROR
     samp0 = snd0 + 0x6A
 

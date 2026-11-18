@@ -4,7 +4,7 @@
 
 --check writes nothing: exit 0 only if the committed file is what the sources compile to now.
 
-Runs `dnfw.waverider.coldfire.compose` on stock Digitone II 1.11 MAIN OS (the GNU
+Runs `dnfw.waverider.coldfire.compose` on stock Digitone II 1.12 MAIN OS (the GNU
 m68k assembler and GCC, natively or through WSL, are needed here and nowhere else:
 GCC compiles the page renderer `csrc/waverider/page.c`) and
 records what it changed in `src/dnfw/mods/waverider_code.json`:
@@ -35,7 +35,7 @@ from dnfw.patch.assemble import assemble, available     # noqa: E402
 from dnfw.waverider import coldfire as CF               # noqa: E402
 from dnfw.waverider import cpage                        # noqa: E402
 
-STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"
 OUT_JSON = ROOT / "src/dnfw/mods/waverider_code.json"
 
 
@@ -64,7 +64,7 @@ def main() -> int:
     if replay(stock, edits) != built["content"]:
         raise SystemExit("the edits do not reproduce the compose output -- not written")
     code = {
-        "os": "Digitone II 1.11",
+        "os": "Digitone II 1.12",
         "stock_length": len(stock),
         "new_type": CF.NEW_TYPE,
         "clone": CF.CLONE,

@@ -5,7 +5,7 @@
         .text
         .globl  smp_rx_hook
 
-| The SysEx router 0x4012166e at 0x4012169a (was: lea 0x40207ae6,%a3), once per F0
+| The SysEx router 0x4012194e at 0x4012197a (was: lea 0x40207f9e,%a3), once per F0
 | message other than F0 7E, in the MIDI input task: a0 = a1 = the message, d1 its
 | length, d2 its source; those must survive, and d0, d3, a2 are free (the USB probe's
 | hook site, docs/usbprobe.md). smp_rx(msg, len, source) only reads the message.
@@ -19,7 +19,7 @@ smp_rx_hook:
         lea     12(%sp), %sp
         movem.l (%sp), %d0-%d2/%a0-%a1
         lea     20(%sp), %sp
-        lea     0x40207ae6, %a3
+        lea     0x40207f9e, %a3
         rts
 
 | The parameter setter 0x40037b74 at 0x40037be6 (was: movea.l %d0,%a0 ; move.w

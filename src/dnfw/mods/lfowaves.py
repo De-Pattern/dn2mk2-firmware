@@ -65,7 +65,7 @@ NOT_RAM = (0x467805F4,)
 def _own(e: dict) -> bool:
     lo, hi = e["va"] - BASE, e["va"] - BASE + len(e["new"]) // 2
     stub_lo = STUB[0] - BASE
-    return not (any(x.start < hi and lo < x.end for x in platform.extents())
+    return not (any(x.start < hi and lo < x.end for x in platform.extents(spec=platform.SPEC_111))
                 or (stub_lo < hi and lo < stub_lo + STUB[1]))
 
 
@@ -89,7 +89,7 @@ def extents(firmware, blob_length: int | None = None) -> list[Extent]:
     out = [Extent(SECTION, e["va"] - BASE, len(e["new"]) // 2, "LFO waves edit",
                   displaced=e["va"] == SHORT_NAME) for e in EDITS]
     length = len(SPEC["blob"]) // 2 if blob_length is None else blob_length
-    return out + platform.extents(16 + length)
+    return out + platform.extents(16 + length, platform.SPEC_111)
 
 
 def ram(blob_length: int | None = None) -> list[Extent]:

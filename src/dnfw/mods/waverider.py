@@ -21,7 +21,7 @@ Two sections, both from committed data:
 
 Saved as its machine type by the stock SAVE. This build keeps 5-7 on LOAD; stock
 firmware (and any build without this mod) loads them as **FM Tone**, the stock LOAD
-bound's own fallback (`0x400dd286`), with their parameters as they were. A sound saved
+bound's own fallback (`0x400dd3ea`), with their parameters as they were. A sound saved
 with Waverider (type 5) on v0.10 or earlier loads as PERC here, its WaveTone values
 read as PERC's controls.
 """
@@ -133,20 +133,20 @@ def ram() -> list[Extent]:
 def _main_os(original: bytes) -> bytes:
     if len(original) < SPEC["stock_length"]:
         raise ModError(f"MAIN OS is {len(original):,} B, shorter than "
-                       f"{SPEC['stock_length']:,}: not Digitone II 1.11")
+                       f"{SPEC['stock_length']:,}: not Digitone II 1.12")
     for g in SPEC["guards"]:
         want = bytes.fromhex(g["bytes"])
         at = g["va"] - BASE
         if original[at:at + len(want)] != want:
             raise ModError(f"0x{g['va']:08x} ({g['what']}) is not stock; this mod is "
-                           "for unmodified Digitone II 1.11")
+                           "for unmodified Digitone II 1.12")
     content = bytearray(original)
     for e in SPEC["edits"]:
         old, new = bytes.fromhex(e["stock"]), bytes.fromhex(e["new"])
         at = e["va"] - BASE
         if bytes(content[at:at + len(old)]) != old:
             raise ModError(f"0x{e['va']:08x} ({e['what']}) is not stock; this mod is for "
-                           "unmodified Digitone II 1.11, or another mod already wrote there")
+                           "unmodified Digitone II 1.12, or another mod already wrote there")
         content[at:at + len(new)] = new
     return bytes(content)
 
@@ -172,7 +172,7 @@ def apply(firmware) -> Result:
     at, stock = bspec["intro_va"] - BASE, bytes.fromhex(bspec["intro_stock"])
     if bytes(base_os[at:at + 8]) != stock:
         raise ModError(f"0x{bspec['intro_va']:08x} (the intro routine) is not stock; this mod is "
-                       "for unmodified Digitone II 1.11")
+                       "for unmodified Digitone II 1.12")
     base_os[at:at + 8] = b"\x4e\xf9" + struct.pack(">I", bspec["stamp"]) + b"\x4e\x71"
     codes += [(platform.area.CODE, platform.area.CodeChunk(bspec["load"], bytes.fromhex(bspec["code"])).pack()),
               (bspec["aniz_chunk"].encode(), aniz), _label()]
