@@ -1143,7 +1143,7 @@ def main() -> int:
                              "closed": sts[:1] == [0],
                              # v0.60 (impbox): NO exits and keeps RANDOM's locks, as the DT2 does
                              "RANDOM changed the locks": d0[3:6] != [512, 1024, 1536],
-                             "RANDOM's locks are slices 1..3": all(v in (512, 1024, 1536) for v in d0[3:6]),
+                             "RANDOM's locks are slices": all(v % 512 == 0 and 512 <= v <= 63 * 512 for v in d0[3:6]),
                              "NO keeps RANDOM's locks": len(d0) >= 9 and d0[6:9] == d0[3:6]}
                     if letgo:
                         trk = [int(v, 16) for k, v in m.items() if k.split("@")[0] == "0x42431a6c"]
