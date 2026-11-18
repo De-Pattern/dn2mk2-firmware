@@ -345,20 +345,22 @@ static int mnm_k(void *view, int j)             /* knob 0..127, as the DSP and p
     return (v * 254 + top) / (2 * top);
 }
 
-static int mnm_choice_count(int n)
+static int mnm_choice_count(int n)              /* v0.60: wr_gen.h's, one for every reader */
 {
-    return n == MNM_PCH ? mnm_pch_idx[127] + 1 : n;
+    return mnm_count(n);
 }
 
 static int mnm_choice_of(int n, int k)
 {
-    return n == MNM_PCH ? mnm_pch_idx[k > 127 ? 127 : k] : (k * n) >> 7;
+    return mnm_choice(n, k);
 }
 
 static const char *mnm_value_text(int mi, int j, int c)
 {
     static char num[6] __attribute__((section(".data")));
     int n = mnm_choices[mi][j];
+    if (mnm_cont(n))                            /* v0.60: DYN's 1FRQ / 2FRQ: the value, x.x / x.xx */
+        return mnm_cont_text(n, c, num);
     if (n == MNM_WAVES || n == 2 * MNM_WAVES) {
         int w = (c & (MNM_WAVES - 1)) + 1;
         num[0] = 'S'; num[1] = (char)('0' + w / 10); num[2] = (char)('0' + w % 10); num[3] = 0;

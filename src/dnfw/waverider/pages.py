@@ -177,6 +177,13 @@ MNM_CHOICES = {
     "DPRO-DDRW": {"WAV1": 64, "WAV2": 64},
     "DPRO-DENS": {"WAVE": 64, "PCH2": "pch", "PCH3": "pch", "PCH4": "pch"},
     # VO-6: its manual's names (Appendix A); V-SW below 64 ends the vowel
+    # v0.60 (zuzsw, Thos Grol; the owner's manual pages): FM+'s listed frequencies by the ROM's
+    # ratio table (the DSP's (6 knob + 3) >> 5), named as ratios (1/2, 1, 2 ...); DYN's two
+    # continuous frequencies as the Monomachine shows them: 1FRQ x.x (2 knob/128: 1.0 at 64),
+    # 2FRQ x.xx (4 (knob/128)^2: 1.33 at 74), both 1.0 x their top at 127
+    "FM+STAT": {"1FRQ": "flist", "2FRQ": "flist"},
+    "FM+PAR": {"1FRQ": "flist", "2FRQ": "flist", "3FRQ": "flist"},
+    "FM+DYN": {"1FRQ": "lin2", "2FRQ": "sqr4"},
     "VO-6": {"V-SW": ("OFF", "ON"), "CONS": ("-", "B", "D", "F", "G", "H", "J", "K", "L", "M", "N",
                                             "P", "R", "RR", "S", "SJ", "T", "TJ", "TH", "V", "Z")},
 }
@@ -190,9 +197,32 @@ MNM_WIDGET = {("DPRO-WAVE", "WAVE"): 2, ("VO-6", "CONS"): 2,
               ("DPRO-DENS", "PCH2"): 4, ("DPRO-DENS", "PCH3"): 4, ("DPRO-DENS", "PCH4"): 4,
               ("SID 6581", "PWRS"): 5, ("SID 6581", "WAVE"): 5, ("SID 6581", "MOD"): 5,
               ("SID 6581", "MSRC"): 5, ("DPRO-WAVE", "WPRS"): 5, ("DPRO-WAVE", "SYNC"): 5,
-              ("VO-6", "V-SW"): 5}
+              ("VO-6", "V-SW"): 5,
+              # v0.60: FM+'s listed frequencies a bar along a line (the ratio under it), DYN's
+              # continuous ones a meter's box (the value under it), as its manual draws them
+              ("FM+STAT", "1FRQ"): 3, ("FM+STAT", "2FRQ"): 3,
+              ("FM+PAR", "1FRQ"): 3, ("FM+PAR", "2FRQ"): 3, ("FM+PAR", "3FRQ"): 3,
+              ("FM+DYN", "1FRQ"): 4, ("FM+DYN", "2FRQ"): 4}
 MNM_WAVES = 32
 MNM_PCH = 255                       # mnm_choices' mark: the choice by mnm_pch_idx[knob]
+MNM_FLIST = 254                     # v0.60: FM+'s listed ratio, by mnm_flist_idx[knob]
+MNM_LIN2 = 253                      # v0.60: DYN's 1FRQ, a knob shown x.x (2 knob / 128)
+MNM_SQR4 = 252                      # v0.60: DYN's 2FRQ, a knob shown x.xx (4 (knob / 128)^2)
+
+
+def _flist_names() -> tuple[tuple[int, ...], tuple[str, ...]]:
+    """FM+'s listed frequencies: the knob -> its entry ((6 knob + 3) >> 5, as dnfw.mnm.fm.ratio
+    reads the ROM), and each entry's ratio (the ROM's word / 2^20) as a fraction: 1/2, 1, 5/4"""
+    import fractions
+    from ..mnm import rom as mrom
+    idx = tuple((6 * k + 3) >> 5 for k in range(128))
+    if not mrom.available():
+        return idx, tuple(str(k) for k in range(24))
+    names = []
+    for v in mrom.words(*mrom.FM_FLIST):
+        f = fractions.Fraction(v, 0x100000)
+        names.append(str(f.numerator) if f.denominator == 1 else f"{f.numerator}/{f.denominator}")
+    return idx, tuple(names)
 
 
 # the Monomachine's machines (v0.26; kinds 2 and 3 were RESONATOR's and CZ's until v0.25):
@@ -227,6 +257,13 @@ def mnm_c_header() -> str:
                 n_row.append(MNM_PCH)
                 at_row.append(len(names))
                 names += list(_pch_names()[1])
+            elif c == "flist":
+                n_row.append(MNM_FLIST)
+                at_row.append(len(names))
+                names += list(_flist_names()[1])
+            elif c in ("lin2", "sqr4"):
+                n_row.append(MNM_LIN2 if c == "lin2" else MNM_SQR4)
+                at_row.append(0)
             elif isinstance(c, int):
                 n_row.append(c)
                 at_row.append(0)
@@ -253,6 +290,15 @@ def mnm_c_header() -> str:
         f"#define MNM_WAVES {MNM_WAVES}",
         f"#define MNM_PCH {MNM_PCH}",
         f"static const unsigned char mnm_pch_idx[128] = {{{', '.join(map(str, pidx))}}};",
+        f"#define MNM_FLIST {MNM_FLIST}\n#define MNM_LIN2 {MNM_LIN2}\n#define MNM_SQR4 {MNM_SQR4}",
+        f"static const unsigned char mnm_flist_idx[128] = {{{', '.join(map(str, _flist_names()[0]))}}};",
+        # v0.60: one place for every reader (md_page.c, page.c, fmt.c): how many choices a
+        # control has, the knob's choice, and whether it is a knob shown as a number
+        "static inline int mnm_cont(int n) { return n == MNM_LIN2 || n == MNM_SQR4; }",
+        "static inline int mnm_count(int n) { return n == MNM_PCH ? mnm_pch_idx[127] + 1 : n == MNM_FLIST ? mnm_flist_idx[127] + 1 : mnm_cont(n) ? 128 : n; }",
+        "static inline int mnm_choice(int n, int k) { k = k < 0 ? 0 : k > 127 ? 127 : k; return n == MNM_PCH ? mnm_pch_idx[k] : n == MNM_FLIST ? mnm_flist_idx[k] : mnm_cont(n) ? k : (k * n) >> 7; }",
+        # DYN's (truncated, as the manual's 1.33 at 74): x.x = 2 k / 128 (2.0 at 127: the DSP's 1.0 there), x.xx = 4 (k / 128)^2 (4.00 at 127)
+        "static inline const char *mnm_cont_text(int n, int k, char *b) { int h = k >= 127 ? (n == MNM_LIN2 ? 200 : 400) : n == MNM_LIN2 ? 200 * k / 128 : 400 * k * k / 16384; int i = 0; b[i++] = (char)('0' + h / 100); b[i++] = '.'; b[i++] = (char)('0' + h / 10 % 10); if (n == MNM_SQR4) b[i++] = (char)('0' + h % 10); b[i] = 0; return b; }",
         f"static const char mnm_labels[MNM_N][8][6] = {{{labels}}};",
         f"static const unsigned char mnm_lo[8] = {{{', '.join(str(lo) for _r, _s, lo, _t in _perc.PARAMS)}}};",
         f"static const unsigned char mnm_top[8] = {{{', '.join(str(t) for _r, _s, _lo, t in _perc.PARAMS)}}};",
@@ -554,6 +600,9 @@ def source(page_draw: int, cell: int) -> str:
     mnm_label_pick = "\n".join(f"    moveq   #{kd - 1},%d1\n    cmp.l   %d1,%d0\n    bne.s   wl_n{k}\n"
                                f"    moveq   #{k},%d0\n    bra.s   wl_hit\nwl_n{k}:"
                                for k, kd in enumerate(MNM_KINDS))
+    mnm_page_pick = "\n".join(f"    moveq   #{kd - 1},%d1\n    cmp.l   %d1,%d0\n    bne.w   wp_n{k}\n"
+                              f"    moveq   #{k},%d0\n    bra.w   7f\nwp_n{k}:"
+                              for k, kd in enumerate(MNM_KINDS))
     mnm_page_data = "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
                               f"    .long {', '.join(str(e) for e in MNM_PAGE)}\n"
                               f"    .long {TAG}" for k in range(len(MNM_LABELS)))
@@ -623,49 +672,53 @@ wr_count:
 wr_page:
     bsr.w   is_wr
     tst.l   %d0
-    beq.s   3f
+    beq.w   3f
     subq.l  #1,%d0
-    bne.s   5f
+    bne.w   5f
     move.l  %sp@(16),%d0
     moveq   #{len(PAGES)},%d1
     cmp.l   %d1,%d0
-    bcs.s   1f
+    bcs.w   1f
 6:  move.l  #{EMPTY_PAGE:#010x},%d0
-    bra.s   2f
+    bra.w   2f
 1:  moveq   #44,%d1
     mulu.w  %d1,%d0
     addi.l  #descriptors,%d0
-    bra.s   2f
-| d0 = kind - 1: 1, 2 -> the Monomachine's 0, 1; 3..8 a sample machine; 9.. -> 2..;
+    bra.w   2f
+| d0 = kind - 1. v0.60 (zuzsw, Thos Grol on v0.59): each Monomachine kind by an explicit
+| test (MNM_KINDS), as wr_label's; v0.59 took "9.. -> 2.." by arithmetic, which BOUNCE's kind 13
+| between VO-6 (12) and FM+ (14..16) broke: STAT got PAR's descriptor, PAR DYN's, and DYN read
+| past mnm_descriptors into the sample machines' (its knobs on ONESHOT's records, "unused").
 | v0.44: 12 (BOUNCE, kind 13) -> the sample row 6 (d0 9 at 4:, as 3..8 give 0..5)
 5:  moveq   #{_smp.BOUNCE_TYPE - 5},%d1
     cmp.l   %d1,%d0
-    bne.s   10f
+    bne.w   10f
     moveq   #{len(_smp.NAMES) + 2},%d0
-    bra.s   4f
-10: moveq   #9,%d1
-    cmp.l   %d1,%d0
-    bcc.s   7f
+    bra.w   4f
+10:
+{mnm_page_pick}
     moveq   #3,%d1
     cmp.l   %d1,%d0
-    bcc.s   4f
-    addq.l  #6,%d0
-7:  subq.l  #7,%d0                         | the Monomachine machine's index
-    move.l  %sp@(16),%d1                   | its one page
-    bne.s   6b
+    bcs.w   6b                             | (no other kind below 3: the stock empty page)
+    moveq   #9,%d1
+    cmp.l   %d1,%d0
+    bcs.w   4f                             | 3..8: a sample machine
+    bra.w   6b                             | any kind added later: the stock empty page
+7:  move.l  %sp@(16),%d1                   | the Monomachine machine (d0 its index): its one page
+    bne.w   6b
     moveq   #44,%d1
     mulu.w  %d1,%d0
     addi.l  #mnm_descriptors,%d0
-    bra.s   2f
+    bra.w   2f
 4:  subq.l  #2,%d0
 | a sample machine (d0 = its kind - 3): pages 0 and 1 its own (the DT2's SRC page 1 and
 | page 2, the same parameters), page 2 the recorder
 8:  move.l  %sp@(16),%d1
     subq.l  #2,%d1
-    bcs.s   9f
-    bne.s   6b
+    bcs.w   9f
+    bne.w   6b
     move.l  #smp_rec_descriptor,%d0
-    bra.s   2f
+    bra.w   2f
 9:  subq.l  #1,%d0
     moveq   #44,%d1
     mulu.w  %d1,%d0
@@ -676,9 +729,9 @@ wr_page:
 3:  move.l  %sp@(12),%d1
     move.l  %sp@(16),%d0
     cmpi.l  #{NEW_TYPE},%d1
-    blt.s   0f
+    blt.w   0f
     cmpi.l  #{TYPES_LAST},%d1
-    bgt.s   0f
+    bgt.w   0f
     moveq   #{CLONE},%d1
 0:  rts
 

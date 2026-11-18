@@ -1103,8 +1103,8 @@ def main() -> int:
 
         # 6g. v0.25, GRID's ALLOCATE SLICE (YES on a GRID track's page): trigs placed on steps
         # 1, 3, 5 in GRID RECORDING; CREATE LINEAR LOCKS locks slices 1, 2, 3 on them (the
-        # stock's own lock calls, read back through its GET); RANDOM again, then NO puts
-        # back the linear ones
+        # stock's own lock calls, read back through its GET); RANDOM twice, then NO exits with
+        # RANDOM's locks kept (v0.60, impbox: as the DT2; NO used to put the linear ones back)
         if "slc_alloc_n" in lay:
             from dnfw.sampler import machines as SMx    # noqa: PLC0415
             sid = SMx.SLICE_REC
@@ -1112,7 +1112,7 @@ def main() -> int:
             get = ",".join(f"call:0x40037c52:0:{sid}:{k},wait:2" for k in (0, 2, 4))
             steps = (f"wait:3,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,tap:19,wait:6,tap:25,wait:4,"
                      f"tap:27,wait:4,tap:29,wait:4,tap:19,wait:6,yes,wait:6,png:m,yes,wait:6,"
-                     f"mem:{lay['slc_alloc_n']:#x}:4,{get},yes,wait:6,down,wait:3,yes,wait:6,yes,wait:6,"
+                     f"mem:{lay['slc_alloc_n']:#x}:4,{get},yes,wait:6,down,wait:3,yes,wait:6,yes,wait:6,{get},"
                      f"no,wait:6,mem:{lay['slc_state']:#x}:4,{get}")
             # v0.42 (NiKo, v0.40): CREATE RANDOM LOCKS stays open after its YES; another track
             # (TRACK + [TRIG 2]) must close it, YES there must not open it again, and back on the
@@ -1141,7 +1141,10 @@ def main() -> int:
                     facts = {"three trigs locked": int(m[hex(lay["slc_alloc_n"])], 16) == 3,
                              "linear: slices 1, 2, 3": d0[:3] == [512, 1024, 1536],
                              "closed": sts[:1] == [0],
-                             "NO puts the locks back": d0[4:6] == [1024, 1536]}
+                             # v0.60 (impbox): NO exits and keeps RANDOM's locks, as the DT2 does
+                             "RANDOM changed the locks": d0[3:6] != [512, 1024, 1536],
+                             "RANDOM's locks are slices": all(v % 512 == 0 and 512 <= v <= 63 * 512 for v in d0[3:6]),
+                             "NO keeps RANDOM's locks": len(d0) >= 9 and d0[6:9] == d0[3:6]}
                     if letgo:
                         trk = [int(v, 16) for k, v in m.items() if k.split("@")[0] == "0x42431a6c"]
                         lgv = [int(v, 16) for k, v in m.items() if k.split("@")[0] == hex(lay["slc_letgo"])]
@@ -1155,8 +1158,8 @@ def main() -> int:
                                       "YES off the page opens nothing": sts[7:8] == [0]})
                     good = all(facts.values())
                     why = str(facts) + f" {d0} states {sts}"
-                return good, ("GRID's ALLOCATE SLICE: LINEAR locks slices 1..3 on three placed trigs; NO after "
-                              "RANDOM puts them back" + ("; v0.42: open RANDOM lets go on another track and on another "
+                return good, ("GRID's ALLOCATE SLICE: LINEAR locks slices 1..3 on three placed trigs; RANDOM "
+                              "changes them and NO exits keeping them" + ("; v0.42: open RANDOM lets go on another track and on another "
                               "page, and YES there opens nothing" if letgo else "") if good else why)
             later("alloc", "GRID allocate slice locks (ColdFire)", "GRID allocate slice locks (ColdFire)", [al_cmd, sorted(EMU_ENV.items())], al_body)
 
@@ -1690,6 +1693,14 @@ def main() -> int:
             st += [f"poke:{snd0 + 0xDE:#x}:{MMx.TYPES[MMx.NAMES.index('DPRO-WAVE')]:02x}",
                    f"poke:{snd0 + 0x14 + 2 * wslot:#x}:0000", "wait:4"]
             st += [f"call:{lay['smp_quant']:#x}:sound0:{wslot}:0x100"] * 4
+            # v0.60 (zuzsw, Thos Grol on v0.59): the page each Monomachine type gets from the
+            # stock page(type, 0) (0x400c24ee, wr_page): its own descriptor, mnm_descriptors + 44 k.
+            # v0.59's arithmetic gave FM+ STAT PAR's, PAR DYN's and DYN one past the table (the
+            # sample machines' first: its knobs on ONESHOT's records, named "unused")
+            from dnfw.waverider import pages as WPx    # noqa: PLC0415
+            mdesc = lay["descriptors"] + 44 * len(WPx.PAGES)
+            for ty in MMx.TYPES:
+                st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", "wait:4", f"call:0x400c24ee:{ty}:0"]
             js = work / "mnmpages.json"
             mp_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                       "--snapshot", snap, "--steps", ",".join(st), "--png-dir", work / "mnmpages", "--json", js]
@@ -1706,11 +1717,13 @@ def main() -> int:
                     on = (95 * 2 * top + 127) // 254 << 8
                     facts = {"each machine its own page, none the stock grid":
                              len(set(pages)) == len(pages) and shots["stock"] not in pages,
-                             "WPRS: three detents keep OFF, the fourth gives ON": d0 == [0, 0, 0, on]}
+                             "WPRS: three detents keep OFF, the fourth gives ON": d0[:4] == [0, 0, 0, on],
+                             "each Monomachine type its own page record (FM+ included, v0.60)":
+                             d0[4:] == [mdesc + 44 * k for k in range(len(MMx.TYPES))]}
                     good = all(facts.values())
                     why = str(facts) + f" d0 {d0}"
-                return good, ("the five Monomachine pages drawn, each its own; a two-choice control "
-                              "four detents a choice" if good else why)
+                return good, ("the Monomachine pages drawn, each its own; a two-choice control "
+                              "four detents a choice; each type's page record its own (v0.60)" if good else why)
             later("mnmpages", "Monomachine pages and detents (ColdFire)", "Monomachine pages and detents (ColdFire)", [mp_cmd, sorted(EMU_ENV.items())], mp_body)
 
             # 6h2. v0.53 (owner: PLAY's four choices took too much turning): PLAY two detents a
