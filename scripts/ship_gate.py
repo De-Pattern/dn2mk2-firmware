@@ -1693,6 +1693,14 @@ def main() -> int:
             st += [f"poke:{snd0 + 0xDE:#x}:{MMx.TYPES[MMx.NAMES.index('DPRO-WAVE')]:02x}",
                    f"poke:{snd0 + 0x14 + 2 * wslot:#x}:0000", "wait:4"]
             st += [f"call:{lay['smp_quant']:#x}:sound0:{wslot}:0x100"] * 4
+            # v0.60 (zuzsw, Thos Grol on v0.59): the page each Monomachine type gets from the
+            # stock page(type, 0) (0x400c24ee, wr_page): its own descriptor, mnm_descriptors + 44 k.
+            # v0.59's arithmetic gave FM+ STAT PAR's, PAR DYN's and DYN one past the table (the
+            # sample machines' first: its knobs on ONESHOT's records, named "unused")
+            from dnfw.waverider import pages as WPx    # noqa: PLC0415
+            mdesc = lay["descriptors"] + 44 * len(WPx.PAGES)
+            for ty in MMx.TYPES:
+                st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", "wait:4", f"call:0x400c24ee:{ty}:0"]
             js = work / "mnmpages.json"
             mp_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                       "--snapshot", snap, "--steps", ",".join(st), "--png-dir", work / "mnmpages", "--json", js]
@@ -1709,11 +1717,13 @@ def main() -> int:
                     on = (95 * 2 * top + 127) // 254 << 8
                     facts = {"each machine its own page, none the stock grid":
                              len(set(pages)) == len(pages) and shots["stock"] not in pages,
-                             "WPRS: three detents keep OFF, the fourth gives ON": d0 == [0, 0, 0, on]}
+                             "WPRS: three detents keep OFF, the fourth gives ON": d0[:4] == [0, 0, 0, on],
+                             "each Monomachine type its own page record (FM+ included, v0.60)":
+                             d0[4:] == [mdesc + 44 * k for k in range(len(MMx.TYPES))]}
                     good = all(facts.values())
                     why = str(facts) + f" d0 {d0}"
-                return good, ("the five Monomachine pages drawn, each its own; a two-choice control "
-                              "four detents a choice" if good else why)
+                return good, ("the Monomachine pages drawn, each its own; a two-choice control "
+                              "four detents a choice; each type's page record its own (v0.60)" if good else why)
             later("mnmpages", "Monomachine pages and detents (ColdFire)", "Monomachine pages and detents (ColdFire)", [mp_cmd, sorted(EMU_ENV.items())], mp_body)
 
             # 6h2. v0.53 (owner: PLAY's four choices took too much turning): PLAY two detents a

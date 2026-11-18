@@ -55,7 +55,7 @@ static int mnm_kn(int j, int v)
 
 static int mnm_ch(int n, int k)
 {
-    return n == MNM_PCH ? mnm_pch_idx[k > 127 ? 127 : k] : (k * n) >> 7;
+    return mnm_choice(n, k);                    /* v0.60: wr_gen.h's (PCH, FM+'s listed) */
 }
 
 static int mnm_rep(int j, int n, int c)        /* the value (coarse) in the middle of choice C */
@@ -114,9 +114,9 @@ static int mnm_quant(int mi, int slot, int old, int value)
     int j = 0;
     while (j < 8 && mnm_slot[j] != slot)
         j++;
-    if (j == 8 || !mnm_choices[mi][j])
-        return value;                           /* not one of the eight, or a knob */
-    int n = mnm_choices[mi][j], count = n == MNM_PCH ? mnm_pch_idx[127] + 1 : n;
+    if (j == 8 || !mnm_choices[mi][j] || mnm_cont(mnm_choices[mi][j]))
+        return value;                           /* not one of the eight, or a knob (v0.60: DYN's FRQs too) */
+    int n = mnm_choices[mi][j], count = mnm_count(n);
     int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
     if (nc == oc)
         return value;
@@ -184,7 +184,7 @@ static int func_kind(u8 *s, int slot, u32 id)
             if (mnm_slot[j] == slot) {
                 if (j == MNM_TUNE_J && mnm_labels[mi][j][0] == 'T' && mnm_labels[mi][j][1] == 'U')
                     return F_TUNE;              /* v0.47: by semitones (the owner) */
-                return mnm_choices[mi][j] ? F_CHOICE : F_NONE;
+                return mnm_choices[mi][j] && !mnm_cont(mnm_choices[mi][j]) ? F_CHOICE : F_NONE;
             }
         return F_NONE;
     }
