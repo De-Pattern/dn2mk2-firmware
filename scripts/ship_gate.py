@@ -1103,8 +1103,8 @@ def main() -> int:
 
         # 6g. v0.25, GRID's ALLOCATE SLICE (YES on a GRID track's page): trigs placed on steps
         # 1, 3, 5 in GRID RECORDING; CREATE LINEAR LOCKS locks slices 1, 2, 3 on them (the
-        # stock's own lock calls, read back through its GET); RANDOM again, then NO puts
-        # back the linear ones
+        # stock's own lock calls, read back through its GET); RANDOM twice, then NO exits with
+        # RANDOM's locks kept (v0.60, impbox: as the DT2; NO used to put the linear ones back)
         if "slc_alloc_n" in lay:
             from dnfw.sampler import machines as SMx    # noqa: PLC0415
             sid = SMx.SLICE_REC
@@ -1112,7 +1112,7 @@ def main() -> int:
             get = ",".join(f"call:0x40037c52:0:{sid}:{k},wait:2" for k in (0, 2, 4))
             steps = (f"wait:3,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,tap:19,wait:6,tap:25,wait:4,"
                      f"tap:27,wait:4,tap:29,wait:4,tap:19,wait:6,yes,wait:6,png:m,yes,wait:6,"
-                     f"mem:{lay['slc_alloc_n']:#x}:4,{get},yes,wait:6,down,wait:3,yes,wait:6,yes,wait:6,"
+                     f"mem:{lay['slc_alloc_n']:#x}:4,{get},yes,wait:6,down,wait:3,yes,wait:6,yes,wait:6,{get},"
                      f"no,wait:6,mem:{lay['slc_state']:#x}:4,{get}")
             # v0.42 (NiKo, v0.40): CREATE RANDOM LOCKS stays open after its YES; another track
             # (TRACK + [TRIG 2]) must close it, YES there must not open it again, and back on the
@@ -1141,7 +1141,10 @@ def main() -> int:
                     facts = {"three trigs locked": int(m[hex(lay["slc_alloc_n"])], 16) == 3,
                              "linear: slices 1, 2, 3": d0[:3] == [512, 1024, 1536],
                              "closed": sts[:1] == [0],
-                             "NO puts the locks back": d0[4:6] == [1024, 1536]}
+                             # v0.60 (impbox): NO exits and keeps RANDOM's locks, as the DT2 does
+                             "RANDOM changed the locks": d0[3:6] != [512, 1024, 1536],
+                             "RANDOM's locks are slices 1..3": all(v in (512, 1024, 1536) for v in d0[3:6]),
+                             "NO keeps RANDOM's locks": len(d0) >= 9 and d0[6:9] == d0[3:6]}
                     if letgo:
                         trk = [int(v, 16) for k, v in m.items() if k.split("@")[0] == "0x42431a6c"]
                         lgv = [int(v, 16) for k, v in m.items() if k.split("@")[0] == hex(lay["slc_letgo"])]
@@ -1155,8 +1158,8 @@ def main() -> int:
                                       "YES off the page opens nothing": sts[7:8] == [0]})
                     good = all(facts.values())
                     why = str(facts) + f" {d0} states {sts}"
-                return good, ("GRID's ALLOCATE SLICE: LINEAR locks slices 1..3 on three placed trigs; NO after "
-                              "RANDOM puts them back" + ("; v0.42: open RANDOM lets go on another track and on another "
+                return good, ("GRID's ALLOCATE SLICE: LINEAR locks slices 1..3 on three placed trigs; RANDOM "
+                              "changes them and NO exits keeping them" + ("; v0.42: open RANDOM lets go on another track and on another "
                               "page, and YES there opens nothing" if letgo else "") if good else why)
             later("alloc", "GRID allocate slice locks (ColdFire)", "GRID allocate slice locks (ColdFire)", [al_cmd, sorted(EMU_ENV.items())], al_body)
 

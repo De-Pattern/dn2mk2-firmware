@@ -247,20 +247,6 @@ static int alloc_locks(int random)
     return j;
 }
 
-static void alloc_cancel(void)                  /* NO: the locks as they were */
-{
-    if (!lk_kept)
-        return;
-    for (int k = 0; k < STEPS; k++) {
-        int v = lk_old[k];
-        if (v >= 0)
-            LOCK_SET(0, SMP_SLICE_ID, (u32)v, (u32)k);
-        else if (LOCK_GET(0, SMP_SLICE_ID, (u32)k) >= 0)
-            LOCK_CLEAR(0, SMP_SLICE_ID, (u32)k);
-    }
-    lk_kept = 0;
-}
-
 static void menu_draw(void *c)
 {
     popup(c, 12, 1, 115, 61);
@@ -285,7 +271,7 @@ static void alloc_draw(void *c)                 /* GRID's, as the DT2 draws it *
             box(c, 13, y - 2, 114, y + 6);
         LABEL(c, 64, y, "%s", items[k]);
     }
-    LABEL(c, 64, 17, "%s", "NO: CANCEL LOCKS");
+    LABEL(c, 64, 17, "%s", "NO: EXIT");
 }
 
 static void grid_draw(void *c)
@@ -895,8 +881,10 @@ int slc_pop(u8 *it)
     if (slc_state == S_ALLOC) {
         if (code == K_UP || code == K_DOWN)
             menu_sel ^= 1;
-        else if (code == K_NO) {
-            alloc_cancel();
+        else if (code == K_NO) {                /* v0.60 (impbox): NO exits, the locks kept, as the
+                                                 * DT2's manual says ("Press [NO] to exit the menu");
+                                                 * it put the old ones back, so RANDOM seemed to do nothing */
+            lk_kept = 0;
             slc_state = S_OFF;
         } else if (code == K_YES) {
             int n = alloc_locks(menu_sel);
