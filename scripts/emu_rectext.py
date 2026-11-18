@@ -169,10 +169,11 @@ def main() -> int:
     check("every centre-box message of the RECORDER stays inside its box (no pixel in the gutters, "
           "the dotted border untouched) in all " + str(len(states)) + " states", not bad, bad)
 
-    # v0.59 MON (C): "MON" in the box's top right corner (x 83..96, y 43..47: screen rows 16..20)
+    # v0.59 MON (C): "MON" in the box's top right corner (x 82..96, y 43..47: screen rows 16..20)
     # when on, in every state: drawn there and only there, over nothing any state draws there, the
-    # box and the gutters as above; off (every state above) nothing there
-    MX0, MX1, MR0, MR1 = 83, 96, 63 - 47, 63 - 43
+    # box and the gutters as above; off (every state above) nothing there. (The label's first
+    # column is x 82, inside the box: BX0 29 < 82, the border at 97 untouched.)
+    MX0, MX1, MR0, MR1 = 82, 96, 63 - 47, 63 - 43
     mon_bad, mon_seen, base = {}, 0, {}
     for name, v in states:
         v = dict(v)
