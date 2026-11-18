@@ -13,8 +13,6 @@
 
 **New machines for the Elektron Digitone II, built from your own copy of Elektron's OS.**
 
-<p align="center"><img src="docs/walkthrough.gif" alt="The mod's machines and pages, running in the Digitone II emulator" width="720"></p>
-
 The Digitone II ships with five machines. This mod adds three families more, running on
 the instrument's own DSP and sitting in MACHINE SEL beside the stock ones:
 
