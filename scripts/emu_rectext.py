@@ -24,16 +24,17 @@ from emulib.machine import Machine                             # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 SRC, STATE = 0x80003AF0, 0x8000DE60
-OWNER, FRAMES, TEMPO_AT = 0x80005308, 0x4058E8D4, 0x80005E60 + 216
+OWNER, FRAMES, TEMPO_AT = 0x80005308, 0x4058F8D4, 0x80005E60 + 216
 KIT, SOUND_STRIDE = 0x800052A0, 1163
-SYNC, UNDO, BITMAP_CLEAR = 0x4002549C, 0x400DAF44, 0x400DB052
-BUILD, APPLY = 0x400D85E8, 0x400DB092
-LOAD, SAVE, CLEAR = 0x400DE51E, 0x400DE718, 0x4003D14E
-SEQ_PLAYING, SEQ_PATTERN, TRACK_CUR = 0x42C5A918, 0x42C5A9A0, 0x42C5A984
+SYNC, UNDO, BITMAP_CLEAR = 0x4002549C, 0x400DB0A8, 0x400DB1B6
+BUILD, APPLY = 0x400D874C, 0x400DB1F6
+LOAD, SAVE, CLEAR = 0x400DE682, 0x400DE87C, 0x4003D14E
+SEQ_PLAYING, SEQ_PATTERN, TRACK_CUR = 0x42C5B918, 0x42C5B9A0, 0x42C5B984
 PAT_LENGTH, PAT_MODE = 122196, 122201
 REC, RECS, INDEX, TABLE_BYTES = 258, 80, 20640, 22256 + 2048
 LIST_BYTES = 20 + 202 * 8
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
+IDLE = 0x400CF246                   # the UI task's idle loop (1.11: 0x400CF0E2)
 REC_FIRST = 123
 RAM_REC, ID_REC, TAG = 0x52, 202, 0x20
 PAT_LOCK_TABLE = 97872                  # v0.44: the pattern's lock table inside the pattern object (rectrig.c)
@@ -83,7 +84,23 @@ def main() -> int:
     lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
     regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
 
+    # A direct call runs on the CPU as the run left it. A run can stop inside an interrupt
+    # handler; a call made there and the UI resumed after it left the UI task's context on
+    # this call's stack, and the task later returned into SENTINEL (an illegal instruction:
+    # the EXCEPTION screen, no frame drawn after it). So once the panel runs, a call waits
+    # until the UI is back in its idle loop, as it is between two inputs on the unit.
+    held = {"panel": None}
+
+    def to_idle():
+        p = held["panel"]
+        for _ in range(400):                           # at most 20 M instructions
+            if p is None or machine.pc == IDLE:
+                return
+            p.settle(50_000)
+        raise SystemExit(f"the UI never came back to its idle loop {IDLE:#x} (pc {machine.pc:#x})")
+
     def call(fn, *args, until=None, limit=50_000_000):
+        to_idle()
         saved = [uc.reg_read(r) for r in regs]
         sp = STACK_TOP - 0x200
         machine.write(sp, struct.pack(">I", SENTINEL) + b"".join(struct.pack(">I", x & 0xFFFFFFFF) for x in args))
@@ -121,6 +138,7 @@ def main() -> int:
     setv("smp_dir_ok", 1)
     from emulib.panel import Panel                             # noqa: PLC0415
     panel = Panel(machine, png_dir=a.png_dir or "out/rectext")
+    held["panel"] = panel
     panel.settle(5_000_000)
     put32(lay["rec_overlay"], 1)
     put32(lay["rec_phase"], 0)

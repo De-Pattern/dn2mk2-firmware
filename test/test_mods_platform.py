@@ -12,6 +12,7 @@ from dnfw.patch import area
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BASE = platform.BASE
 STOCK_SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+STOCK_112 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"
 
 pytestmark = pytest.mark.skipif(not STOCK_SYX.exists(), reason="no stock 1.11 image")
 
@@ -70,7 +71,7 @@ def test_split_join_round_trip(stock):
     chunks = [(b"BOOT", b"abc"), (area.CODE, area.CodeChunk(0x46700000, b"\x4e\x75").pack())]
     out = platform.join(stock, chunks)
     base, back = platform.split(out)
-    assert base == platform.join(stock, [])[:platform.STOCK_LENGTH]
+    assert base == platform.join(stock, [])[:len(stock)]
     assert [c for c, _ in back] == [b"BOOT", area.CODE]
     assert platform.add(out, []) == out
 
@@ -152,3 +153,20 @@ def test_changes_nothing_outside_the_declared_extents(firmware, stock, order):
     for i, (a, b) in enumerate(zip(stock, out)):
         if a != b:
             assert any(x.start <= i < x.end for x in allowed), hex(BASE + i)
+
+
+@pytest.mark.skipif(not STOCK_112.exists(), reason="no stock 1.12 image")
+def test_each_stock_gets_its_own_platform(stock):
+    """1.11 keeps upstream's platform (lfo4, lfowaves, bootscreen); 1.12 gets the
+    port's. Stock, grown with the loader, and grown with an unknown tail."""
+    from dnfw.cli.files import read_image
+    from dnfw.firmware.load import load
+    stock_112 = load(read_image(STOCK_112)).container.find(3).unpack()
+    for image, spec in ((stock, platform.SPEC_111), (stock_112, platform.SPEC)):
+        assert len(image) == spec["stock_length"]
+        assert platform.spec_for(image) is spec
+        grown = platform.join(image, [(b"BOOT", b"abcd")])
+        assert platform.spec_for(grown) is spec
+        assert platform.split(grown)[0][:len(image)] == platform.join(image, [])[:len(image)]
+        assert platform.spec_for(image + bytes(4096 + 16)) is spec
+

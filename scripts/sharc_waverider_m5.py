@@ -68,6 +68,7 @@ from dnfw.image import bootstream, sharc_object                # noqa: E402
 from dnfw.waverider import dsp, testtable                       # noqa: E402
 from dnfw.perc import live as PL                                # noqa: E402
 from dnfw.perc import machines as PM                            # noqa: E402
+from dnfw.perc import mf                                        # noqa: E402
 from dnfw.perc import program as PP                             # noqa: E402
 from dnfw.sampler import live as SL                             # noqa: E402
 from dnfw.sampler import machines as SM                         # noqa: E402
@@ -448,10 +449,23 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
             insn = dk.st.decode_at(image.memory, None, load_sw + off // 2)
             if insn.kind in ("unknown", "uncertain") or (insn.length_bytes or 0) != end - off:
                 bad.append(f"+{off} digikit {insn.type_name}/{insn.length_bytes} vs {end - off}")
+            mfc = mf.parse(lines[k])
+            if mfc is not None:                  # a multifunction line: digikit's compute field is mf's
+                fl = insn.fields or {}
+                dkc = (fl["compute[22:16]"] << 16 | fl["compute[15:0]"]) if "compute[22:16]" in fl \
+                    else fl.get("compute")
+                if dkc != mfc:
+                    bad.append(f"+{off} digikit compute {dkc if dkc is None else hex(dkc)} vs {mfc:#x}"
+                               f" for '{lines[k].strip()}'")
             if use_selmap:
                 n, text = sel.get(off, (0, "?"))
                 want = norm(lines[k])
                 got = norm(text)
+                if mfc is not None:
+                    # selmap reads the float multifunction categories 011000 / 011001 as
+                    # `Fm = MRF + Fx * Fy`: a known misreading, so for these lines its text,
+                    # the MRF aside, must still be the source
+                    got = got.replace("=mrf+", "=")
                 if "do" in want and "until" in want:
                     same = got.startswith(want.split("do")[0] + "do")
                 else:
@@ -1982,21 +1996,16 @@ def step_smp(init, sound, machines, blocks) -> dict:
     mx = runs["mixed"]
     kick = smp_series(runs["kick"], 0)
     up = smp_series(runs["kick_up"], 0)
-    # v0.18: the kick as the DSP played it against the DT2's own reader (the bit-exact model
-    # of its code, outside the repository: ../dt2s117/research/tools/models_reader.py), times
-    # LEV's make-up gain; 0.25 frames a 96 kHz sample
-    kick_err = 1.0
-    dt2_models = ROOT.parent / "dt2s117" / "research" / "tools"
-    if (dt2_models / "models_reader.py").is_file():
-        sys.path.insert(0, str(dt2_models))
-        import models_reader as MR
-        pcm = [max(-32768, min(32767, round(x * 32768))) for x in SL.test_samples()[0]]
-        mv = MR.Voice(pcm, 0, 0, len(pcm) << 31, 1 << 29, 0)
-        g = struct.unpack("<f", SP.tables_bytes()[-4:])[0]
-        exp = []
-        for _ in range(len(kick) // BLOCK - 1):
-            exp += [g * float(x) for x in MR.read_block(mv, MR.load_polyphase())]
-        kick_err = max((abs(a - b) for a, b in zip(kick[BLOCK:], exp)), default=1.0)
+    # v0.18: the kick as the DSP played it against the DT2's own reader (2026-11-15: our model
+    # of it, dnfw.dt2.reader, with the tables from the owner's DT2 image; it replaces a model
+    # outside the repository that only upstream's host had), times LEV's make-up gain;
+    # 0.25 frames a 96 kHz sample
+    from dnfw.dt2 import reader as DR
+    pcm = [max(-32768, min(32767, round(x * 32768))) for x in SL.test_samples()[0]]
+    g = struct.unpack("<f", SP.tables_bytes()[-4:])[0]
+    blocks_kick = len(kick) // BLOCK - 1
+    exp = [g * x for x in DR.read(DR.Voice(pcm, 0, DR.ONE // 4), BLOCK * blocks_kick)]
+    kick_err = max((abs(a - b) for a, b in zip(kick[BLOCK:], exp)), default=1.0) if blocks_kick > 0 else 1.0
     werp_buf = [x for blk in mx["buffers"][1:] for x in blk[3]] if mx["ok"] else []
     rev = smp_series(mx, 0) if mx["ok"] else []
     rev_grows = len(rev) >= 4 * BLOCK and V.rms(rev[-2 * BLOCK:]) > V.rms(rev[BLOCK:3 * BLOCK])

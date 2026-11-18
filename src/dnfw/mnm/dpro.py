@@ -155,61 +155,76 @@ def start(p: Prog, L: C.Layout) -> None:
 # -- interp -------------------------------------------------------------------------------
 def _interp(p: Prog, L: C.Layout) -> None:
     W = L.W
-    # v0.42: P, il, g and out held in registers (R0, R11, R13, R14) and the count in R15, the
-    # five taps unrolled (v0.41 loaded them from L2 every sample, and counted the taps in a
-    # scratch word): the same operations in the same order, the same words bit for bit
+    # v0.42: P, il, g and out held in registers (R0, R11, R13, out walked by I0 since v0.52) and the
+    # count in R15, the five taps unrolled (v0.41 loaded them from L2 every sample, and counted the taps
+    # in a scratch word): the same operations in the same order, the same words bit for bit
     # (scripts/mnm_identity.py); P and out stored back at the end, as v0.41 left them.
-    p.ld(0, W["fr"])
-    p.ld(11, W["il"])
-    p.ld(13, W["g"])
+    # v0.52 (speed): 0.5, 1.0 and 32.0 held (F1, F12, F14); the phase's wrap as `IF GE` on
+    # (x - 1.0)'s sign (x in [0.5, 1.5): that difference is exact, the same word as before); the taps'
+    # words read at offsets, each on the compute before its use (I1 the samples, I2 the phase's 10 words)
+    # v0.52, then: the taps on multifunction instructions (the multiplier's F0-F3 x F4-F7 beside the
+    # ALU's F8-F11 +- F12-F15): d F0, c + d r F1, P F2, 0.5 F3, r F4, x F5, il F6, g F7, c F8, the sum F9,
+    # 1.0 F10, d r F12, (c + d r) x F13, 32.0 F14; each product formed while the one before is summed
+    p.ld(2, W["fr"])
+    p.ld(6, W["il"])
+    p.ld(7, W["g"])
     p.ld(14, W["out"])
+    p.seti(0, 14)
+    p.fconst(3, 0.5)
+    p.fconst(10, 1.0)
+    p.fconst(14, 32.0)
+    P = p.par
 
     def one():
-        p.trunc(2, 0)                           # the buffer index
-        p.iconst(12, 0)
-        p.float_(3, 2, 12)
-        p.fop(3, 0, "-", 3)
-        p.fconst(12, 0.5)
-        p.fop(3, 3, "+", 12)
-        p.fconst(12, 1.0)
-        p.if_(3, "GE", 12, lambda: p.fop(3, 3, "-", 12))
-        p.fconst(12, 32.0)
-        p.fop(3, 3, "*", 12)
-        p.trunc(4, 3)                           # the phase, 0..31
-        p.iconst(12, 0)
-        p.float_(5, 4, 12)
-        p.fop(6, 3, "-", 5)                     # the residual
-        p.lsh(2, 2, 2)
+        p.trunc(11, 2)                          # the buffer index
+        p.float0(12, 11)
+        p.fop(13, 2, "-", 12)
+        p.fop(13, 13, "+", 3)
+        p.fop(12, 13, "-", 10)
+        p.fop_if("GE", 13, 12, "PASS")
+        p.fop(13, 13, "*", 14)
+        p.trunc(12, 13)                         # the phase, 0..31
+        p.lsh(1, 12, 5)
+        p.lsh(8, 12, 3)
+        p.iop(1, 8, "+", 1)                     # 40 words a phase
+        p.iconst(8, L.DT["interp"])
+        p.iop(1, 8, "+", 1)
+        p.seti(2, 1)
+        p.ldi(0, 1, 2)                          # d0
+        p.float0(1, 12)
+        p.ldi(8, 0, 2)                          # c0
+        p.fop(4, 13, "-", 1)                    # the residual r
+        p.lsh(11, 11, 2)
         p.iconst(12, L.BUF)
-        p.iop(2, 12, "+", 2)
-        p.seti(1, 2)
-        p.lsh(5, 4, 5)
-        p.lsh(7, 4, 3)
-        p.ipass(12, 5)
-        p.iop(5, 12, "+", 7)                    # 40 words a phase
-        p.iconst(12, L.DT["interp"])
-        p.iop(5, 12, "+", 5)
-        p.seti(2, 5)
-        p.fconst(7, 0.0)
-        for _ in range(5):                      # the taps
-            p.ldpost(8, 1)
-            p.ldpost(9, 2)
-            p.ldpost(10, 2)
-            p.fop(10, 10, "*", 6)
-            p.fop(9, 9, "+", 10)
-            p.fop(9, 9, "*", 8)
-            p.fop(7, 7, "+", 9)
-        C.sat(p, 7)
-        p.fop(7, 7, "*", 13)
-        p.seti(5, 14)
-        p.ld(10, W["m"])
-        p.ifz(10, "NE", lambda: (p.ldi(9, 0, 5), p.fop(7, 7, "+", 9)))
-        p.stpost(5, 7)
-        p.iconst(12, 4)
-        p.iop(14, 14, "+", 12)
-        p.fop(0, 0, "+", 11)
-    p.loop_r(15, N2, one)
-    p.st(W["P"], 0)
+        p.iop(11, 12, "+", 11)
+        p.seti(1, 11)
+        p.fconst(9, 0.0)
+        P(("*", 12, 0, 4), ("ldk", 0, 3, 2))                               # d0 r; d1
+        for k in range(5):                      # the taps
+            if k < 4:
+                P(("*", 12, 0, 4), ("+", 1, 8, 12), ("ldk", 5, k, 1))     # c + d r; the next d r; x
+            else:
+                P(("op", 1, 8, "+", 12), ("ldk", 5, k, 1))
+            mv = (("ldk", 8, 2 * k + 2, 2),) if k < 4 else ()              # the next c
+            if k == 0:
+                P(("op", 13, 1, "*", 5), *mv)                              # (c + d r) x
+            else:
+                P(("*", 13, 1, 5), ("+", 9, 9, 13), *mv)                   # the sum += the last; this one
+            if k <= 2:
+                p.ldi(0, 2 * k + 5, 2)                                     # the d after the next
+        P(("op", 9, 9, "+", 13))
+        p.fconst(8, C.TOP)
+        p.fop(9, 9, "MIN", 8)
+        p.fconst(8, -1.0)
+        p.fop(9, 9, "MAX", 8)                   # C.sat
+        p.fop(9, 9, "*", 7)
+        p.ld(11, W["m"])
+        p.ifz(11, "NE", lambda: (p.ldi(8, 0, 0), p.fop(9, 9, "+", 8)))
+        p.stpost(0, 9)
+        p.fop(2, 2, "+", 6)
+    p.loop_r(15, N2, one, one=15)
+    p.st(W["P"], 2)
+    p.geti(14, 0)
     p.st(W["out"], 14)
     p.st(W["t"], 15)                            # (v0.41's tap count, 0 at the end)
     p.st(W["k"], 15)
@@ -217,7 +232,7 @@ def _interp(p: Prog, L: C.Layout) -> None:
 
 def interp(p: Prog, L: C.Layout) -> None:
     """32 samples from BUF at W fr + k il -> W out (int address, walked), x W g (float), added
-    to what is there if W m (int) != 0. Clobbers R0-R15 (v0.42: R13-R15 too), I1, I2, I5, I12."""
+    to what is there if W m (int) != 0. Clobbers R0-R15 (v0.42: R13-R15 too), I0, I1, I2, I12."""
     p.call("dp_interp", lambda: _interp(p, L))
 
 
@@ -227,67 +242,122 @@ def _dec2(p: Prog, L: C.Layout) -> None:
     p.iconst(12, L.DT["dec2"])
     p.seti(1, 12)
 
-    def stage():
+    def consts():
+        p.fconst(7, C.TOP)
+        p.fconst(8, -1.0)
+        p.iconst(9, 16)
+        p.seti(0, 5)
+
+    def stage():                                # the last stage alone (the odd samples' c5)
         p.ldpost(3, 1)                          # c
-        p.iconst(5, L.MIX)                      # stages 0..3 the even samples, 4..8 the odd
-        p.ld(0, W["st"])
-        p.iconst(12, 5)
-        p.if_(0, "LE", 12, lambda: p.iconst(5, L.MIX + 4), kind="i")
+        p.iconst(5, L.MIX + 4)
         p.ldi(1, 0, 2)
         p.ldi(2, 1, 2)
 
-        # v0.42: TOP, -1 and 8 held in R7..R9, the count in R10 (v0.41 loaded them as
-        # constants every sample and counted in a scratch word): the same words bit for bit
-        p.fconst(7, C.TOP)
-        p.fconst(8, -1.0)
-        p.iconst(9, 8)
+        # v0.42: TOP, -1 held in R7, R8, the count in R10 (v0.41 loaded them as constants every sample
+        # and counted in a scratch word): the same words bit for bit. v0.52 (speed): two samples
+        # a round, at I0's words 0 and 2 (on the computes around them), the last input in F1 and F4 by
+        # turns (no move), I0 two samples on (R9 16 bytes) a round
+        consts()
 
-        def one():
-            p.seti(5, 5)
-            p.ldi(4, 0, 5)
-            p.fop(4, 4, "MIN", 7)
-            p.fop(4, 4, "MAX", 8)               # C.sat
-            p.fop(6, 4, "-", 2)
-            p.fop(6, 6, "*", 3)
-            p.fop(2, 1, "+", 6)
-            p.sti(0, 5, 2)                      # (the next stage limits it as it reads it)
-            p.fop(2, 2, "MIN", 7)
-            p.fop(2, 2, "MAX", 8)               # fed back limited, as the 56300 stores it
-            p.fpass(1, 4)
+        def two():
+            for k, (x1, x) in enumerate(((1, 4), (4, 1))):
+                p.ldi(x, 2 * k, 0)
+                p.fop(x, x, "MIN", 7)
+                p.fop(x, x, "MAX", 8)           # C.sat
+                p.fop(6, x, "-", 2)
+                p.fop(6, 6, "*", 3)
+                p.fop(2, x1, "+", 6)
+                p.sti(2 * k, 0, 2)              # (the next stage limits it as it reads it)
+                p.fop(2, 2, "MIN", 7)
+                p.fop(2, 2, "MAX", 8)           # fed back limited, as the 56300 stores it
             p.iop(5, 9, "+", 5)
-        p.loop_r(10, 16, one)
+            p.seti(0, 5)
+        p.loop_r(10, 8, two, one=10)
         p.st(W["j"], 10)
         p.stpost(2, 1)
         p.stpost(2, 2)
-    p.loop(W["st"], 9, stage)
+
+    def pair():
+        """v0.52 (speed): two stages of one chain in one pass (0-1, 2-3 the even samples, 4-5, 6-7
+        the odd): the second reads the first's output limited, which is the first's limited feedback
+        word, so it is not stored and read back; the second's last input (x1) kept apart (F12). The
+        same words. Registers as stage(), and c' F11, x1' F12, y1' F13"""
+        p.ldpost(3, 1)                          # c
+        p.ldpost(11, 1)                         # c'
+        p.iconst(5, L.MIX)
+        p.ld(0, W["st"])
+        p.iconst(12, 2)
+        p.if_(0, "LE", 12, lambda: p.iconst(5, L.MIX + 4), kind="i")
+        p.ldi(1, 0, 2)
+        p.ldi(2, 1, 2)
+        p.ldi(12, 2, 2)
+        p.ldi(13, 3, 2)
+        consts()
+
+        def two():
+            for k, (x1, x) in enumerate(((1, 4), (4, 1))):
+                p.ldi(x, 2 * k, 0)
+                p.fop(x, x, "MIN", 7)
+                p.fop(x, x, "MAX", 8)           # C.sat
+                p.fop(6, x, "-", 2)
+                p.fop(6, 6, "*", 3)
+                p.fop(2, x1, "+", 6)
+                p.fop(2, 2, "MIN", 7)
+                p.fop(2, 2, "MAX", 8)           # the first's word, limited: the second's input
+                p.fop(6, 2, "-", 13)
+                p.fop(6, 6, "*", 11)
+                p.fop(13, 12, "+", 6)
+                p.sti(2 * k, 0, 13)
+                p.fop(13, 13, "MIN", 7)
+                p.fop(13, 13, "MAX", 8)
+                p.fpass(12, 2)
+            p.iop(5, 9, "+", 5)
+            p.seti(0, 5)
+        p.loop_r(10, 8, two, one=10)
+        p.st(W["j"], 10)
+        p.stpost(2, 1)
+        p.stpost(2, 2)
+        p.stpost(2, 12)
+        p.stpost(2, 13)
+    p.loop(W["st"], 4, pair)
+    stage()
     p.iconst(12, L.MIX)
-    p.seti(5, 12)
+    p.seti(0, 12)
+    p.fconst(3, 0.5)                            # v0.52 (speed): the constants held, the count in
+    p.fconst(7, C.TOP)                          # R0, I0 walking MIX: the same words
+    p.fconst(8, -1.0)
 
     def out():
-        p.ldpost(1, 5)
-        p.ldpost(2, 5)
+        p.ldpost(1, 0)
+        p.ldpost(2, 0)
         p.fop(1, 1, "+", 2)
-        p.fconst(12, 0.5)
-        p.fop(1, 1, "*", 12)
-        C.sat(p, 1)
+        p.fop(1, 1, "*", 3)
+        p.fop(1, 1, "MIN", 7)
+        p.fop(1, 1, "MAX", 8)                   # C.sat
         p.stpost(4, 1)
-    p.loop(W["j"], 16, out)
+    p.loop_r(0, 16, out, one=0)
+    p.st(W["j"], 0)
 
 
 def dec2(p: Prog, L: C.Layout) -> None:
-    """MIX (32) -> 16 at I4 (walked); I2 the 18 state words. Clobbers R0-R13, I1, I2, I5, I12.
+    """MIX (32) -> 16 at I4 (walked); I2 the 18 state words. Clobbers R0-R13, I0, I1, I2, I12.
     v0.51, at OS 1: MIX (16) to I4 as it is, limited (no decimator)."""
     if OS == 2:
         p.call("dp_dec2", lambda: _dec2(p, L))
         return
     p.iconst(12, L.MIX)
-    p.seti(5, 12)
+    p.seti(0, 12)
+    p.fconst(7, C.TOP)                          # v0.52: the limits held, the count in R0, I0 walking MIX
+    p.fconst(8, -1.0)
 
     def out():
-        p.ldpost(1, 5)
-        C.sat(p, 1)
+        p.ldpost(1, 0)
+        p.fop(1, 1, "MIN", 7)
+        p.fop(1, 1, "MAX", 8)                   # C.sat
         p.stpost(4, 1)
-    p.loop(L.W["j"], 16, out)
+    p.loop_r(0, 16, out, one=0)
+    p.st(L.W["j"], 0)
 
 
 def state_ptr(p: Prog, L: C.Layout, i: int, k: int) -> None:

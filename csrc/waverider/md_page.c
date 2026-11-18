@@ -26,14 +26,14 @@ typedef unsigned short u16;
 typedef unsigned char u8;
 
 #define GET_VALUE ((int (*)(void *, u32, u8 *))0x4006538E)
-#define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90)
-#define RECORD(id) ((const int *)(0x401F7F94u + 60u * (id)))
-#define FRAMES (*(volatile u32 *)0x4058E8D4u)                      /* 1,500 a second */
-#define UI_TRACK (*(volatile u8 *)0x42431A6Cu)
+#define SET_PIXEL ((void (*)(void *, int, int, int))0x40113E70)
+#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))
+#define FRAMES (*(volatile u32 *)0x4058F8D4u)                      /* 1,500 a second */
+#define UI_TRACK (*(volatile u8 *)0x42432A6Cu)
 #define CTL_FRAME ((volatile u16 *)0x80005E60u)
 #define TEMPO_WORD 108                                             /* BPM x 120 */
 #define MDUI ((const u8 *)MDUI_LOAD)
-#define NAME_SHORT_OF(id) (*(const char **)(0x401F7F94u + 60u * (id) + 0x30u))
+#define NAME_SHORT_OF(id) (*(const char **)(0x401F83A4u + 60u * (id) + 0x30u))
 
 enum { SMALL, SYM, BIG };
 
@@ -161,7 +161,7 @@ static int knob(void *view, u32 id)
 /* v0.27: a p-locked control drawn as stock draws it, its cell inverted (owner's photo: a
  * trig held, its locked parameters lit). The stock getter's flag (0x4006538e's third
  * argument) is what the stock grid (0x40017498) tests to draw a cell highlighted. The
- * canvas, as 0x40113b90 reads it: +4 width, +8 height, +12 words a column, +16 the bits
+ * canvas, as 0x40113e70 reads it: +4 width, +8 height, +12 words a column, +16 the bits
  * (a column's words, bit 31 - (y & 31) of word y >> 5). */
 static int locked(void *view, u32 id)
 {

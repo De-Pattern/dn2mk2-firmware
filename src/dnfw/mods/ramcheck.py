@@ -64,7 +64,7 @@ def named(stock: bytes, content: bytes) -> list[tuple[int, int]]:
         found += [(platform.BASE + a, v) for a, v in _words(bytes(content[lo:hi]), lo)
                   if not (LO <= struct.unpack_from(">I", stock, a)[0] < HI)]
         i = j
-    if len(content) > platform.STOCK_LENGTH:
+    if len(content) > platform.spec_for(content)["stock_length"]:
         for cid, data in platform.split(content)[1]:
             if cid == area.CODE:
                 code = area.CodeChunk.unpack(data)

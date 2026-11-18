@@ -7,7 +7,7 @@ docs/erase-mod-data.md): the gate's check.
         --scenario ui|link|boot --json out/erase-ui.json [--png-dir out/erase]
 
 The +Drive is played by Python, as in the link16 and pools checks: the stock block driver's
-three entries (0x4012c59a read, 0x4012c780 write, 0x4012c4b2 TRIM) become `moveq #0,%d0 ;
+three entries (0x4012c87a read, 0x4012ca60 write, 0x4012c792 TRIM) become `moveq #0,%d0 ;
 rts` and a hook does their work first. Every call is logged as the eMMC commands the stock
 routine sends for it (CMD18 / CMD25 at the sector; TRIM: CMD35 start, CMD36 start + count
 - 1, CMD38 argument 1, the routine's own arithmetic, docs/erase-mod-data.md). The device
@@ -64,10 +64,10 @@ from emulib.image import differences                           # noqa: E402
 from emulib import bounded                                      # noqa: E402
 from emulib.machine import Machine                             # noqa: E402
 
-BLK_READ, BLK_WRITE, BLK_TRIM = 0x4012C59A, 0x4012C780, 0x4012C4B2
-BLK_READY, BLK_SECTORS = 0x4461B68C, 0x4461B6B0
-SYSEX_ROUTER, SYSEX_SENDER = 0x4012166E, 0x401233F2
-KIT, SOUND_STRIDE = 0x4210C08C, 1163
+BLK_READ, BLK_WRITE, BLK_TRIM = 0x4012C87A, 0x4012CA60, 0x4012C792
+BLK_READY, BLK_SECTORS = 0x4461C68C, 0x4461C6B0
+SYSEX_ROUTER, SYSEX_SENDER = 0x4012194E, 0x401236D2
+KIT, SOUND_STRIDE = 0x4210D08C, 1163
 DEVICE = 48_340_992                     # the Kingston 32 GB part, reconfigured (docs/drive-storage-research.md)
 POOL0, POOL_END = 0x600000, 0x6C8001
 PL0, PL_END = 0x6D0000, 0x6E0300
@@ -221,7 +221,7 @@ def harness(a, disk, ready=True):
                     uc.mem_write(RESULT, struct.pack(">i", -1))               # no answer (CTOE)
                     return
                 d.log.append(("T", s, n))
-                d.cmds += [(35, s), (36, (s + n - 1) & 0xFFFFFFFF), (38, 1)]   # 0x4012c4b2's own
+                d.cmds += [(35, s), (36, (s + n - 1) & 0xFFFFFFFF), (38, 1)]   # 0x4012c792's own
                 if d.rng is not None and d.rng.random() < 1 / 20:
                     # returned early: still programming, briefly, or for longer than a pass's look
                     d.busy = d.rng.randrange(1, 8) if d.rng.random() < 0.7 else d.rng.randrange(5000, 9000)

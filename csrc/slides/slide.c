@@ -8,7 +8,7 @@
  * The mirror is per VOICE (16 blocks of 101 slots): the target the sound and the locks write
  * (SRC, 0x80003af0), the one-pole smoother's 16.16 state (STATE, 0x8000de60) and its output
  * the frame is built from (OUT, 0x800068e4), word index 17 + 101 v + s in each. A lock jumps
- * STATE (0x400db092); the slide puts it back on the previous value and then moves STATE and
+ * STATE (0x400db1f6); the slide puts it back on the previous value and then moves STATE and
  * OUT together every frame, after the smoother, before the modulation is added (so LFOs ride
  * on top). It lands on the target exactly, where the smoother then rests. A slot leaves the
  * slide the frame its SRC stops being the target (a knob, a new sound, a new trig): STATE
@@ -40,11 +40,11 @@ typedef signed char s8;
 #define OWNER ((volatile u32 *)0x80005308u)             /* voice -> track (0x40026a3c) */
 #define VSOUND(v) (*(u8 *volatile *)(0x800052A8u + 4u * (u32)(v)))   /* voice -> sound */
 #define SOUND_TYPE 0xDE
-#define FRAMES (*(volatile u32 *)0x4058E8D4u)           /* frames since boot, 1,500 a second */
+#define FRAMES (*(volatile u32 *)0x4058F8D4u)           /* frames since boot, 1,500 a second */
 #define TEMPO (((volatile u16 *)0x80005E60u)[108])      /* the frame's BPM x 120 */
-#define PATTERN (*(u8 *volatile *)0x42C5A9A0u)          /* the pattern playing */
-#define SCALE_TICKS(i) (((const u8 *)0x401F6B08u)[4 * (i) + 3])   /* ticks a step: 3..48 */
-#define SMOOTHER ((u32 (*)(void *))0x400DB12Au)
+#define PATTERN (*(u8 *volatile *)0x42C5B9A0u)          /* the pattern playing */
+#define SCALE_TICKS(i) (((const u8 *)0x401F6F18u)[4 * (i) + 3])   /* ticks a step: 3..48 */
+#define SMOOTHER ((u32 (*)(void *))0x400DB28Eu)
 #define RECS 80
 #define REC 258
 
@@ -211,7 +211,7 @@ static void trigger(u32 v, u32 t, u8 *list)
     sl_started++;
 }
 
-/* The lock applier 0x400db092(voice, list, mirror), both callers (a note's voice, and a
+/* The lock applier 0x400db1f6(voice, list, mirror), both callers (a note's voice, and a
  * trigless lock on each voice of its track): stock's, then the slide this trig asks for. */
 void sl_apply(u32 v, u8 *list, void *mirror)
 {
@@ -348,7 +348,7 @@ int sl_lock_set(u8 *table, u32 t, u32 step, u32 k, u32 value)
     return lock_set(table, t, step, k, value, 0);
 }
 
-/* the lock-list builder 0x400d85e8(track, list, table, sound, step, ...): stock's, then the
+/* the lock-list builder 0x400d874c(track, list, table, sound, step, ...): stock's, then the
  * step's SLD and SLEN past its entries */
 void sl_build(int track, u8 *list, u8 *table, void *sound, int step, int a6, int a7)
 {
@@ -383,7 +383,7 @@ int sl_clear(void *model, int track, int step)
     return r;
 }
 
-/* the pattern's lock table, RAM -> stored 0x400de718(stored, ram): stock's, then our
+/* the pattern's lock table, RAM -> stored 0x400de87c(stored, ram): stock's, then our
  * records' headers as their stored ids (stock wrote each record i to i) */
 int sl_save(u8 *stored, u8 *ram)
 {
@@ -401,7 +401,7 @@ int sl_save(u8 *stored, u8 *ram)
     return r;
 }
 
-/* stored -> RAM 0x400de51e(ram, stored): stock's (it skips our ids, leaving record i free),
+/* stored -> RAM 0x400de682(ram, stored): stock's (it skips our ids, leaving record i free),
  * then ours back in */
 int sl_load(u8 *ram, u8 *stored)
 {
@@ -438,14 +438,14 @@ int sl_ours_any(const u8 *table, u32 t)
  * E and F set. A trig held: its own value (the first held step's), drawn inverted when it is
  * a lock, as stock draws a p-lock; turning sets it on every held step. No trig held: what a
  * trig gets with no lock (OFF, 1 step), and turning does nothing. */
-#define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90u)   /* (canvas, x, y, on) */
-#define TEXT ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011545Cu)
+#define SET_PIXEL ((void (*)(void *, int, int, int))0x40113E70u)   /* (canvas, x, y, on) */
+#define TEXT ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011573Cu)
 #define CENTRED 2
-#define APP ((u32 (*)(void))0x4018A97Au)
+#define APP ((u32 (*)(void))0x4018AC5Au)
 #define TRACK_CTX ((u32 (*)(u32))0x4003EFDEu)
 #define PATTERN_LEN ((u32 (*)(u32))0x4004F896u)
-#define HELD_OBJ (*(u8 *volatile *)0x446478C8u)
-#define BIT_TEST ((u32 (*)(void *, u32))0x4019C40Cu)
+#define HELD_OBJ (*(u8 *volatile *)0x446488C8u)
+#define BIT_TEST ((u32 (*)(void *, u32))0x4019C6ECu)
 #define PTIM_ID 34
 #define SL_X0 24                                /* encoder E's place; F's is a column on */
 #define SL_COLW 26
@@ -498,28 +498,28 @@ static int held(struct held *h)
  * at (102, 0); canvas y up, the label at y, the widget from y + 7):
  *
  * - SLD: RTRG's widget, drawn by stock's widget routine 0x40036560 with RTRG's record (id
- *   0x132; its toggle 0x400bc414 blits the sheet's frame value >> 8 at (x + 1, y + 11)), the
+ *   0x132; its toggle 0x400bc578 blits the sheet's frame value >> 8 at (x + 1, y + 11)), the
  *   value 0 (OFF) or 0x100 (ON), as RTRG's own;
- * - SLEN: LEN's box, as LEN's widget 0x400cc2b4 draws it (its font 0x40293c64, the text
+ * - SLEN: LEN's box, as LEN's widget 0x400cc418 draws it (its font 0x402941a4, the text
  *   centred at (x + 9, y + 13), the box (x, y + 7) .. (x + 18, y + 23)): our text, as LEN's
  *   own table has no "1", "1.5" ... (its "1/8" is two steps);
- * - the label as the cell routine draws it (0x40115668, font 0x40291760, centred at x + 9 on
+ * - the label as the cell routine draws it (0x40115948, font 0x40291ca0, centred at x + 9 on
  *   a cleared "XXXX" width: x - 2 .. x + 20);
- * - a lock (a trig's own value): stock's p-lock look, the widget's area inverted, 0x40114842
+ * - a lock (a trig's own value): stock's p-lock look, the widget's area inverted, 0x40114b22
  *   (x - 3, y + 6, x + 21, y + 24, -1), as the cell routine does for a locked parameter.
  *
  * The place is cleared first (stock's empty place shows a dotted frame there). */
-#define CELL_TEXT ((void (*)(void *, u32, int, int, int, int, u32, u32, const char *))0x40115668u)
-#define CELL_FONT 0x40291760u
-#define CELL_FMT_W 0x402170B9u                  /* "XXXX": the label's width */
-#define FMT_S 0x40219C2Du                       /* "%s" */
-#define FILL ((void (*)(void *, int, int, int, int, int))0x40114842u)   /* (c, x0, y0, x1, y1, mode) */
+#define CELL_TEXT ((void (*)(void *, u32, int, int, int, int, u32, u32, const char *))0x40115948u)
+#define CELL_FONT 0x40291ca0u
+#define CELL_FMT_W 0x40217571u                  /* "XXXX": the label's width */
+#define FMT_S 0x4021A0E5u                       /* "%s" */
+#define FILL ((void (*)(void *, int, int, int, int, int))0x40114b22u)   /* (c, x0, y0, x1, y1, mode) */
 #define WIDGET ((void (*)(void *, u32, u32, u32, void *, void *, int, int))0x40036560u)
 #define RTRG_ID 0x132u
-#define BOX_FONT_INIT ((void (*)(void *, u32))0x40115E6Cu)
-#define BOX_FONT_FREE ((void (*)(void *))0x40115CE8u)
-#define BOX_FONT 0x40293C64u
-#define RECT ((void (*)(void *, int, int, int, int, int))0x40114626u)    /* (c, x0, y0, x1, y1, 1) */
+#define BOX_FONT_INIT ((void (*)(void *, u32))0x4011614Cu)
+#define BOX_FONT_FREE ((void (*)(void *))0x40115FC8u)
+#define BOX_FONT 0x402941A4u
+#define RECT ((void (*)(void *, int, int, int, int, int))0x40114906u)    /* (c, x0, y0, x1, y1, 1) */
 
 static void clear(void *c, int x0, int y0, int x1, int y1)
 {
@@ -593,7 +593,7 @@ static u32 slk_at __attribute__((section(".data"))) = 0;
 
 static int sl_choice_step(int delta)            /* -> the choices to move */
 {
-    u32 now = *(volatile u32 *)0x4058E8D4u;     /* the 1.5 kHz ticks */
+    u32 now = *(volatile u32 *)0x4058F8D4u;     /* the 1.5 kHz ticks */
     if (now - slk_at > 3000u || (slk_acc > 0 && delta < 0) || (slk_acc < 0 && delta > 0))
         slk_acc = 0;
     slk_at = now;
@@ -679,7 +679,7 @@ int sl_rec_held(u32 *val)                       /* a step held -> 1, *VAL its RE
 
 /* v0.41 (the REC TRIGS view's grid): the active track's REC locks on the 16 steps of the page it
  * plays (or played last) -> the first step's number, OUT[16] each step's (0 none, 1, 2); -1 none */
-#define TRACK_CUR ((volatile u8 *)0x42C5A984u)
+#define TRACK_CUR ((volatile u8 *)0x42C5B984u)
 int sl_rec_page(u8 *out)
 {
     u32 ctx = TRACK_CTX(APP());
@@ -745,7 +745,7 @@ int sl_rec_knob(int delta)                      /* -> 1: a step is held and H wa
  *   stock writes its own. Stock cleared the destination's steps first through 0x4003d14e
  *   (sl_clear: ours on those steps too), so the pasted steps' slides are the clipboard's,
  *   exactly as their other locks, and the track's other steps keep theirs.
- * - track clear (0x400e745c, FUNC + PLAY): it frees the track's records by their track byte;
+ * - track clear (0x400e75c0, FUNC + PLAY): it frees the track's records by their track byte;
  *   the tag cleared there, ours go with them.
  * - shift and page autocopy: the tag cleared in their track compare, so ours move with
  *   their steps inside the record.

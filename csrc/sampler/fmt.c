@@ -25,8 +25,8 @@ typedef unsigned char u8;
 #define SOUND_VALUES 0x14                       /* its values, a 16-bit word a slot */
 #define MNM_TUNE_J 7                            /* TUNE: knob H on every Monomachine machine */
 #define MNM_TUNE_REC 240u                       /* its record (perc_param_ids[7]) */
-#define RECORD_FMT(id) (*(void **)(0x401F7F94u + 60u * (id) + 0x34u))
-#define RECORD_LO(id) (((const int *)(0x401F7F94u + 60u * (id)))[2] >> 8)
+#define RECORD_FMT(id) (*(void **)(0x401F83A4u + 60u * (id) + 0x34u))
+#define RECORD_LO(id) (((const int *)(0x401F83A4u + 60u * (id)))[2] >> 8)
 
 extern int smp_count(void);
 extern const char *smp_name(int k);
@@ -126,7 +126,7 @@ static int mnm_quant(int mi, int slot, int old, int value)
         static u32 m_at __attribute__((section(".data"))) = 0;
         static int m_slot __attribute__((section(".data"))) = -1;
         int need = fq_click ? 1 : count <= 8 ? 4 : 1;   /* v0.32: FUNC: one a click */
-        u32 now = *(volatile u32 *)0x4058E8D4u;
+        u32 now = *(volatile u32 *)0x4058F8D4u;
         int dir = d > 0 ? 1 : -1;
         if (now - m_at > 3000u || (m_acc > 0) != (dir > 0) || m_slot != slot)   /* 2 s */
             m_acc = 0;
@@ -168,7 +168,7 @@ enum { F_OFF, F_KEEP, F_CHOICE, F_NONE, F_TUNE };
 
 static int func_kind(u8 *s, int slot, u32 id)
 {
-    if (!smp_func_held || !smp_knob_d || *(volatile u32 *)0x4058E8D4u - smp_knob_at > KNOB_FRESH)
+    if (!smp_func_held || !smp_knob_d || *(volatile u32 *)0x4058F8D4u - smp_knob_at > KNOB_FRESH)
         return F_OFF;
     int ty = (signed char)s[SOUND_TYPE];
     /* v0.33: only our machines' own controls, records 238..260 (PERC's, the Monomachine's
@@ -209,7 +209,7 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
 {
     if (smp_samp_direct && slot == SMP_SAMP_SLOT) {     /* v0.55: smp_set_samp's own write */
         extern u32 smp_samp_turned;
-        smp_samp_turned = *(volatile u32 *)0x4058E8D4u;    /* (as below, for every SAMP write) */
+        smp_samp_turned = *(volatile u32 *)0x4058F8D4u;    /* (as below, for every SAMP write) */
         return smp_samp_direct > 0 ? smp_samp_direct << 8 : value;
     }
     int fk = func_kind(s, slot, id);
@@ -238,7 +238,7 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
         static u32 b_at __attribute__((section(".data"))) = 0;
         int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
         int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
-        const int *rw = (const int *)(0x401F7F94u + 60u * SMP_BUF_ID);
+        const int *rw = (const int *)(0x401F83A4u + 60u * SMP_BUF_ID);
         int lo = rw[2] >> 8, span = (rw[3] >> 8) - lo + 1;
         if (span < 8)
             span = 8;
@@ -246,7 +246,7 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
         if (d == 0)
             return old;                         /* a fine move: nothing to show */
         if (d >= -8 && d <= 8) {
-            u32 now = *(volatile u32 *)0x4058E8D4u;
+            u32 now = *(volatile u32 *)0x4058F8D4u;
             int dir = d > 0 ? 1 : -1;
             if (now - b_at > 3000u || (b_acc > 0) != (dir > 0))     /* 2 s, or a turn back */
                 b_acc = 0;
@@ -269,10 +269,10 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
         return value;
     if (slot == SMP_SAMP_SLOT) {                /* v0.27: SAMP turned by hand (smp_page.c's list) */
         extern u32 smp_samp_turned;
-        smp_samp_turned = *(volatile u32 *)0x4058E8D4u;
+        smp_samp_turned = *(volatile u32 *)0x4058F8D4u;
     }
     if (slot == SMP_SAMP_SLOT && type < SMP_N0 && smp_knob_d
-        && *(volatile u32 *)0x4058E8D4u - smp_knob_at <= KNOB_FRESH) {
+        && *(volatile u32 *)0x4058F8D4u - smp_knob_at <= KNOB_FRESH) {
         /* v0.55: past SAMP 127 the list goes on to the eight FLEX buffers (rows 128..135, each
          * the buffer's code: rt_buf_code), turned by the knob's own steps */
         extern int rt_samp_buf(unsigned int samp);
@@ -306,7 +306,7 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
             static int q_slot __attribute__((section(".data"))) = -1;
             int need = fq_click ? 1 : slot == SMP_SEG_SLOT ? SEG_DETENTS
                      : id == SMP_PLAY_REC ? PLAY_DETENTS : CHOICE_DETENTS;
-            u32 now = *(volatile u32 *)0x4058E8D4u;
+            u32 now = *(volatile u32 *)0x4058F8D4u;
             int dir = d > 0 ? 1 : -1;
             if (now - q_at > 3000u || (q_acc > 0) != (dir > 0) || q_slot != slot)   /* 2 s */
                 q_acc = 0;
@@ -518,14 +518,14 @@ void smp_formats(int kind)
  * The DN2's own fine controls (FREQ, record 36) are the reference: while the active track is
  * ONESHOT (all three), STRETCH, REPITCH or BOUNCE (STRT and LEN), records 239/258/257 get
  * that range, default and flag, FREQ's value type (the 4 words at +4 of its runtime entry,
- * which the knob step 0x4011336e reads: 1/256 a count, push for whole steps) and FREQ's
- * two-decimal formatter (0x400e2ef6, generic); otherwise the stock words go back, so
+ * which the knob step 0x4011364e reads: 1/256 a count, push for whole steps) and FREQ's
+ * two-decimal formatter (0x400e305a, generic); otherwise the stock words go back, so
  * WaveTone, GRID and SLICE see exactly what they had. To pull this out: drop the call above
  * (the records are never touched) and ctl_pos in dnfw.sampler.program (back to ctl). */
 #define POS_RANGE 0x7800
 #define FINE_REF 36u                            /* FREQ: stock's fine unipolar control */
-#define REC_W(id) ((int *)(0x401F7F94u + 60u * (id)))
-#define ENTRY_TYPE(id) ((u32 *)(0x4243325Cu + 68u * (id) + 4u))   /* the value type, 4 words */
+#define REC_W(id) ((int *)(0x401F83A4u + 60u * (id)))
+#define ENTRY_TYPE(id) ((u32 *)(0x4243425Cu + 68u * (id) + 4u))   /* the value type, 4 words */
 static const u16 pos_ids[3] = {SMP_STRT_ID, SMP_LEN_ID, SMP_LOOP_ID};
 static int pos_rec[3][3] __attribute__((section(".data")));   /* stock range, default, flag */
 static u32 pos_type[3][4] __attribute__((section(".data")));

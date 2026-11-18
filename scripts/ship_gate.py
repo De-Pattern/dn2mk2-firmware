@@ -1,7 +1,7 @@
 """Every safety gate, on the exact .syx you will flash. Nothing is cleared without it.
 
-    DT2_SECTIONS=/path/to/stock-1.11-sections \\
-    python scripts/ship_gate.py Digitone_II_OS1.11.syx build.syx \\
+    DT2_SECTIONS=/path/to/stock-1.12-sections \\
+    python scripts/ship_gate.py Digitone_II_OS1.12.syx build.syx \\
         [--venv ../digikit/.venv/bin/python] [--digikit-sharc ../digikit-wt-sharcemu] \\
         [--only STEP[,STEP...]] [--list]
 
@@ -49,9 +49,10 @@ failure:
    DN2's own NameView is up, opened once and drawn; its NO goes on to ASSIGN without a name. The negative
    control clears the main view pointer: our own naming screen stands in (the fallback). The recorder
    flow (6d) spells a name with the stock screen's own keys and its YES names the recording.
-6s. **DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
+6s. **DIRECT JUMP** (`emu_jump.py` run on the coupled emulator by `emu_jump_coupled.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
-   that is not the PTN view's stays stock's; the setting persists in its sector.
+   that is not the PTN view's stays stock's; the setting persists in its sector; rapid fire (83 cues). Every run
+   on the coupled emulator: the UI and the audio ISR every period (the stock control too).
 6q. **UI fuzz** (v0.33, `emu_fuzz_ui.py`): the sample pages driven at random, two seeds.
    v0.34 (docs/timing-model.md): with the audio interrupt firing on its own at its real
    cadence through the real vectors, preempting the mod's UI code; a CPU exception, the
@@ -129,6 +130,14 @@ sys.path.insert(0, str(HERE))
 import gate_cache                                          # noqa: E402
 
 MAIN_BASE = 0x40000400
+
+
+def has_bootscreen(sec3: bytes) -> bool:
+    """this MAIN OS section's intro jumps to the boot screen's stamp (dnfw.mods.bootscreen.apply's JMP), i.e. the build
+    carries the start-up animation; a NOBOOT build keeps stock's intro"""
+    from dnfw.mods import bootscreen as BS      # noqa: PLC0415
+    o = BS.SPEC["intro_va"] - BS.BASE
+    return sec3[o:o + 2] == b"\x4e\xf9" and int.from_bytes(sec3[o + 2:o + 6], "big") == BS.SPEC["stamp"]
 # CODE chunks that hold only data, reached through a pointer and never jumped to.
 # Each is listed by name, on purpose: a chunk is assumed to execute unless it is here.
 DATA_ONLY: dict[int, str] = {       # (Waverider's wave-display bytes were one, until v0.11)
@@ -162,6 +171,7 @@ MNM_EXC_TREES = {"src/dnfw/mnm": "c27c4179af8142a94794fcafac097b5b99edd267",
 MNM_EXC_REST = 8
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
+         "test/test_ram_112.py",                            # 1.12: every RAM chunk above stock's uncached buffers
          "test/test_waverider_pages.py",                    # v0.45: test_ping_coldfire/_live dropped with PING
          "test/test_shft_live.py", "test/test_mnm.py",
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
@@ -169,7 +179,9 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_sampler_relatch.py", "test/test_pools.py",
          "test/test_gate_cache_foreign.py",                 # v0.48: the cache's cross-worktree guard and its control
          "test/test_slides.py",
-         "test/test_libtree.py", "test/test_web_tool.py"]   # v0.40: nested folders (the model, the page's levels)
+         "test/test_libtree.py", "test/test_web_tool.py",   # v0.40: nested folders (the model, the page's levels)
+         "test/test_dsl_merge.py",                          # the DSL's packing: off by default, the same programs
+         "test/test_perc_mf.py"]                            # par()'s multifunction lines: mf's own encoding
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
@@ -346,7 +358,7 @@ def own_inputs(own=None) -> dict[str, str]:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("stock", type=pathlib.Path, nargs="?", help="Elektron's Digitone_II_OS1.11.syx")
+    p.add_argument("stock", type=pathlib.Path, nargs="?", help="Elektron's Digitone_II_OS1.12.syx")
     p.add_argument("build", type=pathlib.Path, nargs="?", help="the exact .syx that will be flashed")
     p.add_argument("--venv", default=str(ROOT.parent / "digikit/.venv/bin/python"),
                    help="python with digikit's emulator deps (unicorn)")
@@ -611,7 +623,7 @@ def main() -> int:
             ob_args = [sys.executable, "scripts/gate_overbridge.py", work / "stock_section_3_MAIN_OS.bin",
                        bdir / "section_3_MAIN_OS.bin"]
             rc_o, out_o = run("overbridge", [*ob_args, "--json", work / "overbridge.json"], logs)
-            rc_c, out_c = run("overbridge_control", [*ob_args, "--control", "0x400DB092"], logs)
+            rc_c, out_c = run("overbridge_control", [*ob_args, "--control", "0x400DB1F6"], logs)
             last = out_o.strip().splitlines()[-1] if out_o.strip() else ""
             good = rc_o == 0 and rc_c == 0 and last.startswith("PASS")
             gate("Overbridge's code untouched", good,
@@ -623,7 +635,11 @@ def main() -> int:
         # v0.37: the build plays the start-up animation (dnfw.bootanim): every frame the stamp
         # shows during the boot, checked bit for bit against his (s!Rwa²'s), all of them shown
         from dnfw.mods import waverider as Wb   # noqa: PLC0415
-        anim = hasattr(Wb, "_boot")
+        # only when THIS image carries the boot screen, i.e. its intro
+        # jumps to the stamp (dnfw.mods.bootscreen.SPEC, this layer's addresses). A NOBOOT build (stock's intro,
+        # no stamp) has no animation to check: from reset it is held to the boot alone, as stock is
+        anim = hasattr(Wb, "_boot") and has_bootscreen(sec3)
+        noboot = hasattr(Wb, "_boot") and not anim
         if anim:
             boot_cmd.append("--aniz")
 
@@ -633,7 +649,8 @@ def main() -> int:
             if anim:
                 good = good and ", 0 not his" in out
             return good, ("booted and drew its UI, no fault" + ("; the start-up animation's first frame, "
-                          "his" if anim else "") if good else out[-800:])
+                          "his" if anim else "; a NOBOOT image (stock's intro): no animation" if noboot else "")
+                          if good else out[-800:])
         later("boot", "boot from reset", "boot from reset", [boot_cmd], boot_body)
 
         # 5b. v0.37: the start-up animation, every frame. From reset the intro stops after its
@@ -652,6 +669,9 @@ def main() -> int:
                 return good, (f"all {n_anim} frames, each his, in order, to the intro's end; the panel showed "
                               f"each, the version label over the last only" if good else out[-800:])
             later("aniz", "start-up animation, every frame", "start-up animation", [aniz_cmd], aniz_body)
+        elif noboot:                             # (the step stays in the list: it says why nothing ran)
+            later("aniz", "start-up animation, every frame", "start-up animation", [],
+                  lambda tdir: (True, "a NOBOOT image: its intro is stock's (no jump to the stamp), no animation to check"))
 
         # 6. engine + LOAD/SAVE
         # PERC (5), the Monomachine's (6, 7, v0.26: 14..) and the sample machines (8..13,
@@ -821,9 +841,13 @@ def main() -> int:
         # drawing throughout (scripts/emu_waverider_menu.py, keys and knob as the panel)
         if "rec_overlay" in lay:
             ov, src = hex(lay["rec_overlay"]), hex(lay["rec_src"])
-            steps = (f"wait:5,png:p0,mem:{ov}:4,press:17,wait:3,tap:49,wait:3,release:17,"
-                     f"wait:30,mem:{ov}:4,png:a1,spin:0:3,wait:5,mem:{src}:4,spin:0:9,wait:5,mem:{src}:4,png:a2,no,"
-                     f"wait:30,mem:{ov}:4,png:a3,wait:5,png:a4")
+            # (1.12 redraws later in the emulator; the stock page came back
+            # 60..300 M instructions after NO on clean 1.12, so the waits are longer: the checks are the same)
+            # The first screen is taken once the first frame is composed, at most 40 M after the
+            # resume (it was a fixed 25 M, which the first frame reached within 0.5 M on some builds)
+            steps = (f"firstframe:40,png:p0,mem:{ov}:4,press:17,wait:3,tap:49,wait:3,release:17,"
+                     f"wait:60,mem:{ov}:4,png:a1,spin:0:3,wait:15,mem:{src}:4,spin:0:9,wait:15,mem:{src}:4,png:a2,no,"
+                     f"wait:300,mem:{ov}:4,png:a3,wait:15,png:a4")
             js = work / "recorder.json"
             rec_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                        "--build", bdir, "--snapshot", snap, "--steps", steps,
@@ -835,6 +859,9 @@ def main() -> int:
                 good = False
                 if rc == 0 and js.exists():
                     r = json.loads(js.read_text())
+                    ff = r.get("first_frame_at")
+                    if ff is None:
+                        return False, "no frame composed within 40 M instructions of the resume"
                     m = r["memory"]
                     seen = [int(m[k], 16) for k in (ov, f"{ov}@1", f"{ov}@4")]
                     srcs = [int(m[k], 16) for k in (src, f"{src}@3")]     # v0.41: 3 detents, then 9 more
@@ -842,9 +869,9 @@ def main() -> int:
                     good = (seen == [0, 1, 0] and srcs == [0, 3] and not r["setter_writes"]
                             and r["screen_frames"] > 0 and shots[1] != shots[0] and shots[1] != shots[2])
                     why = (f"overlay {seen}, src {srcs}, setter writes "
-                           f"{len(r['setter_writes'])}, frames {r['screen_frames']}")
+                           f"{len(r['setter_writes'])}, frames {r['screen_frames']}, first frame at {ff / 1e6:.0f} M")
                 return good, ("FUNC+VOICE opens it, knob A moves SRC four detents a choice (3: none, 12: three; v0.41) with no write to the sound, NO closes it, "
-                 "the screen drawn throughout"
+                 f"the screen drawn throughout (first frame at {ff / 1e6:.0f} M)"
                               if good else why)
             later("recorder", "recorder screen (ColdFire)", "recorder screen (ColdFire)", [rec_cmd, sorted(EMU_ENV.items())], rec_body)
 
@@ -860,7 +887,7 @@ def main() -> int:
             g = {k: hex(lay.get(k, 0)) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n", "trim_s",
                                                   "trim_e", "nm_text", "rec_pv_on", "smp_func_held", "smp_cmds",
                                                   "smp_saved", "trim_head_x", "sn_opens", "sn_results")}
-            kit = 0x4210C08C                    # the snapshot's live kit ([0x800052a0])
+            kit = 0x4210D08C                    # the snapshot's live kit ([0x800052a0])
             snd = hex(kit + 52 + 1163 * 2)      # track 3's sound
             steps = (f"wait:3,mem:0x800052a0:4,mem:{snd}:256,poke:{g['trim_slot']}:00000004,"
                      f"poke:{g['trim_n']}:00017700,poke:{g['trim_s']}:00000000,poke:{g['trim_e']}:00017700,"
@@ -870,8 +897,8 @@ def main() -> int:
                      f"mem:{g['trim_s']}:4,spin:7:-3,wait:5,mem:{g['trim_e']}:4,png:t2,spin:5:2,wait:5,png:tz,"
                      f"mem:{g['smp_cmds']}:4,"
                      f"press:17,wait:2,press:10,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_cmds']}:4,"
-                     f"mem:{g['trim_head_x']}:4,png:p0,addl:0x4058e8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p1,"
-                     f"addl:0x4058e8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p2,"
+                     f"mem:{g['trim_head_x']}:4,png:p0,addl:0x4058f8d4:150,wait:10,mem:{g['trim_head_x']}:4,png:p1,"
+                     f"addl:0x4058f8d4:150,wait:10,mem:{g['trim_head_x']}:4,png:p2,"
                      f"release:10,wait:3,release:17,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_func_held']}:4,"
                      f"mem:{g['smp_cmds']}:4,mem:{g['trim_head_x']}:4,png:pr,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,"
                      # v0.54: FILE NAME is the DN2's own NAME screen (NameView, docs/name-screen.md),
@@ -952,7 +979,7 @@ def main() -> int:
             tail = (f"yes,wait:10,mem:{g2['rec_phase']}:4,mem:{g2['sn_opens']}:4,png:s0,no,wait:10,"
                     f"mem:{g2['rec_phase']}:4,mem:{g2['sn_results']}:4,png:s1")
             sn_runs = {}
-            for kind, extra in (("stock", ""), ("control", "poke:0x44647980:00000000,")):
+            for kind, extra in (("stock", ""), ("control", "poke:0x44648980:00000000,")):
                 js_ = work / f"stockname_{kind}.json"
                 sn_runs[kind] = (js_, [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                        "--build", bdir, "--snapshot", snap, "--steps", pre + extra + tail,
@@ -1000,7 +1027,7 @@ def main() -> int:
             hires = hex(SMx.MIRROR + 0x78000)
             pat = bytes((k * 37) % 200 for k in range(1024)).hex()
             tb = _st.pack(">9I", 0, 30000, 0, 36000, 70000, 40000, 72000, 140000, 72000).hex()
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             pk = ",".join(f"poke:{kit + 52 + 1163 * t + 0xDE:#x}:0d,poke:{kit + 52 + 1163 * t + 108:#x}:0000"
                           for t in range(16))
             # v0.42: the menus poked over the SLICE track's page itself (slice.c closes a menu whose
@@ -1022,14 +1049,19 @@ def main() -> int:
                      # SAMP) after MACHINE SEL (FUNC + SRC, NO: its keys' releases never reach the
                      # mod, so SRC stayed "held" and every YES went to stock: the owner's dead
                      # SLICE/GRID menus, reproduced) and a FUNC combo on the page (FUNC + LEFT)
-                     f"{pk},tap:2,wait:10,func-src,wait:20,no,wait:10,png:y0,press:17,wait:2,left,wait:3,release:17,wait:6,yes,wait:8,png:y1,"
+                     f"{pk},tap:2,wait:10,func-src,wait:20,no,wait:10,png:y0,press:17,wait:2,left,wait:3,release:17,wait:6,press:10,wait:2,png:y1,release:10,wait:6,"
                      f"no,wait:6,tap:18,wait:6,press:33,wait:6,release:33,wait:6,press:34,wait:6,release:34,wait:6,"
                      f"press:26,wait:6,release:26,wait:6")
             js = work / "slice.json"
             slc_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                           "--build", bdir, "--snapshot", snap, "--steps", steps,
-                                          "--regs-at", "0x400576ca",
+                                          "--regs-at", "0x400576ca", "--frame-clock",
                                           "--png-dir", work / "slice", "--json", js]
+            # 2026-11-15: --frame-clock (FRAMES moves as the UI runs; the menu emulator runs no audio ISR, so
+            # it stood at 0). Without it the editor's COULD NOT SAVE (the poked editor's slot is slice.c's -1)
+            # stayed up for good, and YES's answer here, NO SAMPLE ON SAMP (the SAMP slot is empty on our
+            # snapshots), was drawn only by chance (page.c redraws a note only once FRAMES has moved). y1 is
+            # taken while YES is held, inside the answer's 1.5 s: `yes` (a 2 M tap, a 10 M settle) outlasted it
 
             # v0.40 (a user: "sometimes EDIT SLICE POINTS or CREATE SLICE GRID returns CANNOT
             # READ IT"): the menus opened again and again, TR.DET OFF and ON, after CLEAR SLICE
@@ -1101,7 +1133,7 @@ def main() -> int:
         if "slc_alloc_n" in lay:
             from dnfw.sampler import machines as SMx    # noqa: PLC0415
             sid = SMx.SLICE_REC
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             get = ",".join(f"call:0x40037c52:0:{sid}:{k},wait:2" for k in (0, 2, 4))
             steps = (f"wait:3,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,tap:19,wait:6,tap:25,wait:4,"
                      f"tap:27,wait:4,tap:29,wait:4,tap:19,wait:6,yes,wait:6,png:m,yes,wait:6,"
@@ -1115,7 +1147,7 @@ def main() -> int:
                 st_, lg_ = f"{lay['slc_state']:#x}", f"{lay['slc_letgo']:#x}"
                 steps += (f",yes,wait:6,down,wait:3,yes,wait:6,mem:{st_}:4,"
                           f"press:16,wait:2,press:26,wait:3,release:26,wait:2,release:16,wait:10,"
-                          f"mem:0x42431a6c:1,mem:{st_}:4,mem:{lg_}:4,png:t2,yes,wait:8,mem:{st_}:4,png:t2y,no,wait:6,yes,wait:8,mem:{st_}:4,no,wait:6,"
+                          f"mem:0x42432a6c:1,mem:{st_}:4,mem:{lg_}:4,png:t2,yes,wait:8,mem:{st_}:4,png:t2y,no,wait:6,yes,wait:8,mem:{st_}:4,no,wait:6,"
                           f"press:16,wait:2,press:25,wait:3,release:25,wait:2,release:16,wait:10,"
                           f"yes,wait:6,mem:{st_}:4,tap:5,wait:10,mem:{st_}:4,yes,wait:8,mem:{st_}:4,png:p5y,"
                           f"no,wait:4,tap:2,wait:8")
@@ -1136,7 +1168,7 @@ def main() -> int:
                              "closed": sts[:1] == [0],
                              "NO puts the locks back": d0[4:6] == [1024, 1536]}
                     if letgo:
-                        trk = [int(v, 16) for k, v in m.items() if k.split("@")[0] == "0x42431a6c"]
+                        trk = [int(v, 16) for k, v in m.items() if k.split("@")[0] == "0x42432a6c"]
                         lgv = [int(v, 16) for k, v in m.items() if k.split("@")[0] == hex(lay["slc_letgo"])]
                         facts.update({"RANDOM stays open after YES": sts[1:2] == [5],
                                       "on track 2": trk == [1],
@@ -1161,12 +1193,14 @@ def main() -> int:
         if "smp_mod_apply" in lay:
             from dnfw.sampler import machines as SMx    # noqa: PLC0415
             M = SMx.MIRROR
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             snd0 = kit + 52
             samp0 = snd0 + 0x6A
 
-            def samp_all(v):
-                return [f"poke:{kit + 52 + 1163 * t + 0x6A:#x}:{v:02x}00" for t in range(16)]
+            def samp_all(v):                    # (2026-11-14: and a redraw asked, as a load of the value asks one: 1.12
+                # redraws a poked value only when asked, so the list's NO put back a slot it had not seen drawn)
+                return [f"poke:{kit + 52 + 1163 * t + 0x6A:#x}:{v:02x}00" for t in range(16)] + [
+                    f"poke:{lay['smp_overlay_dirty']:#x}:00000001"]
             d = bytearray(0x1000)
             struct.pack_into("<II", d, 0, 0x31504D53, 4)
             for k, (fr, nm) in enumerate([(48000, "KICK"), (96000, "SHS_HAU"), (0, ""), (24000, "SNARE")]):
@@ -1206,7 +1240,7 @@ def main() -> int:
             ph_new = "smp_pos_in" in lay
             ph_cmd, phjs = None, work / "playhead.json"
             if ph_new:                          # (a run of its own: the list's steps below are timed)
-                F_ = "0x4058e8d4"
+                F_ = "0x4058f8d4"
                 pkt = 0x46A23000                 # (above the harness's call stack: SENTINEL + 0x2C00)
                 per = f"{lay['smp_periods']:#x}"
                 wd = f"{lay['wr_draws']:#x}"
@@ -1214,7 +1248,7 @@ def main() -> int:
                 def packet(n, v0, v1):
                     return [f"poke:{per}:{n:08x}", f"poke:{pkt:#x}:{v0:04x}{v1:04x}" + "ffff" * 14,
                             f"call:{lay['smp_pos_in']:#x}:{pkt:#x}", f"addl:{F_}:40", "wait:3"]
-                ps = base + ["wait:6", "tap:2", "wait:6", "png:v0", "mem:0x42431a6c:1"]
+                ps = base + ["wait:6", "tap:2", "wait:6", "png:v0", "mem:0x42432a6c:1"]
                 for n, v0, v1, nm in ((100, 0x2000, 0xFFFF, "v1"), (101, 0x2100, 0xA000, "v2"),
                                       (102, 0x2108, 0xA008, "v3"), (103, 0xE000, 0xA010, "v4")):
                     ps += packet(n, v0, v1) + [f"call:{lay['smp_playhead']:#x}:0", f"png:{nm}", mem(lay["wr_draws"])]
@@ -1253,10 +1287,10 @@ def main() -> int:
             # (v0.40: the reference is the voice's target cell, the sound's value or the trig's
             # lock: SAMP 1 there as the sound's, as stock's sync puts it)
             st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0100", f"poke:{cell - 0x800068E4 + 0x80003AF0:#x}:0100",
-                   f"onpc:0x400db22c:{cell:#x}:2c00",
+                   f"onpc:0x400db390:{cell:#x}:2c00",
                    f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
-                   f"onpc:0x400db22c:{cell:#x}:7e00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
-                   f"onpc:0x400db22c:{cell:#x}:0200", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
+                   f"onpc:0x400db390:{cell:#x}:7e00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
+                   f"onpc:0x400db390:{cell:#x}:0200", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
             # (v0.45: smp_mod_apply sets SAMP to the target first -- a slot never glides -- and
             # then runs the stock apply, which adds the modulation: the modulated value goes in
             # where that apply adds it, on its entry, not before the call)
@@ -1298,7 +1332,7 @@ def main() -> int:
                               for n in ("v0", "v1", "v2", "v3", "v4")}
                         dr = [int(pm[k], 16) for k in (wd, f"{wd}@2", f"{wd}@3", f"{wd}@4") if k in pm]
                         facts["v0.40: the newest note's playhead (0x2000, then 0xA000 over 0x2100, 0xA008, the first voice again at 0xE000)"] = (
-                            pm.get("0x42431a6c") == "00" and heads == [0x2000, 0xA000, 0xA008, 0xE000])
+                            pm.get("0x42432a6c") == "00" and heads == [0x2000, 0xA000, 0xA008, 0xE000])
                         facts["v0.40: a moved playhead drawn at the next pass, a still one not redrawn"] = (
                             len(dr) == 4 and sh["v1"] != sh["v0"] and sh["v2"] != sh["v1"] and dr[1] > dr[0]
                             and dr[2] == dr[1] and sh["v3"] == sh["v2"] and sh["v4"] != sh["v3"] and dr[3] > dr[2])
@@ -1365,7 +1399,7 @@ def main() -> int:
             # not a sample machine, so not a use. Every other kit's types poked to 0 (FM).
             # SELECT UNUSED marks {0, 2, 4, 5, 7} (5); UNLOAD empties exactly those
             if "smp_fb_mark_unused" in lay:
-                P0, PSTR, KSTR = 0x4121898C, 122478, 23921
+                P0, PSTR, KSTR = 0x4121998C, 122478, 23921
                 d2 = bytearray(d[:0xC10])
                 for k in range(8):
                     struct.pack_into("<IIfI", d2, 8 + 16 * k, 0x84001000 + 0x40000 * k, 24000, 1.0, 1)
@@ -1540,7 +1574,7 @@ def main() -> int:
                         lent(LDATA + 4 + 4 * k, 1000 + k, 2, nm) for k, nm in enumerate(hh)) + b"".join(
                         lent(LDATA + 4 + 64 + 4 * k, 1000 + k, 0, nm) for k, nm in enumerate(pab))
                     nfold = b"INCOMING".ljust(32, b"\0") + b"RECORDED".ljust(32, b"\0") + b"AT HIHAT".ljust(32, b"\0")
-                    TICK = 0x4058E8D4
+                    TICK = 0x4058F8D4
                     rt, mq, cur, mcur = lay["smp_fb_rowtext"], lay["smp_mq_off"], lay["smp_fb_cur"], lay["smp_fb_mcur"]
                     snap_ = [mem(rt, 144), mem(mq), mem(cur), mem(TICK)]
                     ns = base + lead + [f"poke:{LRAM + 0x200:#x}:{nidx.hex()}", f"poke:{LRAM + 0x200 + 2048 * 64:#x}:{nfold.hex()}",
@@ -1549,11 +1583,14 @@ def main() -> int:
                         "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8", "up", "wait:4", "yes", "wait:6",
                         f"poke:{lay['smp_fb_folder']:#x}:00000002", f"poke:{cur:#x}:00000000",
                         f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:6", "png:n0"] + snap_      # 0: the folder
-                    # (the emulator's clock, the 1.5 kHz ticks at 0x4058e8d4, does not run: it is set
+                    # (the emulator's clock, the 1.5 kHz ticks at 0x4058f8d4, does not run: it is set
                     # as time would move it: the repeat's 0.4 s then 0.08 s steps, the marquee's 1 s
-                    # rest and 0.2 s a character)
+                    # rest and 0.2 s a character). 2026-11-14 (the 1.12 gate's blind spots): each clock step
+                    # waits 20 M, about four UI passes. Idle, the UI loop passes once in about 4.5 M instructions
+                    # on 1.11 and 1.12 alike (jmp_poll entries over 100 M, clean v0.53), so 2 M held a pass or
+                    # none by the snapshot's phase: 1.11's per-build snapshot held one, 1.12's none (one repeat seen)
                     def clock(t):
-                        return [f"poke:{TICK:#x}:{t:08x}", "wait:2"]
+                        return [f"poke:{TICK:#x}:{t:08x}", "wait:20"]
                     ns += clock(100) + ["press:14", "wait:2"] + clock(700) + clock(850) + clock(1000) + snap_   # 1: held DOWN
                     ns += ["release:14", "wait:2"] + clock(1300) + snap_ + clock(1600) + snap_                  # 2, 3: let go
                     # 4-19: the marquee of the row it stopped on (selected at tick 1000)
@@ -1674,11 +1711,16 @@ def main() -> int:
         if "smp_quant" in lay:
             from dnfw.mnm import machines as MMx    # noqa: PLC0415
             from dnfw.perc import machines as PMx   # noqa: PLC0415
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             snd0 = kit + 52
-            st = ["wait:2", "png:stock"]
+            # (2026-11-14, the 1.12 gate's blind spots: 20 M before the stock page's picture, about four UI passes:
+            # 2 M held none on 1.12's snapshot, so no frame was composed; and a redraw asked after each poke, as
+            # a type chosen in MACHINE SEL asks one: 1.12 redrew only on a change of page, so SID 6581's page
+            # stood for the next SID and DDRW's for DPRO-WAVE)
+            st = ["wait:20", "png:stock"]
             for ty in MMx.TYPES:
-                st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", "wait:20", f"png:m{ty}"]
+                st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:20",
+                       f"png:m{ty}"]
             wslot = PMx.PARAMS[3][1]             # DPRO-WAVE's WPRS: the fourth place
             st += [f"poke:{snd0 + 0xDE:#x}:{MMx.TYPES[MMx.NAMES.index('DPRO-WAVE')]:02x}",
                    f"poke:{snd0 + 0x14 + 2 * wslot:#x}:0000", "wait:4"]
@@ -1743,18 +1785,34 @@ def main() -> int:
         # up (smp_question_up 1); its YES is the question's (it closes, no menu); back on the
         # page, YES opens the menu, NO closes it
         if "smp_question_up" in lay:
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             Q, H, S = lay["smp_question_up"], lay["smp_held_lo"], lay["slc_state"]
-            qs = (f"wait:3,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,call:{Q:#x},press:25,wait:2,yes,"
+            # (2026-11-14, the 1.12 gate: stock's popups waited for by state, not time, whatever the snapshot's project
+            # and card show: the project's per-slot write protection cleared (stock's own project, 0x4018e0a8; 1.12's
+            # per-build snapshot holds the factory PRESETS, slot 0 protected, so the save said WRITE PROTECTED), a
+            # further question (OVERWRITE '...'? when the card holds the project) answered YES, and each view
+            # waited for: SAVING (0x4020734c) and the message after it (0x40207294, ERROR without a card)
+            QV, PV, MV, PROJ = 0x4020671C, 0x4020734C, 0x40207294, 0x4018E0A8
+            qs = (f"wait:3,poke-ret:{PROJ:#x}:0x1de79:00,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,call:{Q:#x},"
+                  f"press:25,wait:2,yes,"
                   f"wait:4,mem:{H:#x}:4,release:25,wait:6,mem:{S:#x}:4,mem:{H:#x}:4,press:17,wait:2,tap:8,"
-                  f"wait:2,release:17,wait:20,png:q,call:{Q:#x},yes,wait:30,mem:{S:#x}:4,call:{Q:#x},tap:2,"
+                  f"wait:2,release:17,wait:20,png:q,call:{Q:#x},yes,wait:30,mem:{S:#x}:4,call:{Q:#x},"
+                  f"yes-while:{QV:#x}:5,until-class:{MV:#x}:1:300,until-class:{MV:#x}:0:300,tap:2,"
                   f"wait:6,yes,wait:6,png:m,mem:{S:#x}:4,no,wait:6,mem:{S:#x}:4,"
                   # v0.41 (the owner, v0.40: "YES opens the slice menu, sometimes" while saving):
-                  # FUNC + SETTINGS, YES, and a YES while SAVING is drawn (its view 0x40206e94 at
-                  # the list's end), then one on the message after it (0x40206ddc): both stock's,
+                  # FUNC + SETTINGS, YES, and a YES while SAVING is drawn (its view 0x4020734c at
+                  # the list's end), then one on the message after it (0x40207294): both stock's,
                   # no menu; smp_question_up sees both up; the message's YES takes it down
-                  f"press:17,wait:2,tap:8,wait:2,release:17,wait:20,yes,wait:3,png:s,call:{Q:#x},yes,wait:3,"
-                  f"mem:{S:#x}:4,wait:15,png:e,call:{Q:#x},yes,wait:6,mem:{S:#x}:4,call:{Q:#x}")
+                  f"press:17,wait:2,tap:8,wait:2,release:17,wait:20,yes,wait:3,yes-while:{QV:#x}:5,"
+                  f"until-class:{PV:#x}:1:50,png:s,call:{Q:#x},yes,wait:3,"
+                  f"mem:{S:#x}:4,until-class:{MV:#x}:1:300,png:e,call:{Q:#x},yes,wait:6,mem:{S:#x}:4,call:{Q:#x},"
+                  f"until-class:{MV:#x}:0:300,call:{Q:#x},"
+                  # a slot write-protected (every slot's bit set): WRITE PROTECTED, the message a
+                  # unit on the factory project shows. Measured in the emulator (1.12): YES does not take it down and
+                  # opens no menu; it goes down by itself (about 210 M instructions)
+                  f"poke-ret:{PROJ:#x}:0x1de79:{'ff' * 16},press:17,wait:2,tap:8,wait:2,release:17,wait:20,yes,"
+                  f"until-class:{MV:#x}:1:100,png:w,call:{Q:#x},yes,wait:6,mem:{S:#x}:4,call:{Q:#x},"
+                  f"until-class:{MV:#x}:0:300,call:{Q:#x}")
             qjs = work / "question.json"
             q_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                      "--snapshot", snap, "--set-d0-at", "0x4005f5c6:0", "--steps", qs,
@@ -1768,7 +1826,7 @@ def main() -> int:
                     m = r["memory"]
                     d0 = [c["d0"] for c in r["direct_calls"]]
                     shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("q", "m")}
-                    d0 = d0 + [None] * (6 - len(d0))
+                    d0 = d0 + [None] * (10 - len(d0))
                     facts = {"TRIG 1 held: seen held": m[hex(H)] == "02000000",
                              "TRIG 1 + YES: stock's, no menu": int(m[hex(S)], 16) == 0,
                              "let go: nothing held": m[f"{hex(H)}@2"] == "00000000",
@@ -1782,19 +1840,26 @@ def main() -> int:
                              "the question drawn": shots["q"] != shots["m"],
                              # v0.41
                              "SAVING seen up: YES on it is stock's, no menu": d0[3] == 1 and int(m[f"{hex(S)}@6"], 16) == 0,
-                             "the message after it seen up: its YES takes it down, no menu":
-                             d0[4] == 1 and d0[5] == 0 and int(m[f"{hex(S)}@7"], 16) == 0}
+                             # on a snapshot without a card the message is ERROR, which
+                             # its YES takes down. A unit has a card: the save is done and the message is DONE,
+                             # which takes no key and goes by itself. Either way its YES opens no menu; a message
+                             # its YES takes down is held to ERROR's form, one it does not must go by itself
+                             "the message after it seen up: its YES opens no menu; it goes (ERROR: by that YES, "
+                             "DONE: by itself)":
+                             d0[4] == 1 and int(m[f"{hex(S)}@7"], 16) == 0 and (d0[5] == 0 or d0[6] == 0),
+                             "WRITE PROTECTED seen up: its YES opens no menu; it goes by itself":
+                             d0[7] == 1 and int(m[f"{hex(S)}@8"], 16) == 0 and d0[9] == 0}
                     good = all(facts.values())
                     why = f"{facts} d0={d0} mem={m}"
                 return good, ("a stock question's YES is the question's; TRIG + YES is stock's; the page's "
-                              "own YES still opens its menu; SAVING's and its message's keys are stock's" if good else why)
+                              "own YES still opens its menu; SAVING's and its message's keys are stock's, WRITE PROTECTED's too" if good else why)
             later("question", "stock questions and held keys (ColdFire)", "stock questions and held keys (ColdFire)", [q_cmd, sorted(EMU_ENV.items())], q_body)
 
         # 6k. v0.30: MACHINE SEL from one sample machine to another keeps SAMP (owner: the stock
         # commit resets the sound to the new machine's defaults, SAMP to OFF). Track 1 on
         # ONESHOT with SAMP 5; MACHINE SEL, DOWN, YES: the next sample machine, SAMP still 5
         if "smp_machine_commit" in lay:
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             sa, ty = kit + 52 + 20 + 2 * 43, kit + 52 + 0xDE
             ks = (f"wait:3,poke:{ty:#x}:08,poke:{sa:#x}:0500,wait:4,tap:2,wait:6,func-src,wait:20,down,wait:4,"
                   f"yes,wait:20,types,mem:{sa:#x}:2")
@@ -1828,9 +1893,9 @@ def main() -> int:
             from dnfw.mnm import machines as MMf      # noqa: PLC0415
             from dnfw.perc import machines as PMf     # noqa: PLC0415
             from dnfw.sampler import machines as SMf  # noqa: PLC0415
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             snd0 = kit + 52
-            clock, memcpy = 0x4058E8D4, 0x40134490
+            clock, memcpy = 0x4058F8D4, 0x40134770
             ptch, other = PMf.PARAMS[0][1], PMf.PARAMS[2][1]
             wprs, wlo, wtop = PMf.PARAMS[3][1], PMf.PARAMS[3][2], PMf.PARAMS[3][3]
             w_on = wlo + (95 * 2 * wtop + 127) // 254
@@ -1895,10 +1960,10 @@ def main() -> int:
         # buffer; DOWN B2, UP B1, UP 127 (smp_set_samp's write past the record, through smp_quant)
         if "rt_buf_code" in lay:
             from dnfw.sampler import machines as SMp   # noqa: PLC0415
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             snd0 = kit + 52
             samp0 = snd0 + 20 + 2 * 43
-            clock, memcpy = 0x4058E8D4, 0x40134490
+            clock, memcpy = 0x4058F8D4, 0x40134770
             srec = SMp.SAMP_REC
             b1, b2, b8 = SMp.BUF_SAMP0, SMp.BUF_SAMP0 + 2, SMp.BUF_SAMP0 + 14
 
@@ -1968,7 +2033,7 @@ def main() -> int:
         # idle packets' unit 18, permille) in percent, rounded, and -1 when none came in the last
         # second; a PERC page with FUNC held draws it in the tempo's place
         if "smp_dsp_load" in lay:
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             ms = ["wait:3", f"poke:{kit + 52 + 0xDE:#x}:05", "wait:20", "png:tempo",
                   f"poke:{lay['smp_load_peak']:#x}:00000274",                  # 628 permille
                   # (the emulator runs no audio periods: the clock and the packet's time are set)
@@ -2006,7 +2071,7 @@ def main() -> int:
             from dnfw.mnm import machines as MMo     # noqa: PLC0415
             from dnfw.perc import machines as PMo    # noqa: PLC0415
             from dnfw.perc import live as PLo        # noqa: PLC0415
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             snd0 = kit + 52
             sa, ty = snd0 + 20 + 2 * 43, snd0 + 0xDE
             sid = MMo.TYPES[MMo.NAMES.index("SID 6581")]
@@ -2041,7 +2106,7 @@ def main() -> int:
         # NO SAMPLE ON SAMP)
         if "smp_lst_open" in lay and "smp_held_lo" in lay:
             from dnfw.sampler import machines as SMp    # noqa: PLC0415
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             snd0, snd1 = kit + 52, kit + 52 + 1163
             srec = SMp.RECORDS[SMp.SAMP_REC][0]
             lo_ = lay["smp_lst_open"]
@@ -2049,7 +2114,7 @@ def main() -> int:
                   "wait:4,tap:2,wait:8",
                   f"call:{lay['smp_quant']:#x}:sound0:{srec}:{3 << 8:#x}:{SMp.SAMP_REC}",
                   f"poke:{snd0 + 0x6A:#x}:0300,poke:{lay['smp_overlay_dirty']:#x}:00000001,wait:10,png:h0,mem:{lo_:#x}:4",
-                  "press:16,wait:2,press:26,wait:3,release:26,wait:2,release:16,wait:10,mem:0x42431a6c:1",
+                  "press:16,wait:2,press:26,wait:3,release:26,wait:2,release:16,wait:10,mem:0x42432a6c:1",
                   f"up,wait:6,mem:{lo_:#x}:4,png:h1",
                   "press:16,wait:2,press:25,wait:3,release:25,wait:2,release:16,wait:10",
                   f"poke:{snd0 + 0xDE:#x}:0d,poke:{snd0 + 0x6A:#x}:0000,wait:4,tap:2,wait:8",
@@ -2066,7 +2131,7 @@ def main() -> int:
                     m = r["memory"]
                     sh = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("h2", "h3")}
                     facts = {"the list opens on track 1": int(m[hex(lo_)], 16) == 1,
-                             "TRK + [TRIG 2]: track 2": int(m["0x42431a6c"], 16) == 1,
+                             "TRK + [TRIG 2]: track 2": int(m["0x42432a6c"], 16) == 1,
                              "UP there: the list closed, not taking it": int(m[f"{hex(lo_)}@2"], 16) == 0,
                              "after MACHINE SEL in and out, YES on a SLICE page answers": sh["h2"] != sh["h3"]}
                     good = all(facts.values())
@@ -2081,11 +2146,15 @@ def main() -> int:
         # nine DOWNs to GRID, YES, RIGHT: the FLTR column drawn with MULTI-MODE marked on its
         # first row; LEFT: GRID under the cursor again; RIGHT once more: the same column
         if "colsw" in lay:
-            kit = 0x4210C08C
+            kit = 0x4210D08C
             ty = kit + 52 + 0xDE
-            rs = (f"wait:3,poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20," + "down,wait:3," * 9
+            # (2026-11-14, the 1.12 gate: down to GRID's row as stock reads it, not nine rows: 1.11's gate snapshot
+            # holds v0.14's MACHINE SEL rows, a 1.12 per-build one this build's (LIST_NEW), GRID further down)
+            rs = (f"wait:3,poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20,down-to:12,wait:3,"
                   + "png:r0,yes,wait:20,right,wait:20,png:r1,left,wait:20,png:r2,right,wait:20,png:r3,types,"
-                  + "no,wait:10,png:v0,press:2,wait:30,png:v1,release:2,wait:10,png:v2")   # v0.35: SYN held (O14)
+                  # (2026-11-14: 300 M after NO and after SYN's release: stock shows the page's title a while after
+                  # a key, then the pattern's name; both pictures are taken once the title has settled)
+                  + "no,wait:300,png:v0,press:2,wait:30,png:v1,release:2,wait:300,png:v2")   # v0.35: SYN held (O14)
             rjs = work / "colsw.json"
             r_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                      "--snapshot", snap, "--steps", rs, "--png-dir", work / "colsw", "--json", rjs]
@@ -2198,8 +2267,21 @@ def main() -> int:
             jruns = [("off", "pp", True), ("off", "pp", False), ("pc", "pp", False), ("on", "pp", False),
                      ("ref", "pp", True), ("on", "pt", False), ("ref", "pt", True), ("on", "odd", False),
                      ("persist", "pp", False), ("rapid", "pp", False)]
-            jcmds = [[a.venv, "-u", "scripts/emu_jump.py", "--build", bdir, "--snapshot", snap, "--scenario", sc,
-                      "--variant", var, "--png-dir", jdir / "screens", "--json", jdir / f"{sc}_{var}_{'stock' if st else 'build'}.json"]
+            # 2026-11-14 (the 1.12 gate's blind spots): both runs from one snapshot that booted
+            # stock (ui1200M, no section beside it), the build installed over it. 1.12's per-build
+            # ui800M booted THIS build: its UI state calls into the build's C chunk, so reverted to
+            # stock (--stock) it faulted at once (stock's fault reporter, from 0x46acee58)
+            jsnap = snap.parent / "ui1200M.snap"
+            if not jsnap.exists() or pathlib.Path(f"{jsnap}.section_3_MAIN_OS.bin").exists():
+                jsnap = snap
+            # 2026-11-14 (the 1.12 gate's blind spots): every run on the coupled emulator (scripts/emu_jump_coupled.py:
+            # emu_jump's own run(), checks and digest, the UI and the audio ISR every period; --stock the coupled
+            # emulator on the stock image). emu_jump alone never runs the audio ISR: on 1.12 the sequencer's node pool
+            # ran dry at entry 256; with the ISR run inside it, the work A04's switch (rapid) and, from v0.53, A01's
+            # loop (odd) start waited on a TDM side it does not have, and no key reached stock's cue after it
+            jcmds = [[a.venv, "-u", "scripts/emu_jump_coupled.py", "--build", a.build, "--stock-image", a.stock,
+                      "--snapshot", jsnap, "--scenario", sc, "--variant", var, "--png-dir", jdir / f"screens_{sc}_{var}",
+                      "--json", jdir / f"{sc}_{var}_{'stock' if st else 'build'}.json"]
                      + (["--stock"] if st else []) for sc, var, st in jruns]
 
             def jump_body(tdir):
@@ -2274,7 +2356,13 @@ def main() -> int:
         # sample / slice, with the track's value on two others; unlocked trigs the track's (v0.39:
         # the lock was a scaled offset from the track's value)
         if "sl_smooth" in lay:
-            sl_cmds = [[a.venv, "-u", "scripts/emu_slides.py", "--build", bdir, "--snapshot", snap,
+            # 2026-11-14 (the 1.12 gate's blind spots): both runs from a snapshot that booted stock (ui1200M, no
+            # section beside it) when there is one, as the jump step: 1.12's per-build snapshot booted THIS build,
+            # and reverted to stock (--stock) its UI composed no frame (no TRIG page 2 to compare)
+            ssnap = snap.parent / "ui1200M.snap"
+            if not ssnap.exists() or pathlib.Path(f"{ssnap}.section_3_MAIN_OS.bin").exists():
+                ssnap = snap
+            sl_cmds = [[a.venv, "-u", "scripts/emu_slides.py", "--build", bdir, "--snapshot", ssnap,
                         "--json", work / f"slides-{k}.json",
                         *(["--stock"] if k == "stock" else ["--png-dir", work / "slides-png"])]
                        for k in ("build", "stock")]
@@ -2363,15 +2451,15 @@ def main() -> int:
 
         # v0.48 (owner, 2026-11-09: "chromatic view is gone after REC grid mode ... i wish it
         # [persisted], across all tracks and machine types"). KEYBOARD's state is the long at
-        # 0x42431a99 in this snapshot (the keyboard object's +56: 0x40047088 toggles it,
+        # 0x42432a99 in this snapshot (the keyboard object's +56: 0x40047088 toggles it,
         # 0x4004702e sets it; found with --access). KEYBOARD on; RECORD (grid recording on):
         # off, as stock; RECORD again (off): on again (stock left it off); to track 2 (made an
         # ONESHOT) with TRK + [TRIG 3]: still on; RECORD twice there: on; KEYBOARD off; RECORD
         # twice: still off (nothing given back that was not taken)
         from dnfw.sampler import machines as SMk        # noqa: PLC0415
-        KB = "mem:0x42431a99:4"
+        KB = "mem:0x42432a99:4"
         kb_steps = ["wait:6", KB, "tap:18", "wait:8", KB, "tap:19", "wait:8", KB, "tap:19", "wait:8", KB,
-                    f"poke:{0x4210C08C + 52 + 1163 * 2 + 0xDE:#x}:{SMk.TYPE_OF['ONESHOT']:02x}",
+                    f"poke:{0x4210D08C + 52 + 1163 * 2 + 0xDE:#x}:{SMk.TYPE_OF['ONESHOT']:02x}",
                     "press:16", "wait:2", "tap:27", "wait:2", "release:16", "wait:8", KB,
                     "tap:19", "wait:8", KB, "tap:19", "wait:8", KB,
                     "tap:18", "wait:8", KB, "tap:19", "wait:8", KB, "tap:19", "wait:8", KB, "png:end"]

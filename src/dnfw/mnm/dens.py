@@ -185,44 +185,70 @@ def render(p: Prog, L: C.Layout) -> None:
     p.ld(2, W["sh"])
     p.ifz(2, "EQ", lambda: p.ipass(3, 1))
     p.st(W["fb"], 3)
-    p.iconst(12, L.BUF)
-    p.seti(5, 12)
+    # NBUF samples into BUF. v0.52 (speed): the loop's words held in registers (v0.42 loaded i0,
+    # msk, cb, fb, w, y1 and the constants every sample, and stored i0): R0 counts down, the index is
+    # (i0 + NBUF - R0) & msk, R1 i0 + NBUF, R5 -31, R8 msk, R9 cb, R10 fb, F11 -1.0, R12 0xFF, F13 w,
+    # F14 y1, F15 TOP; I0 walks BUF. y1 = 0 (the crossfade's weight, 0 over 15/16 of each octave, and at
+    # the top level): the partner's term is +-0, so the sum is this level's term itself and the partner
+    # is not read. The same words
+    p.ld(1, W["i0"])
+    p.iconst(12, D.NBUF)
+    p.iop(1, 12, "+", 1)
+    p.iconst(5, -31)
+    p.ld(8, W["msk"])
+    p.ld(9, W["cb"])
+    p.ld(10, W["fb"])
+    p.fconst(11, -1.0)
+    p.iconst(12, 0xFF)
+    p.ld(13, W["w"])
+    p.ld(14, W["y1"])
+    p.fconst(15, C.TOP)
+    p.iconst(3, L.BUF)
+    p.seti(0, 3)
 
-    def one():
-        p.ld(1, W["i0"])
-        p.ld(2, W["msk"])
-        p.iop(2, 1, "AND", 2)
-        p.iconst(12, 1)
-        p.iop(1, 12, "+", 1)
-        p.st(W["i0"], 1)
+    def word():                                 # F4 = this level's word; R2 the index
+        p.iop(2, 1, "-", 0)
+        p.iop(2, 2, "AND", 8)
         p.lsh(3, 2, 2)
-        p.ld(4, W["cb"])
-        D.addr(p, 3, 3, 4)
+        p.iop(3, 9, "+", 3)
         p.seti(1, 3)
         p.ldi(4, 0, 1)
-        D.q23(p, 4, 4)                          # this level's word
+
+    def out():
+        p.fop(4, 4, "MIN", 15)
+        p.fop(4, 4, "MAX", 11)                  # C.sat
+        p.stpost(0, 4)
+
+    def one():
+        word()
         p.lsh(3, 2, 3)
-        p.ld(6, W["fb"])
-        D.addr(p, 3, 3, 6)
+        p.iop(3, 10, "+", 3)
+        p.lsh(4, 4, 8)
         p.seti(1, 3)
-        p.iconst(12, 0xFF)
         p.ldi(6, 0, 1)
-        p.iop(6, 6, "AND", 12)
+        p.float_(4, 4, 5)                       # this level's word (D.q23)
         p.ldi(7, 1, 1)
+        p.iop(6, 6, "AND", 12)
         p.iop(7, 7, "AND", 12)
         p.lsh(6, 6, 24)
         p.lsh(7, 7, 16)
         p.iop(6, 6, "OR", 7)
-        p.iconst(12, -31)
-        p.float_(6, 6, 12)                      # the partner: the finer level's low bytes
-        p.ld(7, W["w"])
-        p.fop(4, 4, "*", 7)
-        p.ld(7, W["y1"])
-        p.fop(6, 6, "*", 7)
+        p.float_(6, 6, 5)                       # the partner: the finer level's low bytes
+        p.fop(4, 4, "*", 13)
+        p.fop(6, 6, "*", 14)
         p.fop(4, 4, "+", 6)
-        C.sat(p, 4)
-        p.stpost(5, 4)
-    p.loop(W["j"], D.NBUF, one)
+        out()
+
+    def alone():
+        word()
+        p.lsh(4, 4, 8)
+        p.float_(4, 4, 5)
+        p.fop(4, 4, "*", 13)
+        out()
+    p.ifz(14, "EQ", lambda: p.loop_r(0, D.NBUF, alone, one=0), lambda: p.loop_r(0, D.NBUF, one, one=0),
+          kind="f")
+    p.st(W["i0"], 1)
+    p.st(W["j"], 0)
     p.iconst(1, L.MIX)
     p.st(W["out"], 1)
     p.ld(1, W["bit"])

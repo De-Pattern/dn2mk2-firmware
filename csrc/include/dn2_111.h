@@ -18,7 +18,7 @@ typedef unsigned char u8;
 #define DN2_BSS_CLEAR  0x400004B2
 
 /* The appended area, and where its data chunks run (dnfw.patch.area). */
-#define DNFW_AREA      0x4030B980
+#define DNFW_AREA      0x4030C980
 #define DNFW_RUNTIME   0x46710000
 #define DNFW_MAGIC     0x444E4657      /* 'DNFW' */
 #define DNFW_CODE      0x434F4445      /* 'CODE' */
@@ -26,10 +26,10 @@ typedef unsigned char u8;
 /* The stored <-> live sound converters (`docs/lfo4-build-plan.md` §4), and the
  * two sites just past their value loops, where both pointers are still live.
  * Deserialize takes (live, stored); serialize takes (stored, live, flag). */
-#define DN2_SOUND_LOAD 0x400DD1EA
-#define DN2_SOUND_SAVE 0x400DD6A6
-#define DN2_LOAD_SITE  0x400DD282      /* mvs.b 28(a2),d0 ; moveq #6,d2 -- 6 bytes */
-#define DN2_SAVE_SITE  0x400DD724      /* mvs.b 54(a2),d0 ; move.l (a0,d0.l*4),d0 -- 8 */
+#define DN2_SOUND_LOAD 0x400DD34E
+#define DN2_SOUND_SAVE 0x400DD80A
+#define DN2_LOAD_SITE  0x400DD3E6      /* mvs.b 28(a2),d0 ; moveq #6,d2 -- 6 bytes */
+#define DN2_SAVE_SITE  0x400DD888      /* mvs.b 54(a2),d0 ; move.l (a0,d0.l*4),d0 -- 8 */
 
 /* The parameter setter, and the bound that makes room for LFO4's slots.
  * 0x40037bd0 is `moveq #100,d0 ; cmp.l d2,d0 ; blt.s skip` -- six bytes, the
@@ -43,7 +43,7 @@ typedef unsigned char u8;
 
 /* Step 4b, the page. Two sites, both in UI code that runs every frame.
  *
- * `DN2_PAGE_RECORD` is `id -> 0x42432c00 + 44 * id`, and it rejects anything
+ * `DN2_PAGE_RECORD` is `id -> 0x42433c00 + 44 * id`, and it rejects anything
  * above 36 -- so a fourth MOD page's record cannot come from that table and
  * has to be answered before the arithmetic. The six bytes replaced are two
  * whole instructions the stub replays (`moveq #36,%d1 ; movel %sp@(4),%d0`).
@@ -52,8 +52,8 @@ typedef unsigned char u8;
  * at the mode object's `+124` and the current index at `+144`. The stub is
  * entered after `%a2` would have been loaded and replays that load and the
  * one after it. */
-#define DN2_PAGE_RECORD  0x400C2474    /* the six bytes replaced */
-#define DN2_PAGE_AFTER   0x400C247A    /* cmpl %d0,%d1, where the stock code resumes */
+#define DN2_PAGE_RECORD  0x400C25D8    /* the six bytes replaced */
+#define DN2_PAGE_AFTER   0x400C25DE    /* cmpl %d0,%d1, where the stock code resumes */
 #define DN2_MODE_HEADER  0x40063F5C    /* moveal %sp@(16),%a2 ; moveal %a0,%a3 */
 #define DN2_MODE_AFTER   0x40063F62
 
@@ -82,10 +82,10 @@ typedef unsigned char u8;
 
 /* Step 4d: the companion table, and why LFO4's page drew plain dials.
  *
- * `0x400c2418` is `entry -> 0x4243325c + 68 * entry`, bounded at 321 and
+ * `0x400c257c` is `entry -> 0x4243425c + 68 * entry`, bounded at 321 and
  * clamping anything above to entry 0. Drawing LFO4's page asks it for entries
  * 321-329 -- the right ones, the page's own eight -- and every one of the 96
- * lookups answered `0x4243325c`, the fallback (`scripts/emu_lfo4_widget.py`).
+ * lookups answered `0x4243425c`, the fallback (`scripts/emu_lfo4_widget.py`).
  * So each parameter got the fallback's widget: a dial with no value, no `512`
  * in a box, no waveform glyph, where LFO3's page has all three.
  *
@@ -93,10 +93,10 @@ typedef unsigned char u8;
  * addresses -- so the accessor is diverted for LFO4's entries instead, to ten
  * rows this build owns. Ten bytes are replaced and both instructions replayed.
  */
-#define DN2_COMPANION        0x4243325C   /* the table itself, 321 x 68 */
+#define DN2_COMPANION        0x4243425C   /* the table itself, 321 x 68 */
 #define DN2_COMPANION_STRIDE 68
-#define DN2_COMPANION_BOUND  0x400C2418   /* the ten bytes replaced */
-#define DN2_COMPANION_AFTER  0x400C2422   /* scs %d1, where the stock code resumes */
+#define DN2_COMPANION_BOUND  0x400C257C   /* the ten bytes replaced */
+#define DN2_COMPANION_AFTER  0x400C2586   /* scs %d1, where the stock code resumes */
 
 /* LFO3's ten entries, the ones LFO4's are copied from. Entry = index + 1, and
  * LFO3's records are indices 94..103. */
@@ -105,7 +105,7 @@ typedef unsigned char u8;
 
 /* Step 4e: the waveform preview, which is re-coded per LFO.
  *
- * `0x4010e1f4` onward is three near-identical blocks selected by an LFO index
+ * `0x4010e4d4` onward is three near-identical blocks selected by an LFO index
  * in `%d0` -- 0, 1, 2 -- each calling `0x4006538e` five times with its own
  * LFO's **entry numbers written as literals**:
  *
@@ -113,7 +113,7 @@ typedef unsigned char u8;
  *     index 1:  89, 91, 92, 85, 93
  *     index 2:  99, 101, 102, 95, 103
  *
- * Anything else falls to `0x4010e2f0` and draws no preview -- which is why
+ * Anything else falls to `0x4010e5d0` and draws no preview -- which is why
  * LFO4's `SPH` came out a plain dial where LFO1-3 have the phase braces around
  * the waveform. **The dispatch already computes 3 for LFO4**
  * (`scripts/emu_lfo4_wave.py`); there is simply no block for it.
@@ -121,10 +121,10 @@ typedef unsigned char u8;
  * So a fourth block is added, transcribing the firmware's own with five
  * constants changed, and the fallback's first eight bytes become a jump to it.
  */
-#define DN2_WAVE_FALLBACK 0x4010E2F0   /* the eight bytes replaced */
+#define DN2_WAVE_FALLBACK 0x4010E5D0   /* the eight bytes replaced */
 #define DN2_WAVE_CALL     0x4006597A   /* what the fallback does, replayed */
-#define DN2_WAVE_AFTER    0x4010E2F8
-#define DN2_WAVE_TAIL     0x4010E2C6   /* the common tail all three blocks reach */
+#define DN2_WAVE_AFTER    0x4010E5D8
+#define DN2_WAVE_TAIL     0x4010E5A6   /* the common tail all three blocks reach */
 #define DN2_WIDGET_GET    0x4006538E   /* (page, entry, buffer) -> the drawn value */
 #define DN2_WAVE_INDEX    3            /* what the dispatch hands LFO4 */
 
@@ -138,7 +138,7 @@ typedef unsigned char u8;
 
 /* The `SLEW` substitution, and the gate LFO4 never got past.
  *
- * `0x4010db00` is handed the entry a column is about to draw and returns
+ * `0x4010dde0` is handed the entry a column is about to draw and returns
  * either that entry or the `SLEW` that replaces it when the waveform is `RND`.
  * Its first act is a three-way compare against **81, 91 and 101** -- LFO1's,
  * LFO2's and LFO3's `SPH` entries, written as literals -- and anything else
@@ -153,13 +153,13 @@ typedef unsigned char u8;
  * three longwords at `DN2_SLEW_ENTRIES`, immediately followed by a mangled
  * RTTI string, so it cannot grow where it stands.
  */
-#define DN2_SLEW_GATE     0x4010DB18   /* the 22 bytes the stub replaces */
-#define DN2_SLEW_ACCEPT   0x4010DB2E   /* the entry is an `SPH`: carry on */
-#define DN2_SLEW_DECLINE  0x4010DBDA   /* it is not: hand the entry back */
-#define DN2_SLEW_CLAMP    0x4010DBC6   /* moveq #2,%d1 -- the ceiling tested */
-#define DN2_SLEW_CLAMPED  0x4010DBCC   /* moveq #2,%d0 -- what a bigger index becomes */
-#define DN2_SLEW_TABLE    0x4010DBCE   /* lea 0x40205454,%a0 */
-#define DN2_SLEW_ENTRIES  0x40205454   /* {80, 90, 100}, with a string behind it */
+#define DN2_SLEW_GATE     0x4010DDF8   /* the 22 bytes the stub replaces */
+#define DN2_SLEW_ACCEPT   0x4010DE0E   /* the entry is an `SPH`: carry on */
+#define DN2_SLEW_DECLINE  0x4010DEBA   /* it is not: hand the entry back */
+#define DN2_SLEW_CLAMP    0x4010DEA6   /* moveq #2,%d1 -- the ceiling tested */
+#define DN2_SLEW_CLAMPED  0x4010DEAC   /* moveq #2,%d0 -- what a bigger index becomes */
+#define DN2_SLEW_TABLE    0x4010DEAE   /* lea 0x4020590c,%a0 */
+#define DN2_SLEW_ENTRIES  0x4020590c   /* {80, 90, 100}, with a string behind it */
 #define DN2_SLEW_COUNT    4            /* ours, one per MOD page */
 
 /* The `DEST` browser, and the one site of six that actually opens it.
@@ -194,7 +194,7 @@ typedef unsigned char u8;
 
 /* "Is this LFO's waveform `RND`?", asked twice and hard-coded both times.
  *
- * Extending `0x4010db00` was not enough: the instrument still drew `SPH` on
+ * Extending `0x4010dde0` was not enough: the instrument still drew `SPH` on
  * LFO4's `RND`. There is a second kind of site, and `scan_lfo_triples.py`
  * found two of them by the **`WAVE`** entries rather than the `SPH` ones --
  * `pea 79`, `pea 89`, `pea 99` pushed as arguments.
@@ -221,7 +221,7 @@ typedef unsigned char u8;
  * default at init. `lfo4-table` relocates this table, but the image's copy is
  * still there and still correct -- and it is the one guaranteed to be loaded
  * when `lfo4_init` runs, which the relocated chunk is not. */
-#define DN2_PARAM_TABLE   0x401F7FC8
+#define DN2_PARAM_TABLE   0x401F83D8
 #define DN2_PARAM_STRIDE  60
 #define DN2_PARAM_DEFAULT 24           /* the record's default value */
 #define LFO3_RECORD0      94           /* LFO3's group of ten starts here */
@@ -246,16 +246,16 @@ typedef unsigned char u8;
 /* **The MIDI byte sink**, found 2026-09-24 by walking MidiOutputStream's vtable.
  *
  * `tx(buffer, count, port, flags)`. Reached from `MidiOutputStream::flush`
- * (`0x401228e0`), which calls it with the stream's own buffer at `this+20` and
+ * (`0x40122bc0`), which calls it with the stream's own buffer at `this+20` and
  * its count at `this+8`; the other three callers push `port` and `flags` as
  * plain constants -- `clrl` then `pea 0x2` -- so no stream instance is needed
  * to use it. That is what makes telemetry possible without constructing or
  * borrowing an object.
  *
  * The class was missed for a day because the RTTI name carries a length prefix:
- * the typeinfo points at `0x4023100c`, not at the "MidiOutputStream" text one
+ * the typeinfo points at `0x4023154b`, not at the "MidiOutputStream" text one
  * byte later, so searching for a pointer to the string found nothing. */
-#define DN2_MIDI_TX     0x401233F2
+#define DN2_MIDI_TX     0x401236D2
 #define DN2_MIDI_PORT   0
 #define DN2_MIDI_FLAGS  2
 #define DN2_SOUND_AT       52           /* the gate's own `addil #52` */
@@ -265,7 +265,7 @@ typedef unsigned char u8;
  *
  * Found 2026-09-25 with digikit's `refscan.py`, which reports that the mirror
  * at `0x800068e4` has exactly **three** static references in the whole image,
- * all inside `0x400db12a` -- a routine that copies three words per 202-byte
+ * all inside `0x400db28e` -- a routine that copies three words per 202-byte
  * block out of a twin table at `0x80003af0` and returns the mirror's base. Its
  * single caller is `0x4002717e`, in the per-frame driver.
  *
@@ -302,8 +302,8 @@ typedef unsigned char u8;
  *
  *   0x400254d4  movel %a2,%a0@(0,%d0:l:4)   ; 0x80003af0 + 4*(slot+1518) = sound
  *   0x400254f6  addil #0x80003b12,%d0       ; + 202*slot: block `slot`
- *   0x400254fe  jsr 0x40134490              ; memcpy(block, sound+20, 202)
- *   0x4002551a  jsr 0x40134490              ; memcpy(0x8000487c+153*slot, sound+222, 153)
+ *   0x400254fe  jsr 0x40134770              ; memcpy(block, sound+20, 202)
+ *   0x4002551a  jsr 0x40134770              ; memcpy(0x8000487c+153*slot, sound+222, 153)
  *
  * `0x80003b12` is `0x80003af0 + 34` -- block 0 of the table the mirror is
  * copied from. So a sound's parameters travel into a voice's block here, in
@@ -317,9 +317,9 @@ typedef unsigned char u8;
  * `lfo4-voiceowner`, 2026-09-25). */
 #define DN2_VOICE_SOUND    0x800052A8   /* 16 x 4, written by 0x4002549c */
 #define DN2_OWNER_REG      0x80005308   /* 16 x 4, scanned at 0x400258f8 */
-#define DN2_TRACK_OBJ        0x40287DD4 /* 16 x 20, read by 0x4002b22e */
+#define DN2_TRACK_OBJ        0x40288314 /* 16 x 20, read by 0x4002b22e */
 #define DN2_TRACK_OBJ_STRIDE 20
-#define DN2_ALT_ARRAY      0x4059C92C   /* 16 x 4, read by 0x4002b246 */
+#define DN2_ALT_ARRAY      0x4059D92C   /* 16 x 4, read by 0x4002b246 */
 
 /* **The working state: the serialised project image that reaches flash.**
  *
@@ -329,7 +329,7 @@ typedef unsigned char u8;
  * save would write -- and an unsaved LFO4 edit made at the same time is not.
  * So stock edits are written into the image as they happen; LFO4 has to be too.
  *
- *   image            0x405cd96c   (the dump's buffer is 0x405cd85c: 0x110 of
+ *   image            0x405ce96c   (the dump's buffer is 0x405ce85c: 0x110 of
  *                                  header, then this)
  *   pattern kit k    image + 0xae0200 + 10752*k,   k = 0..127, kit k = pattern k
  *   sound t          kit + 60 + 359*t
@@ -339,12 +339,12 @@ typedef unsigned char u8;
  * (from `DN2_PROJECT_HOLDER()`, then its vtable slot +40 -- the route the MRAM
  * job and the stock setter's tail both take) keeps them at `+0xef371c`, 23,921
  * bytes apart, and `*DN2_LIVE_CONTAINER` points at the active pattern's. */
-#define DN2_PROJECT_HOLDER   0x4018A97A   /* -> object; its vtable +40 -> project */
+#define DN2_PROJECT_HOLDER   0x4018AC5A   /* -> object; its vtable +40 -> project */
 #define DN2_PROJECT_VSLOT    40
 #define DN2_PROJECT_KITS     0xEF371C     /* project + this = kit 0, live format */
 #define DN2_KIT_BYTES        23921
 #define DN2_PATTERNS         128
-#define DN2_IMAGE            0x405CD96C
+#define DN2_IMAGE            0x405CE96C
 #define DN2_IMAGE_KITS       0xAE0200
 #define DN2_IMAGE_KIT_BYTES  10752
 #define DN2_STORED_SOUND_AT  60
@@ -352,7 +352,7 @@ typedef unsigned char u8;
 
 /* **How a whole-sound change is announced, so the stock writer re-saves it.**
  *
- * `SoundConfigChangedInfo` (typeinfo `0x401dcd28`, vtable `0x401dddec`) is sent
+ * `SoundConfigChangedInfo` (typeinfo `0x401dd138`, vtable `0x401de1fc`) is sent
  * by six stock Sound methods (`0x4004b25a` .. `0x4004b540`) as
  * `holder->vfunc@16(holder, &info)`, `info` = {vtable, flag byte}, flag 1 in
  * every one. Its receivers: `Sound::updateMirror` (`0x4004ca80`), which for any
@@ -360,12 +360,12 @@ typedef unsigned char u8;
  * re-serialises the whole sound into its stored record through `SAVE` -- where
  * `lfo4_on_save` writes LFO4's lane -- and the engine receiver (`0x4003f7bc`),
  * which refreshes the sound's voices and carries no slot index. */
-#define DN2_SOUND_CONFIG_CHANGED  0x401DDDEC   /* vtable */
+#define DN2_SOUND_CONFIG_CHANGED  0x401DE1FC   /* vtable */
 #define DN2_HOLDER_NOTIFY         16           /* holder vtable byte offset */
 
 /* libc as the firmware has it. */
-#define DN2_MEMCPY     0x40134490
-#define DN2_MEMSET     0x401344D8
+#define DN2_MEMCPY     0x40134770
+#define DN2_MEMSET     0x401347B8
 
 #ifndef __ASSEMBLER__
 static inline void *dn2_memset(void *dst, int c, u32 n)

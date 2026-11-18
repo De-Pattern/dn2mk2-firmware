@@ -2,9 +2,9 @@
 where their controls sit.
 
 The machines are the DT2's own -- ONESHOT, WERP, STRETCH, REPITCH, GRID, in the DT2's
-MACHINE SEL order (DT2 1.17 MAIN OS, the list at 0x4020ef78) -- as machine types 8..12
+MACHINE SEL order (DT2 1.17 MAIN OS, the list at 0x4020f430) -- as machine types 8..12
 of the DN2. Their controls and ranges are read from the DT2's parameter descriptors
-(0x401eb76c.., docs/dt2-port-map.md); the DSP code is our own (dnfw.sampler.program),
+(0x401ebb7c.., docs/dt2-port-map.md); the DSP code is our own (dnfw.sampler.program),
 since the DT2's is built around its own engine.
 
 Like every machine of ours, a sample machine's controls are WaveTone records: their

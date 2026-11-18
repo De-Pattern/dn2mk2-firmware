@@ -53,6 +53,7 @@ import sharc_dn2_fixups as fx                                  # noqa: E402
 import sharc_waverider_render as m1                            # noqa: E402
 import sharc_waverider_voice as m2                             # noqa: E402
 from dnfw.image import sharc_object                            # noqa: E402
+from dnfw.perc import mf                                       # noqa: E402
 from dnfw.waverider import render, testtable, voice as V       # noqa: E402
 
 OUT = ROOT / "out" / "waverider"
@@ -112,13 +113,16 @@ def load_json(path: pathlib.Path, src: pathlib.Path, do_assemble: bool, work: pa
 
 
 def _selas(src: pathlib.Path, work: pathlib.Path):
-    """Reassemble SRC with a global label before every instruction; -> (be bytes, offsets)."""
-    lines, k = [], 0
+    """Reassemble SRC with a global label before every instruction; -> (be bytes, offsets).
+    Every float multifunction line's compute field is checked against dnfw.perc.mf's own
+    encoding (selas assembles an illegal operand group as the multiply alone, silently)."""
+    lines, k, texts = [], 0, []
     for line in src.read_text(encoding="utf-8").splitlines():
         text = line.split("//", 1)[0].strip()
         if text and not text.startswith(".") and not text.endswith(":"):
             lines += [f".GLOBAL x_i{k};", f"x_i{k}:"]
             k += 1
+            texts.append(line)
         lines.append(line)
     lab = work / (src.stem + "_lab.asm")
     lab.write_bytes(("\n".join(lines) + "\n").encode())
@@ -129,7 +133,9 @@ def _selas(src: pathlib.Path, work: pathlib.Path):
     data = obj.read_bytes()
     syms = sharc_object.symbols(data)
     offs = [2 * syms[f"x_i{j}"] for j in range(k)]
-    return fix_shift_imm(sharc_object.code(data, "seg_pmco"), offs), offs
+    be = fix_shift_imm(sharc_object.code(data, "seg_pmco"), offs)
+    mf.verify(be, offs, texts)
+    return be, offs
 
 
 def fix_shift_imm(be: bytes, offs: list[int]) -> bytes:

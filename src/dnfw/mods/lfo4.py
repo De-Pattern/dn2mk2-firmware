@@ -69,7 +69,7 @@ def _spec() -> dict:
 def _platform_owned(e: dict) -> bool:
     """An edit the platform makes: the start-up call or the loader in its cave."""
     lo, hi = e["va"] - BASE, e["va"] - BASE + len(e["new"]) // 2
-    return any(x.start < hi and lo < x.end for x in platform.extents())
+    return any(x.start < hi and lo < x.end for x in platform.extents(spec=platform.SPEC_111))
 
 
 def _edits() -> list[dict]:
@@ -83,7 +83,7 @@ def _chunks(blob: bytes) -> list[tuple[bytes, bytes]]:
 def extents(firmware=None) -> list[Extent]:
     spec = _spec()
     out = [Extent(SECTION, e["va"] - BASE, len(e["new"]) // 2, "LFO4 edit") for e in _edits()]
-    return out + platform.extents(len(spec["blob"]) // 2)
+    return out + platform.extents(len(spec["blob"]) // 2, platform.SPEC_111)
 
 
 # The evaluators' three LFO state arrays, moved above BSS so each track holds
