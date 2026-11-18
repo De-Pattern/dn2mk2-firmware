@@ -57,6 +57,8 @@ extern int smp_onsets(u32 *out, int most);
 extern int smp_slices_get(int k, u32 *t);
 extern int smp_slices_set(int k, const u32 *t, int n);
 extern int smp_area_ok(void);
+extern const u8 *smp_frames_read(int k, u32 f0, u32 n);   /* v0.62: the sample's own frames (link.c) */
+#define FINE_MAX 8192u
 
 enum { S_OFF, S_MENU, S_GRID, S_WAIT, S_EDIT, S_ALLOC };   /* v0.25: ALLOC, GRID's ALLOCATE SLICE */
 int slc_state __attribute__((section(".data"))) = S_OFF;
@@ -96,9 +98,35 @@ static u32 msg_at __attribute__((section(".data"))) = 0;
 u32 slc_sl[3 * SLMAX] __attribute__((section(".data")));
 int slc_ns __attribute__((section(".data"))) = 0;
 int slc_cur __attribute__((section(".data"))) = 0;
-static int zoom __attribute__((section(".data"))) = 0;      /* 0..5: the view is frames >> zoom */
+static int zoom __attribute__((section(".data"))) = 0;      /* 0..zmax(): the view is frames >> zoom */
+/* v0.62 (impbox: "finer zoom"): the zoom goes on until the view is 128 frames (v0.23..v0.61:
+ * a 32nd of the sample at most); once the view is FINE_MAX frames or fewer, the sample's own
+ * frames are read for it and drawn above and below the middle (the fine waveform's 1,024
+ * columns are coarser than the screen there) */
+static u32 fv_slot __attribute__((section(".data"))) = 0xFFFFFFFFu, fv_f0 __attribute__((section(".data"))) = 0;
+u32 slc_fv_n __attribute__((section(".data"))) = 0;            /* the frames read for the view (0 none) */
+int slc_fv_lo[126] __attribute__((section(".data")));
+int slc_fv_hi[126] __attribute__((section(".data")));
+#define fv_n slc_fv_n
+#define fv_lo slc_fv_lo
+#define fv_hi slc_fv_hi
+u32 slc_fine_views __attribute__((section(".data"))) = 0;      /* (the gate counts) */
+static int fine_was __attribute__((section(".data"))) = 0;
+extern int smp_overlay_dirty;
+/* v0.62 (impbox): the edit plays as it is made: two tenths of a second after the last change it
+ * goes to the DSP (and the +Drive), so a trig or a key plays the slice as edited without YES */
+static u32 live_at __attribute__((section(".data"))) = 0;
+u32 slc_live_sends __attribute__((section(".data"))) = 0;
+/* v0.62 (impbox): a slice played (a trig, the keyboard) is picked in the editor: the voices of
+ * the editor's track, their notes as the frame last had them */
+#define VOICE_TRACK ((volatile u32 *)0x80005308u)
+#define CTL_FRAME ((volatile u16 *)0x80005E60u)
+static u16 pl_note[16] __attribute__((section(".data")));
+u32 slc_follows __attribute__((section(".data"))) = 0;
+u32 slc_snaps __attribute__((section(".data"))) = 0;
 static int vzoom __attribute__((section(".data"))) = 0;     /* 0..3: the height x 1, 2, 4, 8 */
-static u32 view0 __attribute__((section(".data"))) = 0;     /* the view's first frame */
+u32 slc_view0 __attribute__((section(".data"))) = 0;        /* the view's first frame (v0.62: the gate reads it) */
+#define view0 slc_view0
 static int dirty __attribute__((section(".data"))) = 0;
 static int pv_on __attribute__((section(".data"))) = 0;      /* FUNC + YES's preview playing */
 static u32 pv_at __attribute__((section(".data"))) = 0;      /* v0.30: FRAMES when it started */
@@ -303,6 +331,82 @@ static u32 view_n(void)
     return v < 128u ? (slc_nfr < 128u ? slc_nfr : 128u) : v;
 }
 
+static int zmax(void)                           /* v0.62: the deepest zoom: a view of 128 frames */
+{
+    int z = 0;
+    while (z < 16 && (slc_nfr >> (z + 1)) >= 128u)
+        z++;
+    return z;
+}
+
+/* v0.62: the view's own frames, read when they are few enough, each column's lowest and highest */
+static int fine_ready(void)                     /* the cache is this view's */
+{
+    return slot >= 0 && fv_slot == (u32)slot && fv_f0 == view0 && fv_n == view_n();
+}
+
+static int fine_view(void)                      /* (the UI loop's edit_poll, never the draw) */
+{
+    u32 v = view_n();
+    if (slot < 0 || v > FINE_MAX || v < 126u)
+        return 0;
+    if (fine_ready())
+        return 1;
+    const u8 *p = smp_frames_read(slot, view0, v);
+    if (!p)
+        return 0;
+    for (u32 x = 0; x < 126u; x++) {
+        u32 a = x * v / 126u, b = (x + 1u) * v / 126u;
+        if (b <= a)
+            b = a + 1u;
+        int lo = 32767, hi = -32768;
+        for (u32 i = a; i < b && i < v; i++) {
+            int s16 = (short)(p[2u * i] | p[2u * i + 1u] << 8);
+            if (s16 < lo) lo = s16;
+            if (s16 > hi) hi = s16;
+        }
+        fv_lo[x] = lo;
+        fv_hi[x] = hi;
+    }
+    fv_slot = (u32)slot;
+    fv_f0 = view0;
+    fv_n = v;
+    slc_fine_views++;
+    return 1;
+}
+
+/* v0.62 (impbox): FUNC + START / END: the point to the nearest zero crossing (a frame whose sign
+ * differs from the one before), within 512 frames either way and inside [LO, HI] -> 1 moved */
+static int snap_zero(u32 *pt, u32 lo, u32 hi)
+{
+    if (slot < 0)
+        return 0;
+    u32 f = *pt, a = f > 512u ? f - 512u : 0u, b = f + 512u < slc_nfr ? f + 512u : slc_nfr;
+    if (b <= a + 1u)
+        return 0;
+    const u8 *p = smp_frames_read(slot, a, b - a);
+    if (!p)
+        return 0;
+    u32 best = 0xFFFFFFFFu, bd = 0xFFFFFFFFu;
+    int prev = (short)(p[0] | p[1] << 8);
+    for (u32 i = 1; i < b - a; i++) {
+        int cur = (short)(p[2u * i] | p[2u * i + 1u] << 8);
+        if ((prev < 0) != (cur < 0)) {
+            u32 at = a + i, d = at > f ? at - f : f - at;
+            if (at >= lo && at <= hi && d < bd) {
+                bd = d;
+                best = at;
+            }
+        }
+        prev = cur;
+    }
+    if (best == 0xFFFFFFFFu)
+        return 0;
+    *pt = best;
+    slc_snaps++;
+    return 1;
+}
+
 static int fx(u32 f)                            /* a frame's column in the view, or -1 */
 {
     u32 v = view_n();
@@ -343,6 +447,14 @@ static void edit_draw(void *c)
     const u8 *hr = smp_analysis(0) == 2 && smp_analysis_slot() == slot ? smp_hires() : 0;
     int yc = 31, h = 20;
     u32 v = view_n();
+    if (fine_ready()) {                         /* v0.62: the frames themselves, signed */
+        for (int x = 1; x <= 126; x++) {
+            int lo = (fv_lo[x - 1] * h << vzoom) / 32768, hi = (fv_hi[x - 1] * h << vzoom) / 32768;
+            lo = lo < -h ? -h : lo > h ? h : lo;
+            hi = hi < -h ? -h : hi > h ? h : hi;
+            vline(c, x, yc + lo, yc + hi, 0);
+        }
+    } else
     for (int x = 1; x <= 126; x++) {
         u32 f0 = view0 + (u32)(x - 1) * (v / 126u);
         u32 col = slc_nfr ? (f0 >> 6) * 1024u / ((slc_nfr >> 6) + 1u) : 0;
@@ -465,6 +577,10 @@ static void edit_open(void)
         from_starts(&z, 1);
         dirty = 1;
     }
+    for (u32 v = 0; v < 16; v++)                /* v0.62: the notes sounding now are not "played" */
+        pl_note[v] = CTL_FRAME[1u + v];
+    fv_slot = 0xFFFFFFFFu;
+    live_at = 0;
     slc_state = S_EDIT;
 }
 
@@ -557,6 +673,48 @@ static void start_analysis(int then)
 /* from the UI loop (page.c's wr_poll), every pass */
 static void slice_preview(int on);
 
+/* v0.62: the editor's live work, every UI pass */
+static void edit_poll(void)
+{
+    if (fine_view() && !fine_was)
+        smp_overlay_dirty = 1;                  /* drawn as soon as it is read */
+    fine_was = fine_ready();
+    /* the edit to the DSP (and the +Drive) once the knobs rest */
+    if (dirty && live_at && (int)(FRAMES - live_at) > 300 && slot >= 0
+        && smp_slices_set(slot, slc_sl, slc_ns) == 0) {
+        dirty = 0;
+        live_at = 0;
+        slc_live_sends++;
+    }
+    /* a slice played on the editor's track, SLCE at NOTE: picked. (A voice whose note did not
+     * change -- the same note again on the same voice -- is the same slice: nothing to pick) */
+    u32 t = slc_open_track;
+    if (!KIT || t > 15 || slc_ns < 1)
+        return;
+    u32 snd = SOUND(t);
+    if (SOUND_VALUE(snd, SMP_SLICE_ID) >= 2)    /* SLCE a fixed slice: the notes pick nothing */
+        return;
+    for (u32 v = 0; v < 16; v++) {
+        u16 w = CTL_FRAME[1u + v];
+        if (VOICE_TRACK[v] != t) {
+            pl_note[v] = w;
+            continue;
+        }
+        if ((w >> 8) == (pl_note[v] >> 8))
+            continue;
+        pl_note[v] = w;
+        int n = (int)((w + 128u) >> 8) - 24;    /* dnfw.sampler.program.slice_bounds: from C1 */
+        int k = n % slc_ns;
+        if (k < 0)
+            k += slc_ns;
+        if (k != slc_cur) {
+            slc_cur = k;
+            follow_view();
+            slc_follows++;
+        }
+    }
+}
+
 void slc_poll(void)
 {
     /* v0.42: a menu or dialog lets go when its page is gone or another track is active (as
@@ -578,6 +736,8 @@ void slc_poll(void)
         slc_state = S_OFF;
         slc_letgo++;
     }
+    if (slc_state == S_EDIT)
+        edit_poll();
     if (slc_state != S_WAIT) {
         wait_at = 0;
         return;
@@ -650,6 +810,8 @@ static void edit_knob(int idx, int d)
         return;
     case 5:                                                       /* E START */
         move(s, d, pe ? s[-3] + 1u : 0u, *e - 1u);
+        if (func)                               /* v0.62: FUNC: to the nearest zero crossing */
+            snap_zero(s, pe ? s[-3] + 1u : 0u, *e - 1u);
         if (*l < *s) *l = *s;
         if (pe) {
             *pe = *s;
@@ -660,7 +822,7 @@ static void edit_knob(int idx, int d)
         if (func)
             vzoom = vzoom + d < 0 ? 0 : vzoom + d > 3 ? 3 : vzoom + d;
         else
-            zoom = zoom + d < 0 ? 0 : zoom + d > 5 ? 5 : zoom + d;
+            zoom = zoom + d < 0 ? 0 : zoom + d > zmax() ? zmax() : zoom + d;
         follow_view();
         return;
     case 7: {                                                     /* G POS */
@@ -685,6 +847,8 @@ static void edit_knob(int idx, int d)
     }
     case 8:                                                       /* H END */
         move(e, d, *s + 1u, ns ? ns[1] - 1u : slc_nfr);
+        if (func)                               /* v0.62: FUNC: to the nearest zero crossing */
+            snap_zero(e, *s + 1u, ns ? ns[1] - 1u : slc_nfr);
         if (*l >= *e) *l = *e - 1u;
         if (ns) {
             *ns = *e;
@@ -694,6 +858,7 @@ static void edit_knob(int idx, int d)
     default: return;
     }
     dirty = 1;
+    live_at = FRAMES | 1u;
 }
 
 /* v0.26: FUNC + YES plays the current slice while held (the recorder's preview, after the

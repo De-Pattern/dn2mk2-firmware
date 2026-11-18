@@ -1384,6 +1384,17 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out.update(res)
         out["ok"] = bool(res["ok"]) and not route.get("changed")
         out["routing_changed"] = route.get("changed", 0)
+    elif scenario == "slicefine":
+        # v0.62: the slice editor's requests (impbox): scripts/emu_slicefine.py
+        sys.path.insert(0, str(HERE))
+        import emu_slicefine                    # noqa: PLC0415
+        res = emu_slicefine.run({"machine": machine, "call": call, "long": long, "period": period,
+                                 "disk": disk, "syms": syms, "SL": SL, "SM": SM, "base": base, "pool": pool,
+                                 "returned_d0": returned_d0, "item": SENTINEL + 0x3000,
+                                 "scratch": SENTINEL + 0x3400})
+        disk.clear()
+        out.update(res)
+        out["ok"] = bool(res["ok"]) and not route.get("changed")
     elif scenario == "tune":
         # v0.61: microtuning's record per project (csrc/sampler/tune.c): scripts/emu_tune.py
         sys.path.insert(0, str(HERE))
