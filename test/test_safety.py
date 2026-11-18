@@ -17,13 +17,13 @@ from dnfw.firmware.load import load
 from dnfw.firmware.verify import verify
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"  # the shipping build targets 1.12 (docs/os112-port.md)
 
 
 @pytest.fixture(scope="module")
 def stock():
     if not STOCK.exists():
-        pytest.skip("Digitone II 1.11 is not in 00_Resources")
+        pytest.skip("Digitone II 1.12 is not in 00_Resources")
     return load(read_image(STOCK))
 
 

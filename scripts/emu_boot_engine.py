@@ -52,18 +52,18 @@ from unicorn.m68k_const import (UC_M68K_REG_A2, UC_M68K_REG_A6,   # noqa: E402
 from emu_lfo4_tick import (EVAL_A, MIRROR_AT, MIRROR_BYTES, RATE, REST,   # noqa: E402
                            SET_FRAC, STATE, STATE_LEN, TRACKS)
 
-LOAD, SAVE = 0x400DD1EA, 0x400DD6A6     # (live, stored) and (stored, live, flag)
+LOAD, SAVE = 0x400DD34E, 0x400DD80A     # (live, stored) and (stored, live, flag)
 SOUND_BYTES, STORED, VALUES_AT = 1163, 359, 28
-MACHINE_TYPE, STORED_MACHINE = 0xDE, 244        # sound+0xDE; stored+244 (0x400dd74e)
-FILTER_TYPE, STORED_FILTER = 0xDF, 245          # sound+0xDF; stored+245 (0x400dd754)
+MACHINE_TYPE, STORED_MACHINE = 0xDE, 244        # sound+0xDE; stored+244 (0x400dd8b2)
+FILTER_TYPE, STORED_FILTER = 0xDF, 245          # sound+0xDF; stored+245 (0x400dd8b8)
 LFO4_IDS = [4, 8, 12, 16, 20, 24, 28, 32]          # the reserved p-lock ranks
 MARKS = [0x2A01, 0x2A02, 0x2A03, 0x2A04, 0x2A05, 0x2A06, 0x2A07, 0x2A08]
 EXT_SLOTS, EXT_PARAMS = 256, 8
 
 ROOT = "/mnt/d/01_Code/Z_Personal/dn2_firmware"
 SYX = f"{ROOT}/00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
-REPORTER = 0x4011EA6A
-STACK, SCRATCH = 0x46A00000, 0x46A10000       # above BSS end 0x466b74d0
+REPORTER = 0x4011ED4A
+STACK, SCRATCH = 0x46A00000, 0x46A10000       # above BSS end 0x466b84d0
 
 
 class After:
@@ -318,7 +318,7 @@ def main() -> int:
         return 1
 
     # A sound's arp MODE through the stock converters, in the booted machine:
-    # arpmodes widens the LOAD bound (0x400dd530), and a snapshot harness never
+    # arpmodes widens the LOAD bound (0x400dd694), and a snapshot harness never
     # ran that converter in a machine our image booted.
     fails = []
     if args.arp_mode:
@@ -347,7 +347,7 @@ def main() -> int:
                 fails.append(f"arp MODE {v} did not round-trip as {want}")
 
     # A sound's machine type through the same converters: waverider widens the
-    # LOAD bound (0x400dd286) so type 5 survives; stock loads anything above 4
+    # LOAD bound (0x400dd3ea) so type 5 survives; stock loads anything above 4
     # as 0, FM Tone. SAVE copies sound+0xDE to stored+244 as it is.
     for v in args.machine_type:
         base = after.long(0x800052A0)
@@ -395,7 +395,7 @@ def main() -> int:
         if not ok:
             fails.append("FLEX REC's settings did not round-trip")
 
-    # The filter type, the same way: PING (v0.27..v0.44) widened the LOAD bound (0x400dd2bc)
+    # The filter type, the same way: PING (v0.27..v0.44) widened the LOAD bound (0x400dd420)
     # so type 6 survived; stock (and v0.45, PING removed) loads anything above 5 as 0, Multi-Mode.
     for v in args.filter_type:
         base = after.long(0x800052A0)

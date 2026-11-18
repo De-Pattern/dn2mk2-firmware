@@ -29,7 +29,9 @@ tapped, DOWN, YES. Watched while it runs:
   uses.
 
 Steps (comma-separated): `func-src` (open MACHINE SEL), `up`, `down`, `left`,
-`right`, `yes`, `no`, `png:NAME`, `wait:MILLIONS`, `turn:ENC:DELTA` (push and
+`right`, `yes`, `no`, `png:NAME`, `wait:MILLIONS`, `firstframe:MILLIONS` (run 1 M at a time until
+the first frame is composed, at most MILLIONS after the snapshot resumed, the warm-up included; the JSON's
+`first_frame_at` says when, or null), `turn:ENC:DELTA` (push and
 turn -- what moves a value here, parameters included), `spin:ENC:DELTA` (a
 plain turn: shows the value, moves nothing in this emulator, stock included),
 `tap:CODE`, `press:CODE` / `release:CODE` (hold a key: TRIG 1-16 are 25-40 and
@@ -77,35 +79,36 @@ KEYS = {"up": UP, "down": DOWN, "left": LEFT, "right": RIGHT, "yes": YES, "no": 
 
 # the accessors the build touches, and where each keeps its type argument on entry
 WATCH = {
-    0x400DC02A: ("param_set_slot_to_id(slot, type, filter)", 8),
-    0x400DC19A: ("permission(type, track)", 4),
-    0x400DC15C: ("attribute byte(type)", 4),
-    0x400DC176: ("all-tracks(type)", 4),
-    0x400DC332: ("long name(type)", 4),
-    0x400DC358: ("short name(type)", 4),
-    0x400DC37E: ("name column 3(type)", 4),
+    0x400DC18E: ("param_set_slot_to_id(slot, type, filter)", 8),
+    0x400DC2FE: ("permission(type, track)", 4),
+    0x400DC2C0: ("attribute byte(type)", 4),
+    0x400DC2DA: ("all-tracks(type)", 4),
+    0x400DC496: ("long name(type)", 4),
+    0x400DC4BC: ("short name(type)", 4),
+    0x400DC4E2: ("name column 3(type)", 4),
     0x40059274: ("MACHINE SEL group(type)", 4),
     0x400394BE: ("the machine's parameter list(out, type)", 4),
     0x4004CC08: ("machine setter(sound, type, flag)", 8),
     0x40031880: ("MACHINE SEL commit(model, track, type)", 12),
     0x4004C30C: ("machine change: reset its parameters(sound, 1, old type, 0)", 12),
-    0x400C24D2: ("SYN page count(type)", 4),
-    0x400C24EE: ("SYN page descriptor(type, page)", 4),
-    0x400C248E: ("per-machine descriptor 0x42432b24(type)", 4),
+    0x400C2636: ("SYN page count(type)", 4),
+    0x400C2652: ("SYN page descriptor(type, page)", 4),
+    0x400C25F2: ("per-machine descriptor 0x42433b24(type)", 4),
 }
 SETTER_WRITE = 0x4004CC94               # moveb %d2,%a0@(222)
 # every `mvs.b %aN@(222),%dM` in the image (objdump of MAIN OS): site -> N
 TYPE_READS = {0x400254B4: 2, 0x40031BD2: 0, 0x40031C1C: 0, 0x40036478: 0, 0x40036738: 0,
-              0x40036C24: 0, 0x4004B816: 0, 0x4004CC82: 0, 0x4004DE0E: 3, 0x400A801C: 0,
-              0x400B1668: 0}
+              0x40036C24: 0, 0x4004B816: 0, 0x4004CC82: 0, 0x4004DE0E: 3, 0x400A8180: 0,
+              0x400B17CC: 0}
 GETTER_RTS = 0x4003647C                 # rts of the machine-type getter 0x40036462
 TRACK_GETTER_EXIT = 0x4004B81E          # getMachineType(track) 0x4004b7f2: the common exit
+MSEL_FOLLOW, MSEL_ROW_TYPE = 0x4005A956, 0x4005B162   # MACHINE SEL: UP/DOWN's scroll-follow(view); the cursor row's type(view)
 ISR = 0x40025E36                        # the audio frame handler: modulation, frame, send
 ISR_RTE = 0x40027BC6                    # its only rte (docs/usbprobe.md)
-SEQ_ISR, SEQ_VECTOR = 0x400D987A, 121   # the sequencer's timer ISR (emu_jump.py)
+SEQ_ISR, SEQ_VECTOR = 0x400D99DE, 121   # the sequencer's timer ISR (emu_jump.py)
 SEQ_CALLS_A_TICK = 4                    # its entries a tick (emu_jump.py, measured)
-HEAP_FREE = 0x40120270                  # the heap's free (operator delete 0x4001a0d2 jumps here)
-SYSEX_ROUTER, SYSEX_SENDER = 0x4012166E, 0x401233F2    # docs/usbprobe.md
+HEAP_FREE = 0x40120550                  # the heap's free (operator delete 0x4001a0d2 jumps here)
+SYSEX_ROUTER, SYSEX_SENDER = 0x4012194E, 0x401236D2    # docs/usbprobe.md
 FRAME_BUILT = 0x400275A2                # the builder's sixteen passes are done
 FRAME = 0x80005E60
 FRAME_BYTES = 2688
@@ -114,24 +117,34 @@ MIRROR, MIRROR_BYTES = 0x800068E4, 202  # the modulated per-track values the bui
 KIT_POINTER, KIT_SYNC =0x800052A0, 0x40025AF4   # the live kit; its sixteen-track sync
 TRACK_SYNC, SOUND_STRIDE = 0x4002549C, 1163      # (sound, track) -> the mirror; kit + 52 + 1163 t
 MIRROR_TYPE, MIRROR_STRIDE =0x80003AF0 + 3468, 153   # the builder's per-track type byte
-STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400   # above BSS (0x466b74d0); Machine.write maps it
+STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400   # above BSS (0x466b84d0); Machine.write maps it
 GET_SHORT_NAME = 0x400372DA             # getShortName(this, id): record + 0x30
-SET_PIXEL = 0x40113B90                  # Bitmap::setPixel(bitmap, x, y, on), docs/display-path.md
-PARAM_TABLE, PARAM_RECORDS, PARAM_BYTES = 0x401F7F94, 321, 60
+SET_PIXEL = 0x40113E70                  # Bitmap::setPixel(bitmap, x, y, on), docs/display-path.md
+PARAM_TABLE, PARAM_RECORDS, PARAM_BYTES = 0x401F83A4, 321, 60
 
 
-BLK_READ, BLK_WRITE = 0x4012C59A, 0x4012C780
-BLK_READY, BLK_SECTORS = 0x4461B68C, 0x4461B6B0
+BLK_READ, BLK_WRITE = 0x4012C87A, 0x4012CA60
+BLK_READY, BLK_SECTORS = 0x4461C68C, 0x4461C6B0
 STORE_SECTOR = 0x600000
 REPLY_TAIL = 0x80005E40
 ROUTE_OFFSET = 0xA5A                     # the frame's per-track routing words (docs/link-research.md)
-TDM_TX, TDM_RX = 0x4E6E0100, 0x4E6DF100
+TDM_TX, TDM_RX = 0x4E6E8100, 0x4E6E7100  # OS 1.12 (1.11: 0x4E6E0100, 0x4E6DF100); checked below
+TDM_OPERAND = 0x4002608A                  # stock's addi.l #<TX base> in the SSI ISR (both OSes)
+
+
+def check_tdm(machine):
+    """the fake DSP must use the buffers stock's SSI ISR really uses, read from the running
+    image, never a constant that could agree with a stale one in the mod (OS 1.12 port bug)"""
+    tx = struct.unpack(">I", machine.read(TDM_OPERAND, 4))[0]
+    if (tx, tx - 0x1000) != (TDM_TX, TDM_RX):
+        raise AssertionError(f"stock's TDM TX base is {tx:#010x}, the harness uses {TDM_TX:#010x}")
 
 
 def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
     """the scenario's run: -> what was checked (see the link16: step)"""
     import random
     from unicorn import UC_HOOK_CODE
+    check_tdm(machine)
     # the +Drive, fresh for each scenario; the hooks once per machine
     shared = link16.__dict__.setdefault("shared", {})
     disk: dict[int, bytes] = {}
@@ -165,6 +178,9 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         for va in (BLK_READ, BLK_WRITE):
             machine.write(va, bytes.fromhex("70004e75"))
             uc.hook_add(UC_HOOK_CODE, blk, begin=va, end=va)
+        # the translated code dropped: a snapshot whose build polled the +Drive in the warm-up had stock's driver
+        # translated already, and ran it, not the two instructions (its eDMA read crashed the emulator on 1.12)
+        machine.flush()
     machine.write(BLK_READY, struct.pack(">I", 1))
     machine.write(BLK_SECTORS, struct.pack(">I", 0x3A00000))   # 29 GiB
 
@@ -593,9 +609,9 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         booted = long("smp_booted") == 2 and returned_d0() == n0
         # the track: the active one a SLICE track on SAMP 1 (slot 0), its page up
         kit_ = struct.unpack(">I", machine.read(0x800052A0, 4))[0]
-        trk = machine.read(0x42431A6C, 1)[0] & 15
+        trk = machine.read(0x42432A6C, 1)[0] & 15
         snd_ = kit_ + 52 + 1163 * trk
-        rec_ = struct.unpack(">3i", machine.read(0x401F7F94 + 60 * SM.SAMP_REC, 12))
+        rec_ = struct.unpack(">3i", machine.read(0x401F83A4 + 60 * SM.SAMP_REC, 12))
         machine.write(snd_ + 0xDE, bytes([13]))
         machine.write(snd_ + 20 + 2 * rec_[1], struct.pack(">H", (1 + (rec_[2] >> 8)) << 8))
         item = SENTINEL + 0x3000                # (above the call stack)
@@ -1659,6 +1675,17 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
     return out
 
 
+def frames_va(root: pathlib.Path) -> int:
+    """the audio frame counter (FRAMES, 1,500 a second) as this tree's slice.c defines it: OS 1.12 moved
+    it, so it is read from the ported source, not written here"""
+    import re
+    src = (root / "csrc/sampler/slice.c").read_text()
+    m = re.search(r"#define FRAMES \(\*\(volatile u32 \*\)(0x[0-9A-Fa-f]+)u\)", src)
+    if not m:
+        raise SystemExit("--frame-clock: no FRAMES define in csrc/sampler/slice.c")
+    return int(m.group(1), 16)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--build", default="out/waverider-m5")
@@ -1686,6 +1713,10 @@ def main() -> int:
                         "0x40025e36 preempting whatever runs), as on the unit, where it takes "
                         "about 55 %% of the ColdFire's time (docs/timing-model.md). 0: only "
                         "`frame:` steps enter it, as before")
+    p.add_argument("--frame-clock", action="store_true",
+                   help="2026-11-15: the audio frame counter (FRAMES) moves with the UI's instructions at "
+                        "digikit's instruction clock (emulib.panel.Panel.frame_clock); without it, and without "
+                        "--isr-frame, it stands still and FRAMES-timed notes and redraws never move")
     p.add_argument("--stack-at", action="append", default=[], metavar="VA",
                    help="at every entry to VA, the code addresses on the stack: who calls it")
     p.add_argument("--regs-last", type=int, default=0, metavar="N",
@@ -1698,7 +1729,7 @@ def main() -> int:
     p.add_argument("--pixel-callers", default=None, metavar="X0,Y0,X1,Y1",
                    help="for every setPixel inside the box, the code addresses on the stack: who draws it")
     p.add_argument("--panel-writers", default=None, metavar="X0,Y0,X1,Y1",
-                   help="every write to the two panel buffers (0x44622bc8, 0x44622fc8; 16 B a row) "
+                   help="every write to the two panel buffers (0x44623bc8, 0x44623fc8; 16 B a row) "
                         "inside the pixel box, with the code addresses on the stack")
     p.add_argument("--set-d0-at", action="append", default=[], metavar="VA:VALUE",
                    help="set d0 to VALUE each time VA is reached (a stock condition this "
@@ -1726,14 +1757,14 @@ def main() -> int:
         # pending normal channel-50 callback, which forces vector 191, the audio ISR). The
         # emulator has no DSP to send the marker, so do what its success path does: the
         # pending callbacks into vectors 168 and 170, cleared, and the aligned flag set
-        pend170, pend168 = machine.long(0x42C4BAF4), machine.long(0x42C4BAF8)
-        if machine.long(0x400002A8) == 0x400D5470 and pend170:
+        pend170, pend168 = machine.long(0x42C4CAF4), machine.long(0x42C4CAF8)
+        if machine.long(0x400002A8) == 0x400D55D4 and pend170:
             machine.write(0x400002A8, struct.pack(">I", pend170))
-            machine.write(0x42C4BAF4, b"\0\0\0\0")
+            machine.write(0x42C4CAF4, b"\0\0\0\0")
             if pend168:
                 machine.write(0x400002A0, struct.pack(">I", pend168))
-                machine.write(0x42C4BAF8, b"\0\0\0\0")
-            machine.write(0x42C4BAFC, b"\x01")
+                machine.write(0x42C4CAF8, b"\0\0\0\0")
+            machine.write(0x42C4CAFC, b"\x01")
             print(f"  audio ISR at its real rate: one frame every {a.isr_frame:,} instructions; "
                   f"vector 170 -> {pend170:#010x} (the alignment's pending callback), vector 191 -> {machine.long(0x400002FC):#010x}")
     stock = open(os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin"), "rb").read()
@@ -1853,7 +1884,7 @@ def main() -> int:
             pc = uc.reg_read(K.UC_M68K_REG_PC)
             sp = uc.reg_read(K.UC_M68K_REG_A7)
             stack = struct.unpack(">24I", bytes(uc.mem_read(sp, 96)))
-            chain = " ".join(f"{v:08x}" for v in stack if 0x40000400 <= v < 0x40220000)[:44]
+            chain = " ".join(f"{v:08x}" for v in stack if 0x40000400 <= v < 0x4022053f)[:44]
             what = "w" if kind == UC_MEM_WRITE else "r"
             key = f"{what} +{address - va:#x} pc {pc:#010x} <- {chain}"
             access[key] = access.get(key, 0) + 1
@@ -1877,7 +1908,7 @@ def main() -> int:
             if x0 <= x <= x1 and y0 <= y <= y1:
                 sp = uc.reg_read(K.UC_M68K_REG_A7)
                 stack = struct.unpack(">64I", bytes(uc.mem_read(sp, 256)))
-                chain = " ".join(f"{v:08x}" for v in stack if 0x40000400 <= v < 0x40310000 or 0x4670C000 <= v < 0x4670D000)
+                chain = " ".join(f"{v:08x}" for v in stack if 0x40000400 <= v < 0x40311000 or 0x4670C000 <= v < 0x4670D000)
                 key = chain.split(" ")[:6]
                 pixels[" ".join(key)] = pixels.get(" ".join(key), 0) + 1
         uc.hook_add(UC_HOOK_CODE, pixel, begin=SET_PIXEL, end=SET_PIXEL)
@@ -1887,16 +1918,16 @@ def main() -> int:
         px0, py0, px1, py1 = (int(v) for v in a.panel_writers.split(","))
 
         def panel_write(pc, address, value, size):
-            for base in (0x44622BC8, 0x44622FC8):
+            for base in (0x44623BC8, 0x44623FC8):
                 off = address - base
                 if 0 <= off < 1024:
                     y, bx = off // 16, off % 16
                     if py0 <= y <= py1 and px0 // 8 <= bx <= px1 // 8:
                         sp = uc.reg_read(K.UC_M68K_REG_A7)
                         stack = struct.unpack(">64I", bytes(uc.mem_read(sp, 256)))
-                        chain = [f"{pc:08x}"] + [f"{v:08x}" for v in stack if 0x40000400 <= v < 0x40310000][:7]
+                        chain = [f"{pc:08x}"] + [f"{v:08x}" for v in stack if 0x40000400 <= v < 0x40311000][:7]
                         panel_writers[" ".join(chain)] = panel_writers.get(" ".join(chain), 0) + 1
-        machine.watch_writes(0x44622BC8, 0x44622FC8 + 1024, panel_write)
+        machine.watch_writes(0x44623BC8, 0x44623FC8 + 1024, panel_write)
 
     # who calls VA: the code addresses on the stack at its entry, deepest first
     stacks: dict[str, int] = {}
@@ -1904,7 +1935,7 @@ def main() -> int:
         def stacked(uc_, address, size, user):
             sp = uc.reg_read(K.UC_M68K_REG_A7)
             words = struct.unpack(">256I", bytes(uc.mem_read(sp, 1024)))
-            chain = " ".join(f"{v:08x}" for v in words if 0x40000400 <= v < 0x40310000)
+            chain = " ".join(f"{v:08x}" for v in words if 0x40000400 <= v < 0x40311000)
             key = f"{address:#010x}: " + " ".join(chain.split(" ")[:12])
             stacks[key] = stacks.get(key, 0) + 1
         uc.hook_add(UC_HOOK_CODE, stacked, begin=int(va, 0), end=int(va, 0))
@@ -1938,6 +1969,35 @@ def main() -> int:
         def took(uc_, address, size, user):
             entry_args[address] = tuple(arg(4 * n) & 0xFFFFFFFF for n in range(1, 6))
         uc.hook_add(UC_HOOK_CODE, took, begin=int(va, 0), end=int(va, 0))
+    # MACHINE SEL's view, as UP / DOWN hand it to the scroll-follow (the down-to: step)
+    msel_view: dict[str, int] = {}
+    down_to: list[list] = []
+    popups: list[list] = []
+    screen_obj = json.loads((root / "src/dnfw/mods/waverider_code.json").read_text())["layout"].get("wr_screen_obj")
+
+    def view_of(vt: int) -> int:
+        """the view of class VT in the screen's list, or 0 (as smp_question_up walks it: node +0 the next, +8 the
+        view; the sentinel at screen + 20, the first node at screen + 28)"""
+        def ok(a):
+            return 0x40000000 <= a < 0x48000000 and not a & 3
+        scr = machine.long(screen_obj) if screen_obj else 0
+        if not ok(scr):
+            return 0
+        node = machine.long(scr + 28)
+        for _ in range(32):
+            if not ok(node) or node == scr + 20:
+                return 0
+            v = machine.long(node + 8)
+            if ok(v) and machine.long(v) == vt:
+                return v
+            node = machine.long(node)
+        return 0
+
+    def view_up(vt: int) -> bool:
+        return view_of(vt) != 0
+    until: list[list] = []
+    uc.hook_add(UC_HOOK_CODE, lambda uc_, ad, sz, us: msel_view.__setitem__("view", arg(4) & 0xFFFFFFFF),
+                begin=MSEL_FOLLOW, end=MSEL_FOLLOW)
 
     track_getter5: dict[str, int] = {}
 
@@ -1972,7 +2032,7 @@ def main() -> int:
                 type_writes.append({"step": step_now["name"], "pc": f"{pc:#010x}", "track": t,
                                     "value": v - 256 if v > 127 else v, "size": size,
                                     "stack": [f"{x:#010x}" for x in stack
-                                              if 0x40000400 <= x < 0x40310000][:8]})
+                                              if 0x40000400 <= x < 0x40311000][:8]})
     if a.watch_types:
         machine.watch_writes(type_lo - 3, type_hi, type_write)
 
@@ -2051,6 +2111,10 @@ def main() -> int:
             uc_.reg_write(K.UC_M68K_REG_D0, val & 0xFFFFFFFF)
         uc.hook_add(UC_HOOK_CODE, set_d0, begin=va, end=va)
     panel = Panel(machine, png_dir=str(png_dir))
+    if a.frame_clock:
+        if a.isr_frame:
+            raise SystemExit("--frame-clock with --isr-frame: the audio ISR counts the frames itself")
+        panel.frame_clock(frames_va(pathlib.Path(a.root)))
     # v0.33: what a freeze leaves (the owner's and testers' reports): the firmware's own fault
     # reporter (V%02x M%x P%08x: an exception), memory the CPU touched outside every mapped
     # region, and `alive` checkpoints (frames composed so far, the CPU's PC: a run whose
@@ -2060,7 +2124,7 @@ def main() -> int:
     def fault_reporter(uc_, address, size, user):
         sp = uc.reg_read(K.UC_M68K_REG_A7)
         # v0.34: the handler's argument is the exception frame (the default handler 0x40001252
-        # saves SP at 0x4058d164 and passes it): its format/vector word and the faulting PC
+        # saves SP at 0x4058e164 and passes it): its format/vector word and the faulting PC
         frame = struct.unpack(">I", bytes(uc.mem_read(sp + 4, 4)))[0]
         fv = struct.unpack(">H", bytes(uc.mem_read(frame, 2)))[0]
         reported.append({"at": len(alive), "step": step_now["name"], "ret": f"{struct.unpack('>I', bytes(uc.mem_read(sp, 4)))[0]:#010x}",
@@ -2068,11 +2132,12 @@ def main() -> int:
                          "a2": f"{uc.reg_read(K.UC_M68K_REG_A2):#010x}",
                          "stack": bytes(uc.mem_read(sp, 96)).hex()})
     alive = []
-    uc.hook_add(UC_HOOK_CODE, fault_reporter, begin=0x4011EA6A, end=0x4011EA6A)
+    first_frame_at = None
+    uc.hook_add(UC_HOOK_CODE, fault_reporter, begin=0x4011ED4A, end=0x4011ED4A)
     # v0.38: a free() of an address on the running stack (blskk's crash: stock grew a vector
     # slc_keynotes had put on its stack, and freed the stack buffer to the heap; the heap is
     # then corrupt and the unit crashes later, anywhere). Every heap free goes through
-    # 0x40120270 (operator delete 0x4001a0d2 jumps there); its pointer at sp + 4
+    # 0x40120550 (operator delete 0x4001a0d2 jumps there); its pointer at sp + 4
     stack_frees = []
 
     def at_free(uc_, address, size, user):
@@ -2087,7 +2152,7 @@ def main() -> int:
     # per-instruction hook while inside it (the hook is added at the entry and removed at the
     # rte, so the UI's own run stays uncounted and fast); the worst, the mean, and how many
     # ran past F (an overrun: on the unit the next frame's interrupt is late and the UI starves)
-    isr = {"delivered": 0, "cost": [], "overruns": 0, "frames0": machine.long(0x4058E8D4), "in": [0], "h": [None]}
+    isr = {"delivered": 0, "cost": [], "overruns": 0, "frames0": machine.long(0x4058F8D4), "in": [0], "h": [None]}
     ssi = machine.ev.get("ssi0_dma")
     if ssi is not None:
         def isr_tick(uc_, address, size, user):
@@ -2121,12 +2186,90 @@ def main() -> int:
             panel.let_go(FUNC)
         elif step in KEYS:
             panel.tap(KEYS[step])
+        elif step.startswith("until-call:"):
+            # until-call:VA:WANT[:MOST] (2026-11-14, the 1.12 gate): 10 M at a time until VA() returns WANT, at most MOST
+            # times: a state waited for, not a time (a save's bar and message last as long as the save does). Not a
+            # direct call (the JSON's direct_calls are the steps' own probes); the JSON's until: [VA, WANT, rounds, d0]
+            parts = step.split(":")
+            fn, want = int(parts[1], 0), int(parts[2], 0)
+            most, rounds, got = int(parts[3]) if len(parts) > 3 else 100, 0, None
+            while rounds < most:
+                panel.settle(10_000_000)
+                rounds += 1
+                guest_call(fn)
+                got = returned["d0"]
+                got = got - (1 << 32) if got & 0x80000000 else got
+                if got == want:
+                    break
+            until.append([parts[1], want, rounds, got])
+            print(f"  until {parts[1]}() == {want}: {rounds} x 10 M, d0 = {got}")
+        elif step.startswith("view-words:"):
+            # view-words:VT:N -- the first N longs of the view of class VT now up (none: []), into the JSON's popups
+            _, vt_, n_ = step.split(":")
+            v_ = view_of(int(vt_, 0))
+            popups.append([step, v_ and f"{v_:#x}", [machine.long(v_ + 4 * k) for k in range(int(n_))] if v_ else []])
+        elif step.startswith(("poke-ret:", "yes-while:", "until-class:")):
+            # (2026-11-14, the 1.12 gate: question walks stock's popups by state, whatever the project shows)
+            # poke-ret:FN:OFF:HEX -- HEX at FN() + OFF (an object only a stock call gives, the project, say);
+            # yes-while:VT[:MOST] -- YES while a view of class VT is on the screen (each question answered);
+            # until-class:VT:WANT[:MOST] -- 10 M at a time until a view of class VT is up (1) or not (0).
+            # The views as smp_question_up walks them (csrc/sampler/rec.c). The JSON's popups: [step, rounds, up]
+            parts = step.split(":")
+            if parts[0] == "poke-ret":
+                guest_call(int(parts[1], 0))
+                at_ = (returned["d0"] + int(parts[2], 0)) & 0xFFFFFFFF
+                machine.write(at_, bytes.fromhex(parts[3]))
+                popups.append([step, 0, f"{at_:#x}"])
+            else:
+                vt, rounds = int(parts[1], 0), 0
+                if parts[0] == "yes-while":
+                    most = int(parts[2]) if len(parts) > 2 else 5
+                    while rounds < most and view_up(vt):
+                        panel.tap(KEYS["yes"])
+                        panel.settle(20_000_000)
+                        rounds += 1
+                else:
+                    want, most = bool(int(parts[2], 0)), int(parts[3]) if len(parts) > 3 else 100
+                    while rounds < most and view_up(vt) != want:
+                        panel.settle(10_000_000)
+                        rounds += 1
+                popups.append([step, rounds, view_up(vt)])
+                print(f"  {step}: {rounds} rounds, up {view_up(vt)}")
+        elif step.startswith("down-to:"):
+            # down-to:TYPE[:MOST] (2026-11-14, the 1.12 gate): DOWN in MACHINE SEL until the cursor's row is TYPE,
+            # read as stock reads it (0x4005b162(view)), at most MOST presses; not a count of rows, which is the
+            # snapshot's list (1.11's gate snapshot holds v0.14's rows, a per-build one this build's). The JSON's
+            # down_to: [TYPE, presses, the row's type] each
+            parts = step.split(":")
+            want, most = int(parts[1], 0), int(parts[2]) if len(parts) > 2 else 40
+            presses, row = 0, None
+            while presses < most:
+                panel.tap(KEYS["down"])
+                presses += 1
+                if "view" not in msel_view:
+                    raise SystemExit("down-to: no MACHINE SEL view seen (is MACHINE SEL open?)")
+                guest_call(MSEL_ROW_TYPE, msel_view["view"])
+                row = returned["d0"]
+                row = row - (1 << 32) if row & 0x80000000 else row
+                if row == want:
+                    break
+            down_to.append([want, presses, row])
+            print(f"  down-to {want}: {presses} DOWN, the row's type {row}")
         elif step.startswith("png:"):
             shots[step[4:]] = panel.screen(step[4:])
         elif step.startswith("alive:"):          # v0.33: a liveness checkpoint
             alive.append({"name": step[6:], "frames": panel.frames(), "pc": f"{uc.reg_read(K.UC_M68K_REG_PC):#010x}"})
         elif step.startswith("wait:"):
             panel.settle(int(float(step[5:]) * 1_000_000))
+        elif step.startswith("firstframe:"):
+            # the first frame after the resume comes when it comes (it moved by a fixed 20 K
+            # instructions with a build's code, and by 20 M with the harness's own stepping):
+            # wait for it, up to a bound, rather than for a fixed time
+            limit = int(float(step[11:]) * 1_000_000)
+            while panel.frames() == 0 and panel.ran < limit:
+                if panel.settle(min(1_000_000, limit - panel.ran)) == 0:
+                    break
+            first_frame_at = panel.ran if panel.frames() else None
         elif step.startswith("turn:"):
             _, enc, delta = step.split(":")
             panel.push_and_turn(int(enc), int(delta))
@@ -2227,7 +2370,7 @@ def main() -> int:
             print(f"  sysex: {len(msgs)} message(s), {len(sent)} repl(ies), {total:,} instructions")
         elif step.startswith("seq:"):
             # v0.38: seq:N, N sequencer ticks (PLAY pressed first: the trigs, the arp and its
-            # notes run). The sequencer's timer ISR (0x400d987a, vector 121) never fires here
+            # notes run). The sequencer's timer ISR (0x400d99de, vector 121) never fires here
             # (the timers are deferred), so it is entered as the interrupt would (an exception
             # frame; its rte returns to the sentinel), four entries a tick (emu_jump.py's
             # measure), the UI running between ticks
@@ -2275,7 +2418,7 @@ def main() -> int:
             (png_dir / f"link16_{scenario}.json").write_text(json.dumps(result, indent=1))
             print(f"  link16 {scenario}: {json.dumps({k: v for k, v in result.items() if k != 'log'})}")
         elif step.startswith("addl:"):
-            # v0.40: addl:VA:N, N added to the u32 at VA (the frame counter 0x4058e8d4 moved
+            # v0.40: addl:VA:N, N added to the u32 at VA (the frame counter 0x4058f8d4 moved
             # on as the audio interrupt would, without running it)
             _, va, n = step.split(":")
             machine.write(int(va, 0), struct.pack(">I", (machine.long(int(va, 0)) + int(n, 0)) & 0xFFFFFFFF))
@@ -2362,14 +2505,14 @@ def main() -> int:
               "setter_writes": writes,
               "mirror_type_writes": mirror_writes, "type_writes": type_writes,
               "direct_calls": calls_made,
-              "frames": frames, "memory": mems, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
-              "screen_frames": panel.frames() - frames_at_reset[0],
+              "frames": frames, "memory": mems, "down_to": down_to, "until": until, "popups": popups, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
+              "screen_frames": panel.frames() - frames_at_reset[0], "first_frame_at": first_frame_at,
               "panel_writers": panel_writers, "items": items,
               "alive": alive, "fault_reports": reported, "stack_frees": stack_frees[:10],
               "isr": None if ssi is None else {
                   "frame_instructions": a.isr_frame, "delivered": isr["delivered"],
                   "vector170": ssi.vector170, "vector191": ssi.vector191, "requests": ssi.requests,
-                  "frames": machine.long(0x4058E8D4) - isr["frames0"],
+                  "frames": machine.long(0x4058F8D4) - isr["frames0"],
                   "cost_max": max(isr["cost"], default=0),
                   "cost_mean": round(sum(isr["cost"]) / len(isr["cost"])) if isr["cost"] else 0,
                   "overruns": isr["overruns"]},

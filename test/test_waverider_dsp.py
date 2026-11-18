@@ -158,15 +158,15 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     # Waverider's wavetables went in v0.11. v0.26: the Machinedrum's shipped tables (the
     # host's pitch table, zpack) are not in the image: the ColdFire sends them at power-on.
     # v0.45: PING's tables went with PING
+    # 2026-11-12: the DT2 reader's coefficients (v0.18) went to L2 and L1
     assert [a for _, a, _ in ddr] == [dsp.SHFT_TABLES_DDR,                      # v0.31: AMD's sine
                                       dsp.PERC_TABLES_DDR,
-                                      dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
                                       dsp.MD_TABLES_DDR,
                                       dsp.MD_DELAY_DDR,                         # v0.32: P-I's lines, zeroed
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[-1][2])
-    assert not any(ddr[3][2]) and not any(ddr[4][2])      # the MD's tables (the DSP fills them), P-I's lines
-    assert dsp.MD_TABLES_DDR + len(ddr[3][2]) <= dsp.MD_DELAY_DDR
+    assert not any(ddr[2][2]) and not any(ddr[3][2])      # the MD's tables (the DSP fills them), P-I's lines
+    assert dsp.MD_TABLES_DDR + len(ddr[2][2]) <= dsp.MD_DELAY_DDR
     # v0.32: the voices' working state in L2 (zeros), inside the room proven on units
     from dnfw.perc import live as PL
     L = PL.layout()
@@ -203,7 +203,7 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
     spans = dsp.l2_spans()
     data = spans[2:]                             # v0.32: the voices' state, zeros, below the code
     spans = spans[:2]
-    assert [(at, len(pl)) for _, at, pl in spans] == [(dsp.PERC_L2_LOAD, dsp.PERC_L2_SPAN),
+    assert [(at, len(pl)) for _, at, pl in spans] == [(dsp.PERC_L2_LOAD, len(dsp.objects()["perc"]) + dsp.PERC_PAD),
                                                       (dsp.SMP_L2_LOAD, dsp.SMP_L2_SPAN)]
     for _w, at, payload in data:
         assert dsp.L2_IMAGE_END + 0x10000 <= at and at + len(payload) <= dsp.PERC_L2_LOAD
@@ -225,8 +225,30 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
     for b in bootstream.walk(stock7).blocks:
         if b.count and 0x20000000 <= b.target < 0x20100000:
             assert b.target + b.count <= dsp.L2_IMAGE_END
-    assert dsp.PERC_SW == 0xBE0000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
+    assert dsp.PERC_SW == 0xBD6000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
     assert dsp.SMP_SW == 0xBF1800 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
+
+
+def test_the_sample_readers_coefficients_are_loaded_where_it_reads_them():
+    # 2026-11-12: the interpolator's rows in L2 after the main mix's tap (inside the range proven
+    # on units), the decimator's four and the gain in L1 at REGION's head, then the taps' line
+    from dnfw.sampler import live as SLv
+    from dnfw.sampler import program as SP
+    L, tb = SLv.layout(), SP.tables_bytes()
+    assert L.T["poly"] == dsp.SMP_TABLES_L2 and L.T["decim"] == dsp.SMP_DTAB_DM and L.T["gain"] == dsp.SMP_DTAB_DM + 16
+    l2 = {a: p for _, a, p in dsp.l2_spans()}
+    assert l2[dsp.SMP_TABLES_L2] == tb[:SP.POLY_BYTES]
+    assert dsp.MAIN_TAP_L2 + dsp.MAIN_TAP_BYTES <= dsp.SMP_TABLES_L2
+    assert 0x20088400 <= dsp.SMP_TABLES_L2 and dsp.SMP_TABLES_L2 + SP.POLY_BYTES <= 0x200B0000
+    l2s = sorted((a, a + len(p)) for _, a, p in dsp.l2_spans())
+    assert all(hi <= lo for (_, hi), (lo, _) in zip(l2s, l2s[1:]))   # no two L2 spans overlap
+    sp = dsp.spans()
+    assert dsp.SMP_DTAB_DM == dsp.REGION[0] and sp[0][1] == dsp.dm_to_load(dsp.SMP_DTAB_DM)
+    head = sp[0][2]
+    assert head[:SP.DTAB_BYTES] == tb[SP.POLY_BYTES:] and not any(head[SP.DTAB_BYTES:])
+    assert dsp.SMP_DTAB_DM + SP.DTAB_BYTES <= dsp.SMP_LINE_DM - 8                   # the line's switch, its tag
+    assert L.line == dsp.SMP_LINE_DM and dsp.SMP_LINE_DM + 4 * SP.LINE_WORDS <= dsp.STATE_DM
+    assert dsp.SMP_LINE_DM + 4 * SP.LINE_WORDS <= dsp.REGION[0] + len(head)
 
 
 def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
@@ -294,11 +316,20 @@ def test_the_idle_stub_is_placed_and_returns_where_its_source_says():
                       "DM(0x2c49e0) = R9;", "DM(0x2c59e0) = R9;"}
 
 
+def test_the_l2_layout_keeps_its_bounds():
+    """the layout proposal: PERC from 0x200AC000 to the sample machines' code, above the room kept free
+    (to 0x200AB800) and with nothing of ours from 0x200EA000 up"""
+    assert dsp.PERC_L2_LOAD == 0x200AC000 and dsp.SMP_L2_LOAD == 0x200E3000
+    assert dsp.MAIN_TAP_L2 + dsp.MAIN_TAP_BYTES <= dsp.L2_KEPT_FREE_END == 0x200AB800 <= dsp.PERC_L2_LOAD
+    assert dsp.SMP_L2_LOAD + dsp.SMP_L2_SPAN <= dsp.L2_OURS_END == 0x200EA000 <= dsp.L2_NOCACHE
+    assert len(dsp.objects()["perc"]) + dsp.PERC_PAD <= dsp.PERC_L2_SPAN
+
+
 def test_the_block_counter_goes_on_to_perc():
     spec = json.loads((SHARC / "block_count.json").read_text(encoding="utf-8"))
     assert int(spec["load_sw"], 16) == dsp.COUNT_SW == 0x16F600
     be = bytes.fromhex(spec["object_parcels_be"])
-    assert be[spec["instruction_offsets"][-1]:].hex() == "063e00be0000"   # JUMP 0xbe0000, PERC in L2 (v0.11)
+    assert be[spec["instruction_offsets"][-1]:].hex() == f"063e00{dsp.PERC_SW:06x}"   # JUMP PERC_SW, PERC in L2
     src = [ln.split("//", 1)[0].strip() for ln in (SHARC / "block_count.asm").read_text().splitlines()]
     stores = {c for c in src if c.startswith("DM(")}
     assert stores == {"DM(0x2de11c) = R8;", "DM(0x2de120) = R9;", "DM(0x2de118) = R8;",

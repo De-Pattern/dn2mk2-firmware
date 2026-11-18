@@ -456,6 +456,17 @@ def tables_bytes() -> bytes:
     return p + z
 
 
+_TABLE_SUM: list[int] = []
+
+
+def table_sum() -> int:
+    """the checksum READY carries for this build's tables (dnfw.sampler.machines.table_sum of tables_bytes)"""
+    if not _TABLE_SUM:
+        from ..sampler.machines import table_sum as _sum
+        _TABLE_SUM.append(_sum(tables_bytes()))
+    return _TABLE_SUM[0]
+
+
 def _shift_r(p: Prog, d: int, a: int, s: int, arith: bool = False) -> None:
     """Rd = (A|L)SHIFT Ra BY Rs, Rs's low byte a signed count in -31..31."""
     p.e(f"R{d} = {'ASHIFT' if arith else 'LSHIFT'} R{a} BY R{s};")
@@ -563,6 +574,15 @@ def table_fill(p: Prog, L: Layout) -> None:
         p.e("COMP(R0, R12);")
         p.jump("NE", skip) if not p.run else None
         if p.run and p.r[0] != TABLE_MAGIC:
+            return
+        # 2026-11-12: and READY's checksum is this build's (dnfw.sampler.machines TABLE_SUM_AT): a ready word another
+        # build left in the pool's DDR is never this one, so the decode waits for this build's READY
+        from ..sampler.machines import TABLE_SUM_AT
+        p.ld(0, L.ready + TABLE_SUM_AT)
+        p.iconst(12, table_sum())
+        p.e("COMP(R0, R12);")
+        p.jump("NE", skip) if not p.run else None
+        if p.run and (p.r[0] or 0) & 0xFFFFFFFF != table_sum():
             return
     else:
         skip = None

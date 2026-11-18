@@ -23,8 +23,9 @@ does. Every choice above lands in a `BOOT` chunk of the appended data area.
   intro's own frame counter, so the mark is scattered by the tunnel like the logo.
 - The images are **appended past the end of MAIN OS** and copied above BSS at
   boot, as data chunks in the platform's area (`dnfw.mods.platform`); the stamp
-  itself is a `CODE` chunk at `0x46708000`. Until 2026-09-30 the stamp sat in the
-  cave at `0x402dfa1c` behind a copy stub of its own on the start-up hook, which
+  itself is a `CODE` chunk at `0x4670E000` (`0x46708000` until 2026-11-16, under 1.12's
+  +Drive bounce buffer: `scripts/gen_bootscreen_code.py`). Until 2026-09-30 the stamp sat in the
+  cave at `0x402dff5c` behind a copy stub of its own on the start-up hook, which
   kept this mod apart from lfo4 and lfowaves. The stamp's bytes are unchanged.
 - **Seen under the emulator** frame by frame against stock, and **on the
   instrument on 2026-09-17**: the owner's Digitone II booted and played the
@@ -65,6 +66,8 @@ IMAGE_BYTES = 1024
 STOCK_TUNNEL = (128.0, 64.0)
 
 SPEC = json.loads((pathlib.Path(__file__).with_name("bootscreen_code.json")).read_text())
+# Stock 1.11's addresses: upstream v0.57's generated bootscreen_code.json as it was.
+SPEC_111 = json.loads((pathlib.Path(__file__).with_name("bootscreen_code_111.json")).read_text())
 BASE = 0x40000400
 
 
@@ -130,7 +133,7 @@ def ascii_frames(lit, **options) -> tuple[list[bytes], int]:
 
 def _images(grids, W: int) -> list[bytes]:
     """Frames -> images for the ANIM chunk, stored upside down: the plain blit
-    that shows them (`0x401157fc`) turns the source over vertically, where the
+    that shows them (`0x40115adc`) turns the source over vertically, where the
     tunnel's sampler does not. Measured under the emulator, which runs the
     firmware's own blit, 2026-09-18."""
     return [image_from_pixels({(i % W, H - 1 - i // W) for i, v in enumerate(g) if v}) for g in grids]
@@ -147,17 +150,30 @@ def spin_frames(lit, **options) -> tuple[list[bytes], int]:
     return _images(grids, batspin.W), options.get("resolve", 120)
 
 
+def spec_for(content: bytes) -> dict:
+    """This mod's addresses for MAIN OS CONTENT: 1.11's on a 1.11 image, else 1.12's."""
+    return SPEC_111 if platform.spec_for(content) is platform.SPEC_111 else SPEC
+
+
+def _content(firmware) -> bytes:
+    section = firmware.container.find(SECTION) if firmware is not None else None
+    return section.unpack() if section is not None else b""
+
+
 def extents(firmware, area_length: int = 0) -> list[Extent]:
+    content = _content(firmware)
+    spec = spec_for(content)
     off = lambda va: va - BASE
     return [
-        Extent(SECTION, off(SPEC["intro_va"]), 8, "intro hook: the mark"),
-        Extent(SECTION, off(SPEC["tunnel_x_va"]) + 2, 4, "tunnel scale x"),
-        Extent(SECTION, off(SPEC["tunnel_y_va"]) + 2, 4, "tunnel scale y"),
-    ] + platform.extents(area_length)
+        Extent(SECTION, off(spec["intro_va"]), 8, "intro hook: the mark"),
+        Extent(SECTION, off(spec["tunnel_x_va"]) + 2, 4, "tunnel scale x"),
+        Extent(SECTION, off(spec["tunnel_y_va"]) + 2, 4, "tunnel scale y"),
+    ] + platform.extents(area_length, platform.spec_for(content))
 
 
-def ram() -> list[Extent]:
-    return [Extent(RAM, SPEC["load"], len(bytes.fromhex(SPEC["code"])), "the boot-screen stamp")]
+def ram(firmware=None) -> list[Extent]:
+    spec = spec_for(_content(firmware))
+    return [Extent(RAM, spec["load"], len(bytes.fromhex(spec["code"])), "the boot-screen stamp")]
 
 
 def apply(firmware, images: list[bytes], slow: int = 4, fast: int = 3,
@@ -169,35 +185,36 @@ def apply(firmware, images: list[bytes], slow: int = 4, fast: int = 3,
         raise ModError("image has no MAIN OS section")
     base, others = platform.split(section.unpack())
     content = bytearray(base)
+    spec = spec_for(base)          # every address below is this image's
 
-    va, stock = SPEC["intro_va"], SPEC["intro_stock"]
+    va, stock = spec["intro_va"], spec["intro_stock"]
     have = bytes(content[va - BASE:va - BASE + 8]).hex()
     if have != stock:
         raise ModError(f"0x{va:08x} holds {have}, not {stock} (intro copy routine); "
-                       "this mod is for Digitone II 1.11, or the boot screen is already applied")
-    for va, stock_scale in ((SPEC["tunnel_x_va"], STOCK_TUNNEL[0]), (SPEC["tunnel_y_va"], STOCK_TUNNEL[1])):
+                       "this mod is for Digitone II 1.11 or 1.12, or the boot screen is already applied")
+    for va, stock_scale in ((spec["tunnel_x_va"], STOCK_TUNNEL[0]), (spec["tunnel_y_va"], STOCK_TUNNEL[1])):
         have = bytes(content[va - BASE:va - BASE + 6])
         if have[2:] != struct.pack(">f", stock_scale):
             raise ModError(f"tunnel scale at 0x{va:08x} is not stock ({have.hex()})")
 
     chunks = []
     if ascii is not None:
-        chunks.append((SPEC["anim_chunk"].encode(), anim_chunk(*ascii)))
+        chunks.append((spec["anim_chunk"].encode(), anim_chunk(*ascii)))
     if images:
-        chunks.append((SPEC["boot_chunk"].encode(), boot_chunk(images, slow, fast, rush, stop)))
+        chunks.append((spec["boot_chunk"].encode(), boot_chunk(images, slow, fast, rush, stop)))
     if not chunks:
         raise ModError("give a mark (images) or an ASCII animation")
     chunks.append((platform.area.CODE,
-                   platform.area.CodeChunk(SPEC["load"], bytes.fromhex(SPEC["code"])).pack()))
+                   platform.area.CodeChunk(spec["load"], bytes.fromhex(spec["code"])).pack()))
 
-    jmp = b"\x4e\xf9" + struct.pack(">I", SPEC["stamp"]) + b"\x4e\x71"
-    content[SPEC["intro_va"] - BASE:SPEC["intro_va"] - BASE + 8] = jmp
-    for va, scale in ((SPEC["tunnel_x_va"], tunnel[0]), (SPEC["tunnel_y_va"], tunnel[1])):
+    jmp = b"\x4e\xf9" + struct.pack(">I", spec["stamp"]) + b"\x4e\x71"
+    content[spec["intro_va"] - BASE:spec["intro_va"] - BASE + 8] = jmp
+    for va, scale in ((spec["tunnel_x_va"], tunnel[0]), (spec["tunnel_y_va"], tunnel[1])):
         if not 1.0 <= scale <= 65536.0:
             raise ModError(f"tunnel scale {scale} is outside 1..65536")
         content[va - BASE + 2:va - BASE + 6] = struct.pack(">f", scale)
     content = platform.join(bytes(content), others + chunks)
-    blob = content[platform.STOCK_LENGTH:]
+    blob = content[len(base):]
 
     notes = [(f"animation: {len(ascii[0])} frames, looping from {ascii[1]}" if ascii is not None else
               f"{len(images)} image(s), " + ("static" if len(images) == 1 else

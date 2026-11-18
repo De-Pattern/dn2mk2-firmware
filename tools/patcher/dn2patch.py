@@ -2,7 +2,7 @@
 
 It builds the mod from the owner's own files, the same way the gated build was made, and
 the page then checks the result's sha256 against the gated build's. Nothing of Elektron's
-is shipped with it: the DN2 OS 1.11 file is patched, the DT2's DSP image (section 7 of DT2
+is shipped with it: the DN2 OS 1.12 file is patched, the DT2's DSP image (section 7 of DT2
 OS 1.17), the Machinedrum's OS 1.63 and (v0.26 on) the Monomachine's OS 1.32B are read for
 their tables.
 
@@ -114,5 +114,5 @@ def build(dn2: str, dt2: str, md: str, out: str, mnm: str | None = None) -> str:
     from dnfw.cli.main import main
     rc = main(["mods", "apply", dn2, "--mod", "waverider", "-o", out])
     if rc not in (0, None) or not pathlib.Path(out).is_file():
-        raise PatchError("the build stopped (see the log); is that DN2 OS 1.11?")
+        raise PatchError("the build stopped (see the log); is that DN2 OS 1.12?")
     return hashlib.sha256(pathlib.Path(out).read_bytes()).hexdigest()

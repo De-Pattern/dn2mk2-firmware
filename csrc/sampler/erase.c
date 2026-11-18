@@ -1,9 +1,9 @@
 /* v0.39: ERASE MOD DATA (docs/erase-mod-data.md; owner-approved 2026-11-02).
  *
  * Erases exactly the mod's own +Drive regions (docs/memory-map.md's +Drive table) with the
- * eMMC's erase command, the stock block driver's TRIM (0x4012c4b2(sector, count): CMD35
+ * eMMC's erase command, the stock block driver's TRIM (0x4012c792(sector, count): CMD35
  * start, CMD36 end, CMD38 argument 1), in calls of 2,048 sectors (1 MiB) as stock's FORMAT
- * +DRIVE makes them (0x4012f3cc): the call size proven on every unit. Then reads back every
+ * +DRIVE makes them (0x4012f6ac): the call size proven on every unit. Then reads back every
  * header sector and a sampled set across every range: each must read as erased (all 0x00 or
  * all 0xFF, the card's ERASED_MEM_CONT).
  *
@@ -33,13 +33,13 @@
  * link command 28 (link.c); stepped from the UI loop (page.c's wr_poll) about 40 ms a pass.
  *
  * v0.40 (a unit's report: "TRIM ERROR AT 817905", then further on a second try): the stock
- * TRIM returns non-zero only when one of CMD35/36/38 got no answer (its ISR 0x4012b99e sets -1
+ * TRIM returns non-zero only when one of CMD35/36/38 got no answer (its ISR 0x4012bc7e sets -1
  * on the controller's command timeout, CTOE, and on nothing else), and a card answers no
- * CMD35 while it is still programming the previous erase. Stock's own wait for that (0x4012c52c:
+ * CMD35 while it is still programming the previous erase. Stock's own wait for that (0x4012c80c:
  * the DAT0 edge interrupt armed BEFORE DAT0 is tested) leaves a stale post when DAT0 rises in
  * between -- likely after a short TRIM of an unmapped range -- and the next TRIM's wait then
  * returns at once with the card still busy. So before every call we read the eSDHC's present
- * state (PRSSTAT, read-only, as 0x4012c544 does) and call only when the card is idle: DAT0 high,
+ * state (PRSSTAT, read-only, as 0x4012c824 does) and call only when the card is idle: DAT0 high,
  * no command or data inhibit. A call that still fails is tried again after a pause (ER_TRIES in
  * all), as is a verify read; a failure leaves the place it stopped, and asking again (without a
  * restart) carries on from there. */
@@ -53,18 +53,19 @@ typedef unsigned char u8;
 #error "the sampler's constants are passed by the build (dnfw.waverider.cpage)"
 #endif
 
-#define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
-#define BLK_TRIM  ((int (*)(u32, u32))0x4012C4B2u)                  /* (sector, count) -> 0 ok: CMD35/36/38(1) */
-#define BLK_READY (*(volatile u32 *)0x4461B68Cu)
-#define BLK_SECTORS (*(volatile u32 *)0x4461B6B0u)
-#define FRAMES_NOW (*(volatile u32 *)0x4058E8D4u)                   /* 1,500 a second */
+#define BLK_READ  ((int (*)(u32, u32, void *))0x4012C87Au)          /* (sector, bytes, buf) -> 0 ok */
+#define BLK_TRIM  ((int (*)(u32, u32))0x4012C792u)                  /* (sector, count) -> 0 ok: CMD35/36/38(1) */
+#define BLK_READY (*(volatile u32 *)0x4461C68Cu)
+#define BLK_SECTORS (*(volatile u32 *)0x4461C6B0u)
+#define FRAMES_NOW (*(volatile u32 *)0x4058F8D4u)                   /* 1,500 a second */
 /* v0.40: the eSDHC's present state (MCF5441x PRSSTAT): bit 24 DAT0's level (low: the card is
  * busy), bit 1 CDIHB, bit 0 CIHB. Only ever read (stock's TRIM tests the same bit 24) */
 #define SD_PRSSTAT (*(volatile u32 *)0xFC0CC024u)
 #define SD_IDLE(p) (((p) & (1u << 24)) && !((p) & 3u))
 /* the EXT_CSD as the driver read it at power-on (docs/drive-storage-research.md: byte-swapped
- * per word; SEC_COUNT, byte 212, at 0x4e6f11d4), for the status only */
-#define EXT_CSD 0x4E6F1100u
+ * per word; SEC_COUNT, byte 212, at 0x4e6f11d4 in 1.11), for the status only.
+ * OS 1.12: the driver's buffers moved +0x8000 (0x4e6f11d4 -> 0x4e6f91d4, 2 sites each image) */
+#define EXT_CSD 0x4E6F9100u
 #define CSD_BYTE(b) (*(volatile u8 *)(EXT_CSD + ((u32)(b) & ~3u) + (3u - ((u32)(b) & 3u))))
 
 /* the regions, as the files that own them define them */

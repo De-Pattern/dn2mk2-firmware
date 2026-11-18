@@ -11,7 +11,7 @@
  * recorder's slots too. Ours is a region of the eMMC the DN2 never uses: the stock
  * storage code reads and writes nothing above 2,224 MiB (docs/drive-storage-research.md);
  * ours starts at sector 0x600000 (3 GiB): a header sector, then the image. Read and
- * written through the stock block driver (0x4012c59a / 0x4012c780, under its own mutex),
+ * written through the stock block driver (0x4012c87a / 0x4012ca60, under its own mutex),
  * and only inside that region and inside the device.
  *
  * Loading: at power-on (and after a send), the image's directory decides what is read:
@@ -60,9 +60,9 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-#define SYSEX_SEND ((int (*)(const u8 *, u32, void *, u32))0x401233F2u)  /* (buf, len, abort*, port) */
+#define SYSEX_SEND ((int (*)(const u8 *, u32, void *, u32))0x401236D2u)  /* (buf, len, abort*, port) */
 #define PORT_USB 2
-#define FRAMES (*(volatile u32 *)0x4058E8D4u)
+#define FRAMES (*(volatile u32 *)0x4058F8D4u)
 
 /* dnfw.sampler.machines' constants come from the build (cpage.py's defines): SMP_MIRROR,
  * SMP_POOL_DDR, POOL_BYTES, the link's and the pool's, the recorder's, the commands', the
@@ -80,14 +80,18 @@ typedef unsigned char u8;
 _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in our RAM");
 
 #define REPLY_TAIL ((volatile u16 *)0x80005E40u)                    /* 0x800053a4 + 0xa9c: the DSP's status */
-#define TDM_TX(h) ((volatile u32 *)(0x4E6E0100u + ((u32)(h) << 11)))
-#define TDM_RX(h) ((volatile u32 *)(0x4E6DF100u + ((u32)(h) << 11)))
+/* OS 1.12: stock's SSI buffers moved +0x8000 (not BSS's +0x1000): the TX base is the
+ * operand of stock's addi.l at 0x4002608a, 0x4e6e0100 in 1.11 and 0x4e6e8100 in 1.12 (all 8
+ * operand sites in the ISR, same addresses in both images); RX is TX - 0x1000 in both.
+ * port_os112.py's literal scan skips the 0x4e uncached alias, so these were left at 1.11's. */
+#define TDM_TX(h) ((volatile u32 *)(0x4E6E8100u + ((u32)(h) << 11)))
+#define TDM_RX(h) ((volatile u32 *)(0x4E6E7100u + ((u32)(h) << 11)))
 
 #define PROTO 7                                 /* v0.40: FOLDER IN (30), TREE (31): folders in folders; v0.35: DROP (26); v0.31: the library (16..23); v0.22: 400 MB, the recordings' area a hole */
-#define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
-#define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
-#define BLK_READY (*(volatile u32 *)0x4461B68Cu)                    /* the device is up */
-#define BLK_SECTORS (*(volatile u32 *)0x4461B6B0u)                  /* its size, sectors */
+#define BLK_READ  ((int (*)(u32, u32, void *))0x4012C87Au)          /* (sector, bytes, buf) -> 0 ok */
+#define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012CA60u)
+#define BLK_READY (*(volatile u32 *)0x4461C68Cu)                    /* the device is up */
+#define BLK_SECTORS (*(volatile u32 *)0x4461C6B0u)                  /* its size, sectors */
 #ifndef STORE_SECTOR
 #define STORE_SECTOR 0x600000u
 #endif
@@ -733,6 +737,7 @@ static int l_entry __attribute__((section(".data"))) = -1;       /* the entry du
  * power-on, the +Drive's image or not; READY's magic once every chunk checked out */
 #define TBL ((const u8 *)TABLE_LOAD)
 int smp_tables __attribute__((section(".data"))) = 0;   /* 0 not yet, 1 sending, 2 sent, -1 none */
+static u32 tbl_sum __attribute__((section(".data"))) = 0;   /* the shipped bytes' checksum, sent in READY */
 static u32 tbl_bytes(void)
 {
     if (le32(TBL) != TABLE_MAGIC)
@@ -1126,8 +1131,11 @@ void smp_load(void)                             /* load (again) whatever the ima
     smp_hi = header_read();
     dir_ok = smp_hi != 0;
     meta_read();
-    if (smp_tables == 0)                        /* v0.26: the tables, once, first */
+    if (smp_tables == 0) {                      /* v0.26: the tables, once, first */
         smp_tables = tbl_bytes() ? 1 : -1;
+        if (smp_tables == 1)                    /* 2026-11-12: READY's second word (dnfw.sampler.machines TABLE_SUM_AT) */
+            tbl_sum = checksum(TBL + 8, le32(TBL + 4));
+    }
     if (!dir_ok && smp_tables != 1) {
         smp_lstate = L_IDLE;
         return;
@@ -1198,6 +1206,7 @@ static void load_poll(void)
             for (u32 k = 0; k < n; k++)
                 STAGE(0)[k] = 0;
             put_le32(STAGE(0), TABLE_MAGIC);
+            put_le32(STAGE(0) + TABLE_SUM_AT, tbl_sum);     /* this build's tables, not another's (SM.table_sum) */
         } else if (l_kind == K_PREVIEW) {                   /* v0.33: +DRIVE's preview, from the library */
             extern int smp_lib_read(int k, u32 off, u32 bytes, void *buf);
             if (pv_k < 0 || smp_lib_read(pv_k, l_off - pv_off, n, STAGE(0)) != 0) {
@@ -2892,7 +2901,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
 /* -- v0.25: an LFO (or any modulation) on SAMP steps through the loaded samples ----------
  *
  * The ColdFire applies modulation each tick into the per-voice parameter mirror the frame
- * is built from (0x400db22c(mirror); docs/engine-state.md): mirror block b's parameter s
+ * is built from (0x400db390(mirror); docs/engine-state.md): mirror block b's parameter s
  * at the mirror base (MIRROR_CELL) + 34 + 202 b + 2 s, the sound on voice b at 0x800052A8 + 4 b. SAMP
  * modulated over the 128 slots mostly landed on empty ones, so a note played nothing.
  * Here, after the stock apply, a sample machine's modulated SAMP is moved by the same
@@ -2904,13 +2913,13 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
  * changes when you move the default track SAMP value, so the p-lock seems relative"): what
  * the voice is set to is its TARGET cell (the smoother's source, 0x80003af0, the same
  * layout as the mirror; docs/slides.md), which holds the sound's value or the trig's p-lock
- * (stock's lock applier 0x400db092 writes it, and jumps the smoother there). v0.25..v0.39
+ * (stock's lock applier 0x400db1f6 writes it, and jumps the smoother there). v0.25..v0.39
  * took the sound's own SAMP (and SLCE) instead, so a lock was a "modulation" of lock - SAMP,
  * scaled by mod_scale to n/128 of it over the n loaded samples and counted from the track's
  * SAMP: about one sample per 5 or 6 lock values with 20-odd loaded, moving with the track's
  * SAMP. Now the modulation is what the stock apply added on top of the target, and it steps
  * from the target: a locked trig plays its slot (or slice) exactly. */
-#define MOD_APPLY ((void (*)(void *))0x400DB22Cu)
+#define MOD_APPLY ((void (*)(void *))0x400DB390u)
 #define MIRROR_CELL(b, s) ((volatile u16 *)(0x800068E4u + 34u + 202u * (u32)(b) + 2u * (u32)(s)))
 #define TARGET_CELL(b, s) ((volatile u16 *)(0x80003AF0u + 34u + 202u * (u32)(b) + 2u * (u32)(s)))
 #define VOICE_SOUND(b) (*(u8 *volatile *)(0x800052A8u + 4u * (u32)(b)))
@@ -2939,7 +2948,7 @@ static int mod_scale(int k, int n)              /* a stock offset (+-127) -> +-n
 #define SLICE_TYPE 13
 
 /* v0.45 (the owner, v0.44: scrolling SAMP past the loaded samples, trigs played the last
- * loaded one): the frame's smoother (0x400db12a, before this) glides every parameter toward
+ * loaded one): the frame's smoother (0x400db28e, before this) glides every parameter toward
  * the sound's, SAMP and SLCE too, so for a while after SAMP moves, the heard value differs
  * from the set one -- which this code took for modulation and moved onto the loaded slots,
  * at the end of the list clamped to the last one, every frame. A slot number (and a slice)

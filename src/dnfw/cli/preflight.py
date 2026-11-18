@@ -11,11 +11,11 @@ from ..firmware.load import load
 from .files import read_image
 
 NAME = "preflight"
-HELP = "check a build against the stock 1.11 image it came from, before flashing"
+HELP = "check a build against the stock 1.12 image it came from, before flashing"
 
 
 def configure(parser) -> None:
-    parser.add_argument("stock", type=pathlib.Path, help="Elektron's Digitone II OS 1.11 (.syx or .zip)")
+    parser.add_argument("stock", type=pathlib.Path, help="Elektron's Digitone II OS 1.12 (.syx or .zip)")
     parser.add_argument("build", type=pathlib.Path, help="the .syx you intend to flash")
 
 

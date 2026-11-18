@@ -28,11 +28,35 @@ from emu_coupled import Coupled                                 # noqa: E402
 KIT, SOUND_STRIDE = 0x800052A0, 1163
 ONESHOT = 8
 AMP = 10 ** (-34 / 20)
+# 2026-11-15: the link sends each command CMD_REPEAT (8) packets, one command after another
+# (csrc/sampler/link.c, smp_tdm). Four periods after the snapshot resumes, the power-on RAM
+# check (CMD_PROBE) still has 6 or 7 packets to go, and opening the RECORDER queues a MONITOR.
+# An ARM queued behind them waited for their packets, not for the DSP: 7 periods on a clean
+# 1.11/1.12 build (PROBE's rest), 16 on a build that queued the MONITOR before the ARM (PROBE's
+# rest, then the MONITOR). On the unit nobody arms within milliseconds of power-on and
+# of opening the screen, so the setup first runs until QUIET periods in a row carry no command.
+QUIET = 12              # more than two UI passes (about 4.5 M instructions a pass, 1 M a period)
+DRAIN_LIMIT = 200
 
 
 def tone(block):
     s = [AMP * math.sin(2 * math.pi * 440 * (32 * block + k) / 48000) for k in range(32)]
     return s, s
+
+
+def drain(c, cmd_word) -> int | None:
+    """periods until QUIET in a row carried no command packet (the queue empty) -> how many, or
+    None (DRAIN_LIMIT reached, or the emulator stopped)"""
+    quiet = 0
+    for n in range(DRAIN_LIMIT):
+        if not c.period():
+            return None
+        pk = c.last_packet                      # units 2, 3: the words' offset (link.c's UNIT)
+        cmd = pk is not None and ((pk[10] & 0xFFFF) | (pk[11] & 0xFFFF) << 16) == cmd_word
+        quiet = 0 if cmd else quiet + 1
+        if quiet >= QUIET:
+            return n + 1
+    return None
 
 
 def main() -> int:
@@ -60,6 +84,7 @@ def main() -> int:
         c.put32(lay["rec_src"], 0)                              # IN
         if "rec_rstrt" in lay:                                  # (v0.47 did not export it: 0 there)
             c.put32(lay["rec_rstrt"], 0)                        # R.STRT THRES
+        c.drained = drain(c, SM.CMD_OFFSET // 4)                # nothing queued ahead of the ARM
         return c
 
     def state(c):
@@ -83,11 +108,11 @@ def main() -> int:
         arm(c)
         started = run_until(c, 2, 30)                           # (armed and over the threshold at once:
         echoed = c.last_status[1] == (c.long(lay["smp_cmds"]) & 0xFFFF) if started else False   # no armed block seen)
-        report["numbers"]["A"] = {"started_after": started, "status": c.last_status,
+        report["numbers"]["A"] = {"drained_after": c.drained, "started_after": started, "status": c.last_status,
                                   "halt": c.halt, "faults": len(c.faults())}
         print("  A:", report["numbers"]["A"], flush=True)
         report["checks"]["A: THRES 30 (tick -45 dB), a -34 dB tone: the take starts on the ARM"] = bool(
-            started and started <= 6)
+            c.drained and started and started <= 6)
     if "B" in a.only:
         c = setup()
         c.put32(lay["rec_thres"], 110)
@@ -98,11 +123,11 @@ def main() -> int:
             held = all(c.period() and state(c) == 1 for _ in range(8))
         c.put32(lay["rec_thres"], 30)                           # turned down while armed
         started = run_until(c, 2, 30) if armed else None
-        report["numbers"]["B"] = {"armed_after": armed, "held_at_110": held, "started_after_change": started,
+        report["numbers"]["B"] = {"drained_after": c.drained, "armed_after": armed, "held_at_110": held, "started_after_change": started,
                                   "status": c.last_status, "halt": c.halt, "faults": len(c.faults())}
         print("  B:", report["numbers"]["B"], flush=True)
         report["checks"]["B: THRES 110 (tick -5 dB) holds the -34 dB tone back; THRES 30 while armed: it starts"] = bool(
-            armed and held and started and started <= 8)
+            c.drained and armed and held and started and started <= 8)
     ok = all(report["checks"].values()) and bool(report["checks"])
     report["ok"] = ok
     if a.json:

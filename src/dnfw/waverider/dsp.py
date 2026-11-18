@@ -74,9 +74,19 @@ STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_l
 # touches L2 above the image's end) and well below the startup's non-cacheable window
 # 0x200fa000..0x200fdfff; the I-cache (enabled by the startup, docs/waverider-dsp-silence.md)
 # serves it. Its voices' state and scratch stay in L1, its tables in DDR.
-PERC_L2_LOAD = 0x200C0000
-PERC_L2_SPAN = 0x23000                       # 140 KB (v0.24: with P-I, about 132 KB; 80 KB v0.17..v0.23)
-PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbe0000
+# A layout proposal (2026-11): PERC starts at 0x200AC000 instead of 0x200C0000, one contiguous span up to
+# the sample machines' code (0x200E3000): 220 KB instead of 140 KB. It stays above 0x200AB800 (kept free
+# for the sampler-tables proposal's L2 room, 0x200AA000..0x200AB800) and below 0x200EA000 (nothing of
+# ours goes from there up to the non-cacheable window). Only PERC's code is written, not its whole span
+# (PERC_PAD): the DSP program must stay within the 1 MiB upload buffer (dnfw.safety).
+PERC_L2_LOAD = 0x200AC000
+PERC_L2_SPAN = 0x37000                       # 220 KB (0x23000, 140 KB, at 0x200C0000 until this proposal)
+PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbd6000 (0xbe0000 before)
+PERC_PAD = 120                               # 20 NOPs (zeros) after PERC's code: the branch predictor needs 12 valid
+                                             # instructions after its last jump (hwrules BRANCH-12), and 64 bytes
+                                             # clear the I-cache's prefetch
+L2_KEPT_FREE_END = 0x200AB800                # the end of the room kept free below PERC
+L2_OURS_END = 0x200EA000                     # nothing of ours from here up to L2_NOCACHE
 L2_IMAGE_END = 0x2008823C                    # the stock stream's last L2 byte
 L2_NOCACHE = 0x200FA000                      # the startup's non-cacheable L2 window starts here
 PERC_SCRATCH_DM = 0x2DDE80                   # 55 words (dnfw.perc.machines.SC_WORDS)
@@ -111,14 +121,24 @@ SMP_L2_SPAN = 0x6000                         # v0.28: 24 KB (the re-latch took t
 SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbf1800 (v0.24; 0xbea000 v0.17..v0.23)
 PVMIX_L2_LOAD = SMP_L2_LOAD + SMP_L2_SPAN - 0x400           # v0.25: pvmix.asm (wr_pvmix)
 PVMIX_SW = 0xB80000 + (PVMIX_L2_LOAD - 0x20000000) // 2
+# the L2 layout's bounds, checked on every build (a raise, not an assert: python -O keeps it)
+if not (MAIN_TAP_L2 + MAIN_TAP_BYTES <= L2_KEPT_FREE_END <= PERC_L2_LOAD
+        and SMP_L2_LOAD + SMP_L2_SPAN <= L2_OURS_END <= L2_NOCACHE):
+    raise ImportError(f"L2 layout: PERC {PERC_L2_LOAD:#x} must start at or above {L2_KEPT_FREE_END:#x}, and the "
+                      f"sample machines' span end {SMP_L2_LOAD + SMP_L2_SPAN:#x} at or below {L2_OURS_END:#x}")
 SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 128  # 16 voices x 128 bytes (v0.15)
 SMP_SCRATCH_DM = 0x2DF700                    # after 16 x 128 bytes of state (v0.15)
 SMP_STAGE_DM = SMP_SCRATCH_DM + 0x100        # the recorder's block (dnfw.sampler.machines.REC_STAGE)
 SMP_LINK_DM = SMP_STAGE_DM + 0x80            # the fast link's scratch, then its packet buffer (v0.16)
 SMP_POOL_DDR = 0x84000000                    # the pool's directory, then its frames
 # v0.18: the DT2 reader's coefficients (dnfw.sampler.program.tables_bytes, from the owner's
-# DT2 image) in DDR; each voice's decimator (12 words) in L1, where Waverider's loop was
-SMP_TABLES_DDR = 0x81218000
+# DT2 image) in DDR; each voice's decimator (12 words) in L1, where Waverider's loop was.
+# 2026-11-12: every 96 kHz sample read a row of six and every output sample the decimator's
+# four, 640 DDR reads a voice-block. The interpolator's 256 x 6 now lie in L2, after the main
+# mix's tap (inside the range proven on units, 0x20088400..0x200b0000), the decimator's four and
+# the gain in L1, in REGION's free head, then the reader's taps' line (sampler.program.LINE_WORDS)
+SMP_TABLES_DDR = 0x81218000                             # until 2026-11-12 (no longer loaded)
+SMP_TABLES_L2 = 0x200AA000                              # 6,144 B, to 0x200ab800
 SMP_DEC_DM = SMP_LINK_DM + 0x500                        # 16 x 48 bytes, to 0x2e0080 (W2_RND_DM is 0x2e0100)
 # W2's random table (dnfw.waverider.live.rnd_table): Waverider is gone (v0.11), but
 # RESONATOR, CZ and GRAN read it here
@@ -126,6 +146,11 @@ W2_RND_DM = 0x2E0100                                         # 256 float32 in [0
 # v0.50: the recorder's GAIN (dnfw.sampler.machines.REC_GAIN): a buffer take's dB index (0: none,
 # the RECORDER's v0.49 scaling) and its factor, in the gap the decimators leave before W2_RND_DM
 REC_GAIN_DM = SMP_DEC_DM + 16 * 48                         # 0x2e0080, 2 words
+# 2026-11-12: the DT2 reader's decimator coefficients and LEV make-up gain (sampler.program.DTAB_BYTES,
+# 20 B), then its taps' line: the switch, the tag, then 24 words (zeros at power-on; a render sets the
+# switch and the tag before it reads the line). In REGION's head, free since v0.11
+SMP_DTAB_DM = 0x2DD600                                      # = REGION[0], to 0x2dd614
+SMP_LINE_DM = SMP_DTAB_DM + 0x20                            # 0x2dd620..0x2dd680 (switch 0x2dd618, tag 0x2dd61c)
 # PING (docs/ping.md): its code (entered from machine5_live's tail), 16 x 128 bytes
 # of state, a few words of scratch, then its tables (dnfw.ping.live.tables_bytes).
 # v0.45: PING removed. Only its code address stays in use (ping.asm, now the shared tail);
@@ -279,7 +304,10 @@ def spans() -> list[tuple[str, int, bytes]]:
     at least 64 bytes of zeros (a zero word is a NOP)."""
     obj = objects()
     raw = [
-        ("free since v0.11 (Waverider's reader and osc 2; zeros)", REGION[0], b""),
+        # v0.11 freed this head (Waverider's reader and osc 2); 2026-11-12: the DT2 reader's
+        # decimator coefficients and gain, then its taps' line (zeros), then zeros
+        ("the DT2 sample reader's decimator coefficients and gain (from the owner's DT2 image), its taps' "
+         "line, then free (zeros)", SMP_DTAB_DM, _smp_tables()[-_smp_dtab():]),
         ("state: save area, PERC scratch, idle_load's counters (zeros)", STATE_DM, bytes(STATE_BYTES)),
         ("PERC state: 16 voices x 128 bytes (zeros)", PERC_STATE_DM, bytes(16 * PERC_STATE_STRIDE)),
         ("idle_load.asm (wr_idle)", IDLE_DM, obj["idle_load"]),
@@ -335,8 +363,6 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         # is loaded by a span.
         ("PERC's amp-modulation sine (SHFT's table, kept for AMD)", SHFT_TABLES_DDR, _perc_sine()),
         ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
-        ("the DT2 sample reader's coefficients (from the owner's DT2 image; v0.18)", SMP_TABLES_DDR,
-         _smp_tables()),
         ("Machinedrum sine and tables (zeros: the DSP decodes them; v0.24)", MD_TABLES_DDR,
          bytes(_md_core().TABLE_LAYOUT[_md_core().SHIPPED][0])),
         # v0.26: what ships (the host's pitch table and zpack) comes over the fast link from
@@ -360,6 +386,12 @@ def _smp_tables() -> bytes:
     return smp_program.tables_bytes()
 
 
+def _smp_dtab() -> int:
+    from ..sampler import program as smp_program
+    assert len(_smp_tables()) == smp_program.POLY_BYTES + smp_program.DTAB_BYTES
+    return smp_program.DTAB_BYTES
+
+
 def _smp_pool() -> bytes:
     from ..sampler import live as smp_live
     # v0.17: the Machinedrum's tables needed the DSP image's room, and since v0.16 the
@@ -370,7 +402,7 @@ def _smp_pool() -> bytes:
 
 def l2_spans() -> list[tuple[str, int, bytes]]:
     """(what, load address, payload) of what goes in L2: PERC's code, then the sample
-    machines', each zero-padded to its span (so at least 64 bytes of NOPs after it)."""
+    machines': the sample machines' zero-padded to their span, PERC's code followed by PERC_PAD bytes of NOPs."""
     obj = objects()
     out = []
     for what, name, at, span in (("perc.asm (wr_perc), in L2", "perc", PERC_L2_LOAD, PERC_L2_SPAN),
@@ -384,9 +416,9 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
                                "64 bytes of its room")
             out.append((what, at, code + bytes(room - len(code)) + pv + bytes(PVMIX_ROOM - len(pv))))
             continue
-        if span - len(code) < 64:
-            raise DspError(f"{name}.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
-        out.append((what, at, code + bytes(span - len(code))))
+        if span - len(code) < PERC_PAD:
+            raise DspError(f"{name}.asm ({len(code)} bytes) leaves fewer than {PERC_PAD} bytes of its L2 span")
+        out.append((what, at, code + bytes(PERC_PAD)))    # PERC: its code, not its whole span
     # v0.32: the voices' working state (zeros)
     out.append(("Machinedrum voices: 16 slots x 1 KB, in L2 (zeros; v0.32)", MD_STATE_L2,
                 bytes(16 * _md_core().MD_STRIDE)))
@@ -396,6 +428,11 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
                 bytes(MNM_DT_BYTES)))
     out.append(("the main mix's tap for the recorder's MAIN, in L2 (zeros; v0.37)", MAIN_TAP_L2,
                 bytes(MAIN_TAP_BYTES)))
+    # 2026-11-12: the DT2 sample reader's interpolator rows (in DDR v0.18 .. 2026-11-11)
+    poly = _smp_tables()[:-_smp_dtab()]
+    assert MAIN_TAP_L2 + MAIN_TAP_BYTES <= SMP_TABLES_L2 and SMP_TABLES_L2 + len(poly) <= 0x200B0000
+    out.append(("the DT2 sample reader's interpolator coefficients, in L2 (from the owner's DT2 image)",
+                SMP_TABLES_L2, poly))
     return out
 
 

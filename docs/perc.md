@@ -91,17 +91,25 @@ One program, written once (`src/dnfw/perc/`):
 instructions, 19.4 KB) and resolves its branches with selas's own layout.
 
 **Where it runs.** PERC's code is too big for the free tail of L1 block 1, so it runs
-from **L2 at `0x200c0000`** (sw `0xbe0000`), through the I-cache the startup enables.
+from **L2 at `0x200ac000`** (sw `0xbd6000`; `0x200c0000`, sw `0xbe0000`, until the layout proposal below),
+through the I-cache the startup enables.
 `scripts/sharc_l2_ceiling.py` records what L2 the stock firmware touches (`docs/data/l2-ceiling-2026-10-20.json`), from a fresh
 engine init (5.0 M instructions) and every stock machine on all 16 tracks: reads
 `0x2002f0d0..0x20078256`, writes `0x2002f0d0..0x200779f8`, **nothing above the stock
-image's end `0x2008823c`**. PERC's 64 KB span sits 230 KB above that and 200 KB below
-the startup's non-cacheable window `0x200fa000..0x200fdfff`. Its voices' state (16 x 128
+image's end `0x2008823c`**. PERC's span sits above the voices' L2 state and below the sample machines' code,
+well below the startup's non-cacheable window `0x200fa000..0x200fdfff`.
+
+**The L2 layout proposal.** PERC's span runs from `0x200ac000` to the sample machines' code at `0x200e3000`:
+220 KB, against 140 KB from `0x200c0000`. Below it, `0x200aa000..0x200ab800` is kept free for the sampler-tables
+proposal. Above the sample machines' span, nothing of ours goes from `0x200ea000` up to the non-cacheable window.
+`dnfw.waverider.dsp` refuses to build outside those bounds. Only PERC's code and 20 NOPs after it (120 bytes: the branch predictor reads 12 past its last jump) are written,
+not the whole span. The DSP program must fit the 1 MiB upload buffer (`dnfw.safety`), and that buffer, not
+L2, is what bounds PERC's growth: about 37 KB of program are left in it. Its voices' state (16 x 128
 bytes, `0x2de180`) and scratch (`0x2dde80`) are in L1, its tables (6 KB, `0x81216000`)
 in DDR beside the others, and it reads SHFT's sine table.
 
 **Entry and exit.** The block counter (`block_count.asm`), which the entry JUMP at
-`0x1c9448` reaches every block, now jumps to `0xbe0000`. PERC saves R0-R15, I0-I5, I12
+`0x1c9448` reaches every block, now jumps to PERC (`0xbd6000`). PERC saves R0-R15, I0-I5, I12
 and M0-M4 at `0x2dde00` exactly as Waverider's loop did, renders every type-5 track, and
 jumps to RESONATOR (`0x172980`), then CZ, then PING, whose tail restores them and rejoins
 the chain at `0x1c944c`. Its subroutines return with a plain `JUMP (M14, I12)` (not the

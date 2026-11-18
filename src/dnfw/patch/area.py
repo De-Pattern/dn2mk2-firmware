@@ -35,7 +35,7 @@ from dataclasses import dataclass
 
 MAGIC = b"DNFW"
 CODE = b"CODE"
-AREA_VA = 0x4030B980            # the end of stock 1.11 MAIN OS
+AREA_VA = 0x4030C980            # the end of stock 1.12 MAIN OS (1.11: 0x4030b980)
 RUNTIME_VA = 0x46710000         # where data chunks run, above BSS
 
 

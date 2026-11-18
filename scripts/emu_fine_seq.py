@@ -30,9 +30,9 @@ sys.path.insert(0, str(HERE))
 from emu_coupled import CF_FRAME, Coupled                       # noqa: E402
 
 KIT, STRIDE = 0x800052A0, 1163
-SEQ_PATTERN, TRACK_CUR, SEQ_PLAYING = 0x42C5A9A0, 0x42C5A984, 0x42C5A918
+SEQ_PATTERN, TRACK_CUR, SEQ_PLAYING = 0x42C5B9A0, 0x42C5B984, 0x42C5B918
 PAT_LENGTH = 122196
-UI_TRACK = 0x42431A6C
+UI_TRACK = 0x42432A6C
 ONESHOT = 8
 A, B = 1, 2                     # the two tracks (not 0: the slot -> track table reads 0 for an idle voice)
 SLOT_TRACK = 0x80005308         # the ColdFire's voice -> track table (link.c), what the frame's records follow
@@ -91,7 +91,7 @@ def main() -> int:
         ISR's smoothing (the frame's words)"""
         return struct.unpack(">H", c.read(0x80003AF0 + 2 * (17 + 101 * v + slot), 2))[0]
 
-    owner = c.call(0x4018A97A)[0]
+    owner = c.call(0x4018AC5A)[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, A, ONESHOT, 1, 1)
     setup.append(("track A ONESHOT", "direct: smp_machine_commit called"))
     pat = c.long(SEQ_PATTERN)

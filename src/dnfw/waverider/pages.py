@@ -3,13 +3,13 @@ knob labels a Waverider track shows. `docs/waverider-m7-pages.md` has the eviden
 
 A Waverider track is WaveTone to most of the UI (`coldfire`, M5): the SYN page readers
 are asked about type 1, whatever the track. So these routines do not trust the type
-they are handed. They ask whether the **active track** (the byte `0x42431a6c`, whose
+they are handed. They ask whether the **active track** (the byte `0x42432a6c`, whose
 sound is `[0x800052a0] + 52 + 1163 * t`) is a Waverider (`sound+0xDE` = 5), and only
 then answer with Waverider's pages and labels:
 
-- `wr_count`, entered by `jsr` from the page-count reader `0x400c24d2` (in place of M5's
+- `wr_count`, entered by `jsr` from the page-count reader `0x400c2636` (in place of M5's
   `canon_arg` there): 2 pages; otherwise exactly what `canon_arg` does.
-- `wr_page`, entered by `jsr` from the page reader `0x400c24ee` at `0x400c24f2` (in
+- `wr_page`, entered by `jsr` from the page reader `0x400c2652` at `0x400c2656` (in
   place of M5's `canon_page`): our descriptor for pages 0-1, the stock empty page past
   them; otherwise exactly what `canon_page` does.
 - `wr_icons`, entered by `jsr` from the SYN page draw at `0x4001821e`: on a Waverider
@@ -54,7 +54,7 @@ C_SPAN = 0x30000                   # v0.41: up to the MD graphics, now at 0x46af
                                   # REC trigs took it past). 64 KB until v0.28; all unclaimed RAM above
                                   # BSS (docs/memory-map.md); the pool's mirror starts at 0x46b00000
 C_END = 0x46710000                # the platform runtime starts here
-ACTIVE_TRACK = 0x42431A6C         # byte: the UI's active track, 0..15
+ACTIVE_TRACK = 0x42432A6C         # byte: the UI's active track, 0..15
 KIT_POINTER = 0x800052A0          # the live kit; sound t at + 52 + 1163 t
 SOUND_BASE, SOUND_STRIDE, SOUND_TYPE = 52, 1163, 0xDE
 NEW_TYPE, CLONE = 5, 1
@@ -64,7 +64,7 @@ TYPES_LAST = max(13, *_mnm_types.TYPES, _smp.BOUNCE_TYPE)   # dnfw.waverider.col
                                   # SLICE, had been left out here: its track got WaveTone's pages;
                                   # v0.26: the Monomachine's from 14 on)
 GET_SHORT_NAME = 0x400372DA
-EMPTY_PAGE = 0x42432BD4           # the readers' own empty-page fallback
+EMPTY_PAGE = 0x42433BD4           # the readers' own empty-page fallback
 TAG = 10                          # the tag every stock SYN descriptor ends with
 
 # PERC (machine 5, docs/perc.md; Waverider's place until v0.11): two pages on WaveTone
@@ -580,7 +580,7 @@ is_wr:
     movea.l %sp@+,%a0
     rts
 
-| -- 0x400c24d2 pages(type), from its first instruction by jsr. The stack: our return
+| -- 0x400c2636 pages(type), from its first instruction by jsr. The stack: our return
 | into the reader, the caller's return, the type. A Waverider track: 2, straight back
 | to the caller. Otherwise M5's canon_arg: the displaced loads, 5 read as 1.
 wr_count:
@@ -611,7 +611,7 @@ wr_count:
 2:  moveq   #4,%d1
     rts
 
-| -- 0x400c24ee page(type, n), from 0x400c24f2 by jsr (after its own push of d2). The
+| -- 0x400c2652 page(type, n), from 0x400c2656 by jsr (after its own push of d2). The
 | stack: our return, the saved d2, the caller's return, the type, the page. A Waverider
 | track: our descriptor n (0..1) or the stock empty page, and back to the caller with d2
 | restored. Otherwise M5's canon_page.

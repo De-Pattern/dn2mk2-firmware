@@ -37,13 +37,13 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from emu_coupled import CF_FRAME, Coupled                       # noqa: E402
-from emu_coupled_flex import install_smoother_model             # noqa: E402
+from emu_coupled_flex import DETENT_PERIODS, install_smoother_model     # noqa: E402
 
 KIT, STRIDE = 0x800052A0, 1163
 FLEX = 17
 T, S = 1, 2                              # the FLEX track, its SRC's track (TRK3)
 SLOT_TRACK = 0x80005308
-KB_ON = 0x42431A9C
+KB_ON = 0x42432A9C
 FX_SRC, FX_MUTE = 0, 6
 SENDS = (86, 87, 88)
 
@@ -91,14 +91,19 @@ def main() -> int:
         held(code, True)
         held(code, False)
 
+    # a detent every DETENT_PERIODS periods (was 2). The firmware takes detents at any spacing (4 detents
+    # 0..4 M UI instructions apart all land), but the first detent after FLEX REC opens can wait up to
+    # about 4.3 M UI instructions on 1.12, mostly in the idle task, longer than 2 periods' UI (2 M): a
+    # detent injected while that one is pending is lost in this harness (2 periods: MUTE stays OFF;
+    # 4: ON). The unit itself was not measured
     def turn(enc, delta, n):
         for _ in range(n):
             c.machine.pc = P.encoder(c.machine.m, c.panel.profile, enc, delta)
-            c.periods(2)
+            c.periods(DETENT_PERIODS)
 
     kit = c.long(KIT)
     snd = kit + 52 + STRIDE * T
-    owner = c.call(0x4018A97A)[0]
+    owner = c.call(0x4018AC5A)[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, T, FLEX, 1, 1)
     c.periods(2)
     c.call(lay["fx_set"], T, FX_SRC, 2 + S)

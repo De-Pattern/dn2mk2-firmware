@@ -25,6 +25,10 @@ dispatch, per-track chain), as Milestone 4 does. Steps, each PASS/FAIL
 4. **stock** -- types 0-4 are bit-identical: the same frames with no type-5 track on
    the modded and the stock image give identical buffers on all 16 tracks, and in a
    type-5 run tracks 1-15 match a stock run; the stock filter types likewise.
+4o. **stockout** (2026-11-12, `sharc_stockout_step.py`) -- with stock machines only, what leaves the engine (main mix,
+   tracks' routed and panned blocks, FX returns, TDM slots 0-13, Overbridge records) is the stock image's, every block.
+4t. **tableready** (`sharc_table_ready.py`) -- the tables' READY with this build's checksum: another build's ready
+   word waits, the same build's decodes at once, a cold DDR waits; every decoded word is the model's (docs/mnm.md).
 5. **frame** (with --frame/--frame-be/--frames) -- a caller's frame(s), used verbatim
    every block; every type-5 track bit-exact to the model.
 6-7. **PING, SHFT, GRAN** -- removed (SHFT, GRAN v0.27; PING v0.45); their step functions are kept only where shared.
@@ -43,6 +47,7 @@ import dataclasses
 import gc
 import glob
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -136,6 +141,7 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
     for k in range(0, len(shipped), 4):
         m2.poke(runner.state, Lm.T[MDK.SHIPPED] + k, struct.unpack_from("<I", shipped, k)[0])
     m2.poke(runner.state, Lm.ready, SM.TABLE_MAGIC)
+    m2.poke(runner.state, Lm.ready + SM.TABLE_SUM_AT, MDK.table_sum())   # READY carries this build's checksum
     if warm:
         # v0.17: the Machinedrum's sine and tables as the DSP has them 0.7 s after power-on
         # (it fills them itself, 32 blocks; the "sine" run checks that fill word for word),
@@ -511,7 +517,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,l2tail,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,tdm,stock,stockout,tableready,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -600,6 +606,11 @@ def main(argv=None):
             print("\nstep 3g: voice state and scratch full of garbage (v0.33)")
             results["3g_garbage"] = step_garbage(warm(), sound, machines)
             show(results["3g_garbage"])
+            gc.collect()
+        if "l2tail" in steps:
+            print("\nstep 3t: PERC's unwritten L2 span full of garbage (the L2 layout proposal)")
+            results["3t_l2tail"] = step_l2tail(warm(), sound, machines)
+            show(results["3t_l2tail"])
             gc.collect()
         if "wipe" in steps:
             print("\nstep 3w: the output guard's wipe, a poisoned P-I voice (v0.34)")
@@ -696,6 +707,19 @@ def main(argv=None):
             results["4b_filters"] = step_filters_stock(snap, m2mach, m5, stock_img, sound, machines,
                                                        max(3, a.blocks // 2))
             show(results["4b_filters"])
+
+        if "stockout" in steps:
+            print("\nstep 4o: stock's OUTPUT bit-identical (main, tracks, FX returns, TDM, records; 2026-11-12)")
+            so_step = importlib.import_module("sharc_stockout_step")
+            results["4o_stockout"] = so_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img, sound, machines)
+            gc.collect()
+            show(results["4o_stockout"])
+        if "tableready" in steps:
+            print("\nstep 4t: the tables' READY with this build's checksum (cases a, b, c)")
+            tr_step = importlib.import_module("sharc_table_ready")
+            results["4t_tableready"] = tr_step.run(sys.modules[__name__], snap, m2mach, m5, stock_img, sound, machines)
+            gc.collect()
+            show(results["4t_tableready"])
 
         if "shft" in steps:
             print("\nstep 7: SHFT")
@@ -1656,11 +1680,12 @@ def step_cost(init, sound, machines) -> dict:
         for k in ("L1", "L2", "DDR"):
             counts[k] = 0
         measure("(nothing)", lambda b: base_frame(sound, machines, trigger=False).to_bytes())
-        # v0.43: DNFW_COST_ONLY=mnm measures the Monomachine machines alone (the whole run is 2 h)
+        # v0.43: DNFW_COST_ONLY=mnm measures the Monomachine machines alone (the whole run is 2 h);
+        # 2026-11-12: =smp the sample machines alone
         only = os.environ.get("DNFW_COST_ONLY", "")
-        for k, name in enumerate(PM.NAMES if only != "mnm" else ()):
+        for k, name in enumerate(PM.NAMES if only not in ("mnm", "smp") else ()):
             measure(name, (lambda k: lambda b: base_frame(sound, machines, overrides=perc_words(k), trigger=b == 1).to_bytes())(k))
-        for k, name in enumerate(MMx.NAMES):
+        for k, name in enumerate(MMx.NAMES if only != "smp" else ()):
             def fb(b, k=k):
                 f = base_frame(sound, machines, t0=MMx.TYPES[k], trigger=b == 1)
                 for slot, w in mnm_words(k).items():
@@ -1749,6 +1774,67 @@ def step_garbage(init, sound, machines) -> dict:
     checks = {"every Machinedrum and Monomachine machine, started on NaN or random voice state and "
               "scratch: every block returns, its track finite, PERC bit-exact": not bad}
     return {"ok": not bad, "checks": checks, "numbers": {"failing": bad, "runs": res}}
+
+
+def step_l2tail(init, sound, machines) -> dict:
+    """The L2 layout proposal: the DSP program writes only PERC's code and its NOP tail, not its whole
+    span, and L2 survives a DSP restart (it is not zeroed: a previous program's words stay). So the
+    rest of the span, up to the sample machines' code, must never be read. It is filled with NaN or
+    random words before our first instruction (the block counter, on block 0), on the post-init
+    snapshot the image is loaded on (a cold boot of the DSP program); every Machinedrum and
+    Monomachine machine must then return every block with every track's output bit-identical, word
+    for word, to the same run without the fill."""
+    import random as _r
+    from dnfw.mnm import machines as MMx
+    lo = dsp.PERC_L2_LOAD + len(dsp.objects()["perc"]) + dsp.PERC_PAD
+    hi = dsp.SMP_L2_LOAD
+    fills = {"nan": lambda k: 0xFFFFFFFF, "random": (lambda g: lambda k: g.getrandbits(32))(_r.Random(35))}
+
+    def filled(fill):
+        done = {"n": 0}
+
+        def poke(r):
+            if done["n"]:
+                return
+            done["n"] = 1
+            for a in range(lo, hi, 4):
+                m2.poke(r.state, a, fill(a))
+        return {dsp.COUNT_SW: poke}
+
+    cases = {}
+    for g in range((PM.N + 7) // 8):             # the Machinedrum machines, eight tracks a run
+        n_g = min(8, PM.N - 8 * g)
+
+        def fb(b, g=g, n_g=n_g):
+            f = base_frame(sound, machines, overrides=perc_words(8 * g), trigger=b == 1,
+                           others={t: 5 for t in range(1, n_g)}, trigger_others=True)
+            for t in range(1, n_g):
+                for slot, w in perc_words(8 * g + t).items():
+                    f.param(t, slot, w)
+            return f.to_bytes()
+        cases[f"md{g}"] = fb
+    for k, name in enumerate(MMx.NAMES):        # each Monomachine machine, beside a PERC voice
+        def fb(b, k=k):
+            f = base_frame(sound, machines, t0=MMx.TYPES[k], trigger=b == 1, others={1: 5}, trigger_others=True)
+            for slot, w in mnm_words(k).items():
+                f.param(0, slot, w)
+            for slot, w in perc_words(0).items():
+                f.param(1, slot, w)
+            return f.to_bytes()
+        cases[name] = fb
+    res, bad = {}, []
+    for case, fb in cases.items():
+        ref = run_blocks(init, fb, 6)
+        for fname, fill in fills.items():
+            rr = run_blocks(init, fb, 6, extra_hooks=filled(fill))
+            same = ref["ok"] and rr["ok"] and rr["buffer_bits"] == ref["buffer_bits"]
+            res[f"{fname}_{case}"] = {"ok": same, "halt": rr.get("halt")}
+            if not same:
+                bad.append(f"{fname}_{case}")
+        print(f"    l2tail {case}: {'ok' if not any(b.endswith(case) for b in bad) else 'DIFFERS'}", flush=True)
+    checks = {f"PERC's unwritten span {lo:#x}..{hi:#x} ({hi - lo:,} B) full of NaN or random words: every "
+              "Machinedrum and Monomachine machine returns every block, its output bit-identical": not bad}
+    return {"ok": not bad, "checks": checks, "numbers": {"from": hex(lo), "to": hex(hi), "failing": bad, "runs": res}}
 
 
 def step_wipe(init, sound, machines) -> dict:
@@ -1982,21 +2068,16 @@ def step_smp(init, sound, machines, blocks) -> dict:
     mx = runs["mixed"]
     kick = smp_series(runs["kick"], 0)
     up = smp_series(runs["kick_up"], 0)
-    # v0.18: the kick as the DSP played it against the DT2's own reader (the bit-exact model
-    # of its code, outside the repository: ../dt2s117/research/tools/models_reader.py), times
-    # LEV's make-up gain; 0.25 frames a 96 kHz sample
-    kick_err = 1.0
-    dt2_models = ROOT.parent / "dt2s117" / "research" / "tools"
-    if (dt2_models / "models_reader.py").is_file():
-        sys.path.insert(0, str(dt2_models))
-        import models_reader as MR
-        pcm = [max(-32768, min(32767, round(x * 32768))) for x in SL.test_samples()[0]]
-        mv = MR.Voice(pcm, 0, 0, len(pcm) << 31, 1 << 29, 0)
-        g = struct.unpack("<f", SP.tables_bytes()[-4:])[0]
-        exp = []
-        for _ in range(len(kick) // BLOCK - 1):
-            exp += [g * float(x) for x in MR.read_block(mv, MR.load_polyphase())]
-        kick_err = max((abs(a - b) for a, b in zip(kick[BLOCK:], exp)), default=1.0)
+    # v0.18: the kick as the DSP played it against the DT2's own reader (2026-11-15: our model
+    # of it, dnfw.dt2.reader, with the tables from the owner's DT2 image; it replaces a model
+    # outside the repository that only upstream's host had), times LEV's make-up gain;
+    # 0.25 frames a 96 kHz sample
+    from dnfw.dt2 import reader as DR
+    pcm = [max(-32768, min(32767, round(x * 32768))) for x in SL.test_samples()[0]]
+    g = struct.unpack("<f", SP.tables_bytes()[-4:])[0]
+    blocks_kick = len(kick) // BLOCK - 1
+    exp = [g * x for x in DR.read(DR.Voice(pcm, 0, DR.ONE // 4), BLOCK * blocks_kick)]
+    kick_err = max((abs(a - b) for a, b in zip(kick[BLOCK:], exp)), default=1.0) if blocks_kick > 0 else 1.0
     werp_buf = [x for blk in mx["buffers"][1:] for x in blk[3]] if mx["ok"] else []
     rev = smp_series(mx, 0) if mx["ok"] else []
     rev_grows = len(rev) >= 4 * BLOCK and V.rms(rev[-2 * BLOCK:]) > V.rms(rev[BLOCK:3 * BLOCK])

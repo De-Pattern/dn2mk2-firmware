@@ -19,13 +19,13 @@ What it does is name every way harm could happen, and say what stops each one.
 | **DSP code that the emulators run but the silicon does not** (a hardware loop's shape, branch spacing, same-DAG loads and stores: each silenced or crashed someone's unit once, per complex-ping's notes) | the DSP stops: silence until a power cycle | **Gate (v0.32):** `scripts/gate_hwrules.py` runs complex-ping's `hwrules.py` (MIT, a checkout of his digitone-2-modding-skill beside this repository) on all of our DSP code and round each patch, and fails on any violation the stock image does not have. |
 | **The bootstrap (section 2) is damaged.** It runs the Early Start-up Menu and the recovery flash, so losing it is the one true brick | permanent without a hardware programmer | **Enforced:** `dnfw mods apply` refuses to write any build whose section 2, 4, 5 or 8 differs from stock by a single byte (`src/dnfw/safety.py`, tested in `test/test_safety.py`). Mods only ever change MAIN OS (3) and the DSP program (7). |
 | **Power is lost while the OS is being written to flash** | can be as bad as the above | Same risk as an official Elektron update. Use stable power, don't touch the unit during `UPGRADING… DO NOT TURN OFF`. |
-| **The bootstrap is rewritten by an OS change.** Elektron: *"After some upgrades the bootstrap is also upgraded… right after the first restart."* 1.10 → 1.11 is such an upgrade. | as above, if power fails during it | Do that move **once, with Elektron's own stock 1.11**, on its own (below). After that, our builds carry 1.11's bootstrap byte for byte, so a unit on 1.11 has nothing left to rewrite. **From 1.10 or 1.12, read "Getting onto 1.11" first.** |
-| **A build crashes MAIN OS or won't boot** | recoverable | Recovery runs from the bootstrap, not MAIN OS: [FUNC] at power-on → [TRIG 4] → stock 1.11 over **DIN MIDI**. Every build also boots from reset in the emulator first (`scripts/emu_boot_check.py`). |
+| **The bootstrap is rewritten by an OS change.** Elektron: *"After some upgrades the bootstrap is also upgraded… right after the first restart."* 1.10 → 1.11 is such an upgrade; 1.11 → 1.12 is not (section 2 is byte for byte the same, `docs/os112-port.md`). | as above, if power fails during it | Do that move **once, with Elektron's own stock OS**, on its own (below). After that, our builds carry 1.12's bootstrap byte for byte, so a unit on 1.12 has nothing left to rewrite. **From 1.10 or 1.11, read "Getting onto 1.12" first.** |
+| **A build crashes MAIN OS or won't boot** | recoverable | Recovery runs from the bootstrap, not MAIN OS: [FUNC] at power-on → [TRIG 4] → stock 1.12 over **DIN MIDI**. Every build also boots from reset in the emulator first (`scripts/emu_boot_check.py`). |
 | **The DSP stops and the unit goes silent** | recoverable | Upstream hit exactly this (`docs/waverider-dsp-silence.md`) and recovered by reflashing. Every build runs the DSP code in the SHARC emulator first; our code uses only instruction encodings found byte for byte in stock (the rule after upstream's negative-shift bug). |
 | **A voice's memory holding a NaN** (poisoned at boot, by another writer, or by our own arithmetic): before v0.33 it silenced all audio until a restart; v0.33's guard wiped the voice but left it dead (its wipe stored its loop counter) | silence on that voice, or all audio | **Gate (v0.34):** runner step 3w poisons a P-I voice's delay lines on the real DSP code and requires the wipe, the record and the next note; `test_perc_live` the same on the model; the model's float ops carry a NaN as the core does. On the unit the guard records which voice and where (FUNC held: `V1D`/`V1X`; SysEx DIAG), and SCAN reads any memory range for non-finite words (`tools/dn2diag.py`): docs/timing-model.md. |
 | **The audio interrupt preempting our ColdFire code** (a race on the link's words, a list, the library index; an interrupt handler that runs past its frame and starves the UI) | the screen freezes, keys dead | **Gate (v0.34, 6q):** the UI fuzz runs with the interrupt fired at its real cadence through the real vectors (digikit's SSI0/eDMA source); a CPU exception (the EXCEPTION screen on a unit), a lost interrupt, or a frame overrun fails a seed. The ISR's cost is measured per delivery. |
 | **Loud noise, DC or full-scale output** from a DSP bug | can harm speakers and ears | First test of every DSP build: **low volume, no headphones, monitors down.** And a rule for our DSP code: every engine sanitises its output (NaN/inf → 0, hard-clamped) before it reaches the stock chain. |
-| **A stock machine, FX or the sequencer behaves differently** | a bug, not damage | The DSP gate checks that with no mod track playing, all 16 track buffers are **bit-identical to stock**, and that stock tracks beside a mod track are too (`scripts/sharc_waverider_m5.py` step 4). The ColdFire side lists every edit it makes; each is asserted against the stock bytes before it is written. |
+| **A stock machine, FX or the sequencer behaves differently** | a bug, not damage | The DSP gate checks that with no mod track playing, all 16 track buffers are **bit-identical to stock**, and that stock tracks beside a mod track are too (`scripts/sharc_waverider_m5.py` step 4). Step 4o (`stockout`, 2026-11-12) compares what leaves the engine with stock machines only, over random stock-valid frames: the main mix, every track's routed and panned blocks, the FX returns, TDM slots 0-13 and the Overbridge records, bit for bit, every block. A change to Elektron's own DSP code is shown bit-identical by this step, or declares in it exactly which output words may differ and when. The ColdFire side lists every edit it makes; each is asserted against the stock bytes before it is written. |
 | **Projects or sounds are damaged** | data loss | Back up the +Drive with Elektron Transfer before every flash. No mod writes to the +Drive directly. A track saved with a mod machine loads on stock firmware as FM Tone with its parameters kept. Upstream's `songguard` mod exists because a damaged project can halt even stock firmware, so test in a scratch project and keep real work out of it until a feature has been stable for a while. |
 | **The recovery transfer stalls** (bar stops at e.g. 80 %) | annoying, not harmful | That's the MIDI link dropping packets, not the image. Upstream traced it to an interface going idle mid-transfer. Use a dedicated class-compliant USB-MIDI interface and turn off USB power-saving. Just retry: nothing is written to flash until reception completes. |
 
@@ -34,19 +34,19 @@ What it does is name every way harm could happen, and say what stops each one.
 ## Before the first flash, once
 
 1. **Back up everything** with Elektron Transfer (projects, presets, samples).
-2. **If your unit is on 1.10-anything, update it to stock 1.11 first** (see
-   below). That's an official upgrade, and it rewrites the bootstrap.
-3. **Prove recovery on your unit with stock 1.11**: DIN cable from the
+2. **If your unit is on 1.10-anything or 1.11, update it to stock 1.12 first** (see
+   below). That's an official upgrade; from 1.10 it rewrites the bootstrap.
+3. **Prove recovery on your unit with stock 1.12**: DIN cable from the
    computer's MIDI OUT to the DN2's MIDI IN, hold [FUNC] at power-on, [TRIG 4],
-   Transfer's *Legacy OS upgrade mode*, send `Digitone_II_OS1.11.syx`. It takes
+   Transfer's *Legacy OS upgrade mode*, send `Digitone_II_OS1.12.syx`. It takes
    about 12 minutes; don't interrupt. Note which interface you used: that's
    your recovery cable from now on. Doing this *after* step 2 matters: it
    proves the recovery route of the bootstrap you will actually have.
-4. Confirm the unit boots stock 1.11 and plays normally.
+4. Confirm the unit boots stock 1.12 and plays normally.
 
 Until step 3 has worked once, flash nothing modified.
 
-### Getting onto 1.11 from 1.10, 1.10A–E
+### Getting onto 1.11 from 1.10, 1.10A–E (then on to 1.12)
 
 This is an upgrade, the direction Elektron supports, but it **changes the
 bootstrap**: 1.10E rebuilt it almost entirely (and moved its load address),
@@ -59,8 +59,9 @@ That restart is the most sensitive moment in the whole project, so it is kept
 apart from everything else:
 
 - Use **Elektron's own, unmodified `Digitone_II_OS1.11.syx`**, never a mod, for
-  this step. The preflight guarantees our builds carry 1.11's bootstrap byte
-  for byte, but the first move onto it should still involve nothing of ours.
+  this step, then stock 1.12 as below. The preflight guarantees our builds carry
+  1.12's bootstrap (1.11's, byte for byte) but the first move onto it should still
+  involve nothing of ours.
 - **Normal update route**: Transfer over USB to the running unit, as Elektron
   describe. Stable power; if you have a UPS or a reliable outlet, use it.
 - After `UPGRADING… DO NOT TURN OFF` and the first restart, **leave it alone
@@ -72,18 +73,18 @@ apart from everything else:
 Upstream's unit made the same 1.10E → 1.11 move, through the recovery route,
 and booted 1.11 cleanly (`docs/flashing.md`, 2026-09-11).
 
-### Getting onto 1.11 if your unit runs 1.12
+### Getting onto 1.12 from 1.11
 
-Every mod is built on 1.11. 1.12 only adds Outbox 8 main-output routing.
-Going from 1.12 to 1.11 is a downgrade, which Elektron calls unsupported and
-at your own risk, with possible loss of user content. So:
+Every mod is built on 1.12. 1.12 only adds Outbox 8 main-output routing to 1.11.
+Going from 1.11 to 1.12 is an upgrade, the direction Elektron supports, and it does
+not rewrite the bootstrap: sections 2 (bootstrap), 4 (updater), 7 (DSP) and 8 are
+byte for byte 1.11's (`docs/os112-port.md`, measured on Elektron's two files). So:
 
 - Back up first (step 1).
-- Send **stock 1.11**, unmodified, before any mod. That keeps the downgrade
-  and the first modified flash as two separate steps.
-- If the 1.12 bootstrap differs from 1.11's, that first flash may rewrite the
-  bootstrap on restart. Give the project the 1.12 `.syx` and `dnfw diff` will
-  say whether it does, before you commit to it.
+- Send **stock 1.12**, unmodified, before any mod, by the normal update route.
+  That keeps the OS move and the first modified flash as two separate steps.
+- A build made for 1.11 (an earlier version of this mod) is refused on a 1.12
+  stock file, and the other way round: the tools check every section's hash.
 
 ---
 
@@ -97,7 +98,7 @@ at your own risk, with possible loss of user content. So:
    SAVE/LOAD, unit tests) and records the pass, with the file's sha256, in
    `BUILD.syx.gate.json`. Every build, every time; no exceptions.
 3. **Preflight the file you will actually send:**
-   `dnfw preflight Digitone_II_OS1.11.syx build.syx` must print `PASS`.
+   `dnfw preflight Digitone_II_OS1.12.syx build.syx` must print `PASS`.
 4. **Back up** the +Drive.
 5. **Flash** through the normal Transfer drop over USB. The DIN cable plays
    no part in this; the flash itself goes over USB alone. Have it within reach
@@ -107,7 +108,7 @@ at your own risk, with possible loss of user content. So:
    it during the transfer.
 6. **Low volume** for the first notes.
 7. **Run the regression check** below before using it for music.
-8. If anything is off: **recovery to stock 1.11**, then report what you saw.
+8. If anything is off: **recovery to stock 1.12**, then report what you saw.
 
 ### Regression check after a flash (about 10 minutes)
 
@@ -125,7 +126,7 @@ at your own risk, with possible loss of user content. So:
 ## Rules for code written here
 
 - Only sections 3 and 7 change. Enforced, not remembered.
-- Never build on anything but stock 1.11, checked by hash.
+- Never build on anything but stock 1.12, checked by hash.
 - No DSP instruction form that isn't found byte for byte in stock's code.
 - Every new engine sanitises its output (NaN/inf → 0, clamp) before the
   stock per-track chain.

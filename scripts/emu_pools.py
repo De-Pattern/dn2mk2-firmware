@@ -42,8 +42,8 @@ from __future__ import annotations
 
 import struct
 
-ACTIVE = 0x405CD899
-PJ_LOAD, PJ_GET_PROJECT = 0x40042E6E, 0x4018A97A
+ACTIVE = 0x405CE899
+PJ_LOAD, PJ_GET_PROJECT = 0x40042E6E, 0x4018AC5A
 SAVE_AS = 0x400402D8                    # interactiveSave's (project, slot, cb)
 STUB_OPEN, STUB_TEMP = 0x40042B92, 0x40040190      # the load's +Drive read, its temp-slot write
 NEW_SITE, NEW_AFTER = 0x40042AF0, 0x40042AFA

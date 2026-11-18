@@ -36,7 +36,7 @@ from emu_coupled import CF_FRAME, Coupled                       # noqa: E402
 from emu_coupled_recplay import best_match, chirp              # noqa: E402
 
 KIT, STRIDE = 0x800052A0, 1163
-SEQ_PATTERN, TRACK_CUR = 0x42C5A9A0, 0x42C5A984
+SEQ_PATTERN, TRACK_CUR = 0x42C5B9A0, 0x42C5B984
 PAT_LENGTH, PAT_LOCK_TABLE = 122196, 97872
 BOUNCE = 17
 SLOT_RLEN, SLOT_SAMP, SLOT_BUF = 40, 43, 35
@@ -80,7 +80,7 @@ def main() -> int:
         c.periods(3)
     kit = c.long(KIT)
     snd = kit + 52
-    owner = c.call(0x4018A97A)[0]
+    owner = c.call(0x4018AC5A)[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, 0, BOUNCE, 1, 1)
     rep["setup"].append(("track 0 BOUNCE", "direct: smp_machine_commit called (MACHINE SEL hides BOUNCE in v0.47)"))
     c.poke(SM.MIRROR + 8, b"\x00" * 16 * SM.POOL_SLOTS)

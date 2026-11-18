@@ -23,19 +23,19 @@ typedef unsigned char u8;
 typedef unsigned short u16;
 
 #define GET_VALUE ((int (*)(void *, u32, u8 *))0x4006538E)
-#define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90)
-#define TEXT      ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011545C)
-#define FONT      0x44507ED8u
-#define RECORD_FMT(id) (*(void **)(0x401F7F94u + 60u * (id) + 0x34u))   /* v0.35: its value text */
-#define LABEL_FONT 0x40291760u                  /* the stock grid's 4 x 5 label font: the DT2's labels' */
-/* the stock grid's label text (0x40115668, as 0x4006448a calls it for each cell's name):
+#define SET_PIXEL ((void (*)(void *, int, int, int))0x40113E70)
+#define TEXT      ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011573C)
+#define FONT      0x44508ED8u
+#define RECORD_FMT(id) (*(void **)(0x401F83A4u + 60u * (id) + 0x34u))   /* v0.35: its value text */
+#define LABEL_FONT 0x40291ca0u                  /* the stock grid's 4 x 5 label font: the DT2's labels' */
+/* the stock grid's label text (0x40115948, as 0x4006448a calls it for each cell's name):
  * (canvas, font, x, y, align 1 centred, frame 0 none, width template 0, format, ...) */
-#define LABEL_TEXT ((void (*)(void *, u32, int, int, int, int, const char *, const char *, ...))0x40115668u)
+#define LABEL_TEXT ((void (*)(void *, u32, int, int, int, int, const char *, const char *, ...))0x40115948u)
 #define LABEL(c, x, y, fmt, ...) LABEL_TEXT((c), LABEL_FONT, (x), (y), 1, 0, 0, fmt, __VA_ARGS__)
 #define CENTRED   2
-#define RECORD(id) ((const int *)(0x401F7F94u + 60u * (id)))
+#define RECORD(id) ((const int *)(0x401F83A4u + 60u * (id)))
 extern int smp_values_held(void);                /* v0.35: SYN held long: the pages show their values (rec.c) */
-#define NAME_SHORT(id) (*(const char **)(0x401F7F94u + 60u * (id) + 0x30u))
+#define NAME_SHORT(id) (*(const char **)(0x401F83A4u + 60u * (id) + 0x30u))
 
 #define CELL_X(k) (21 + 26 * (k))         /* v0.20: the DT2's centres, 33 + 26 k (its own screen, measured) */
 #define TOP_Y 34
@@ -467,7 +467,7 @@ static void w_gridicon(void *c, int x, int y, int n)
 /* v0.27: a p-locked control drawn as stock draws it, its cell inverted (owner's photo: a
  * trig held, its locked parameters lit). The stock getter's flag (0x4006538e's third
  * argument) is what the stock grid (0x40017498) tests to draw a cell highlighted. The
- * canvas, as 0x40113b90 reads it: +4 width, +8 height, +12 words a column, +16 the bits
+ * canvas, as 0x40113e70 reads it: +4 width, +8 height, +12 words a column, +16 the bits
  * (a column's words, bit 31 - (y & 31) of word y >> 5). */
 static int locked(void *view, u32 id)
 {
@@ -499,7 +499,7 @@ static int shows(int i)
     extern int smp_knob_code;
     extern u32 smp_knob_at;
     return smp_values_held() || (i >= 0 && smp_knob_code == i + 1
-                                 && *(volatile u32 *)0x4058E8D4u - smp_knob_at < VALUE_SHOW);
+                                 && *(volatile u32 *)0x4058F8D4u - smp_knob_at < VALUE_SHOW);
 }
 
 /* one cell: its widget at (X, Y) and, LABELLED, its label under it */
@@ -685,7 +685,7 @@ static void marker(void *c, int x, int cy, int dotted)
  * is reading (the DSP sends each track's position every block, link.c), cleared either
  * side so it reads over the wave */
 extern int smp_playhead(int t);
-#define UI_TRACK (*(volatile u8 *)0x42431A6Cu)
+#define UI_TRACK (*(volatile u8 *)0x42432A6Cu)
 
 static int ph_was __attribute__((section(".data"))) = -1;         /* the playhead it drew (-1 none) */
 /* v0.40 (owner: "the slice machine's on-screen indicators are a little slow to catch up"; the
@@ -899,7 +899,7 @@ static void fit_name(const char *n, int w, int off, char *out)
  * characters a second to its end, rests a second there and starts again; a new selection
  * starts it from the start, and the row left shows head...tail again. smp_marquee_poll
  * (rec_poll, every UI pass) asks for a redraw only when the shown part moves */
-#define MQ_REST 1500u                           /* the 1.5 kHz ticks of 0x4058e8d4: a second */
+#define MQ_REST 1500u                           /* the 1.5 kHz ticks of 0x4058f8d4: a second */
 #define MQ_STEP 300u                            /* a character each 0.2 s */
 static u32 mq_key __attribute__((section(".data"))) = 0xFFFFFFFFu;
 static u32 mq_at __attribute__((section(".data"))) = 0;
@@ -913,7 +913,7 @@ static int mq_steps __attribute__((section(".data"))) = 0;  /* its characters pa
 /* the row KEY selected now (its name N in W characters; N 0: none) */
 static void mq_follow(u32 key, const char *n, int w)
 {
-    u32 now = *(volatile u32 *)0x4058E8D4u;
+    u32 now = *(volatile u32 *)0x4058F8D4u;
     if (key != mq_key) {
         mq_key = key;
         mq_at = now;
@@ -944,7 +944,7 @@ int smp_list_up(void *view)
 
 void smp_list_hold(void)
 {
-    list_at = *(volatile u32 *)0x4058E8D4u;
+    list_at = *(volatile u32 *)0x4058F8D4u;
     smp_overlay_dirty = 1;
 }
 
@@ -988,7 +988,7 @@ static int list_kind __attribute__((section(".data"))) = -1;    /* and its machi
 static void sample_list(void *c, void *view, int slot, int kind)
 {
     (void)c;
-    u32 now = *(volatile u32 *)0x4058E8D4u;
+    u32 now = *(volatile u32 *)0x4058F8D4u;
     lst_seen_at = now;
     int trk = UI_TRACK;
     /* first sight of this page, another track or another machine: SAMP's value is taken as it is, and no
@@ -1032,7 +1032,7 @@ static void sample_list(void *c, void *view, int slot, int kind)
  * knob D is SAMP (rec.c's smp_ui_pop takes a turn up past 127 onto the FLEX buffers) */
 int smp_samp_page(void)
 {
-    u32 now = *(volatile u32 *)0x4058E8D4u;
+    u32 now = *(volatile u32 *)0x4058F8D4u;
     return now - lst_seen_at < 300u && list_trk == (int)UI_TRACK
         && list_kind >= SMP_KIND0 && list_kind < SMP_KIND0 + SMP_N0;
 }
@@ -1046,7 +1046,7 @@ int smp_list_elsewhere(void)
  * DT2's header in the title bar, the bank, five slots around SAMP's, the scroll bar */
 int smp_list_visible(void)
 {
-    u32 now = *(volatile u32 *)0x4058E8D4u;
+    u32 now = *(volatile u32 *)0x4058F8D4u;
     return smp_lst_open && now - lst_seen_at < 3000u;
 }
 
@@ -1215,7 +1215,7 @@ void smp_fb_unmark_all(void)
  * or any SAMP p-lock (slot 43) of that pattern's track names it. The project's base is
  * found from the playing pattern and the live kit, which must agree on one pattern index;
  * if they don't, nothing is marked (never a guess that unloads a sample in use). */
-#define SEQ_PATTERN_PTR (*(u8 *volatile *)0x42C5A9A0u)
+#define SEQ_PATTERN_PTR (*(u8 *volatile *)0x42C5B9A0u)
 #define KIT_LIVE (*(u8 *volatile *)0x800052A0u)
 #define PRJ_PATTERNS 0x1Cu
 #define PRJ_PATTERN_BYTES 122478u
@@ -2099,7 +2099,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
 extern int rec_src, rec_thres, rec_dest, rec_rlen, rec_rstrt, rec_saved_slot;
 extern int rec_state, rec_peak, rec_link;
 extern u32 rec_frames, rec_heard, rec_room;
-#define FRAMES_NOW (*(volatile u32 *)0x4058E8D4u)
+#define FRAMES_NOW (*(volatile u32 *)0x4058F8D4u)
 
 static void clear(void *c, int x0, int y0, int x1, int y1)
 {

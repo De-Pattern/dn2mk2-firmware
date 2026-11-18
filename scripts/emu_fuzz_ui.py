@@ -53,17 +53,17 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-KIT = 0x4210C08C
+KIT = 0x4210D08C
 SOUND = 1163
 # v0.38 (blskk: "arpeggiator, note edit and sampler make the digitone crash"): the stock arp,
 # KEYBOARD and its chord memories (what NOTE EDIT stores) on the sample machines. The arp's
 # own settings in the sound (docs/arp-hidden-modes.md): MODE, RNG, LEN, the step mask
 ARP_MODE, ARP_RNG, ARP_LEN, ARP_MASK = 351, 353, 355, 356
 SLCE_AT = 0x6C                          # SLCE's value (record 257, slot 44): 0 is NOTE
-# the snapshot's project settings (the getter at 0x40194212, read in the emulator): +29 the
+# the snapshot's project settings (the getter at 0x401944f2, read in the emulator): +29 the
 # KEYBOARD's scale, +30 its MODE when +33 bit 0 is clear (5: the chord memories), and the
 # chord memories, one a [TRIG] key: 16 notes at +35 + 16 k, ended by -1 (0x4003c17c)
-PROJ = 0x412366CC
+PROJ = 0x412376CC
 KB_MODE, KB_TRACKWISE, CHORDS = 30, 33, 35
 BIG_CHORD = bytes([0, 3, 7, 10, 12, 15, 19, 22, 24, 27, 31, 34, 0xFF, 0xFF, 0xFF, 0xFF])    # 12 notes
 
@@ -92,10 +92,10 @@ def scenario_steps(lay) -> list[str]:
     st += [f"poke:{KIT + 52 + SOUND * t + SLCE_AT:#x}:0000" for t in range(16)]
     st += pool_steps(lay) + ["wait:6", "tap:2", "wait:8", "alive:start"]
     st += arp_steps(0, 2) + chord_steps(range(16))
-    st += ["mem:0x405984a8:4", "tap:20", "wait:4", "seq:2", "tap:18", "wait:4", "press:25", "wait:2", "seq:6",
+    st += ["mem:0x405994a8:4", "tap:20", "wait:4", "seq:2", "tap:18", "wait:4", "press:25", "wait:2", "seq:6",
            "press:27", "seq:6", "png:held", "release:25", "release:27", "seq:2", "alive:s1",
            "press:17", "tap:50", "release:17", "wait:8", "press:30", "seq:4", "release:30", "png:rec",
-           "no", "wait:4", "tap:53", "wait:6", "press:26", "seq:4", "release:26", "mem:0x405984a8:4",
+           "no", "wait:4", "tap:53", "wait:6", "press:26", "seq:4", "release:26", "mem:0x405994a8:4",
            "tap:18", "wait:4", "tap:21", "wait:4", "alive:s2"]
     st += ["no", "wait:4", "no", "wait:4", "tap:3", "wait:8", "alive:p1", "png:p1", "tap:2", "wait:8", "alive:p2", "png:p2"]
     return st
@@ -206,7 +206,7 @@ def judge(r: dict, lay, baseline_pages: set, real_isr: bool = False) -> tuple[bo
     isr = r.get("isr") or {}
     exceptions = [(f.get("step"), f.get("vector"), f.get("fault_pc")) for f in r.get("fault_reports", [])]
     # (an exception aborts the emulator itself -- unicorn does not dispatch them -- so it shows
-    # as a run that did not finish. 0x4011ea6a, the firmware's formatter, runs on stock too:
+    # as a run that did not finish. 0x4011ed4a, the firmware's formatter, runs on stock too:
     # it is no fault sign. A checkpoint with no new frame is not a freeze by itself -- nothing
     # may have needed redrawing -- so the stalls are kept for the report, and the verdict is the
     # last probe's)
@@ -278,7 +278,7 @@ def main(argv=None) -> int:
         else:
             ok, info = judge(r, lay, baseline_pages, bool(a.isr_frame))
             mem = r.get("memory", {})
-            ran = [v for k, v in mem.items() if k.startswith("0x405984a8")]
+            ran = [v for k, v in mem.items() if k.startswith("0x405994a8")]
             info["facts"]["the arp ran (its state's step counter changed)"] = len(ran) == 2 and ran[0] != ran[1]
             ok = all(info["facts"].values())
         report["arpnote"] = {"ok": ok, **info}

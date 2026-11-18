@@ -130,7 +130,7 @@ def main() -> int:
     def word(slot):
         return struct.unpack(">H", c.read(snd + 0x14 + 2 * slot, 2))[0]
 
-    owner = c.call(0x4018A97A)[0]
+    owner = c.call(0x4018AC5A)[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, 0, ONESHOT, 1, 1)
     setup.append(("track 0 ONESHOT", "direct call of smp_machine_commit (the UI's commit path, not MACHINE SEL's keys)"))
     c.poke(SM.MIRROR + 8, b"\x00" * 16 * SM.POOL_SLOTS)          # an empty pool: room to record
@@ -294,7 +294,7 @@ def main() -> int:
         c.frame_filter = fil
     setup.append(("the note", "UI: KEYBOARD, [TRIG 9] held"))
     kb, trig9 = names.get("KEYBOARD"), 33
-    KB_ON = 0x42431A99                                           # KEYBOARD's state byte (the gate's kbrec step)
+    KB_ON = 0x42432A99                                           # KEYBOARD's state byte (the gate's kbrec step)
     kb_was = c.read(KB_ON, 1)[0]
     if kb and not kb_was:                                        # a tap toggles it: only when it is off
         tap(kb)

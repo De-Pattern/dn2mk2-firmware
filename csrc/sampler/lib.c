@@ -40,10 +40,10 @@ typedef unsigned char u8;
 #error "the sampler's constants are passed by the build (dnfw.waverider.cpage)"
 #endif
 
-#define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
-#define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
-#define BLK_READY (*(volatile u32 *)0x4461B68Cu)
-#define BLK_SECTORS (*(volatile u32 *)0x4461B6B0u)
+#define BLK_READ  ((int (*)(u32, u32, void *))0x4012C87Au)          /* (sector, bytes, buf) -> 0 ok */
+#define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012CA60u)
+#define BLK_READY (*(volatile u32 *)0x4461C68Cu)
+#define BLK_SECTORS (*(volatile u32 *)0x4461C6B0u)
 
 #define POOL_STORE_END (0x600000u + 1u + POOL_BYTES / 512u)         /* link.c's image ends here */
 #define LIB_SECTOR 0x700000u

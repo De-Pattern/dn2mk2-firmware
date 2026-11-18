@@ -8,7 +8,7 @@ something that passed before, not a docs-only rebuild. Every build, every time.
 (Owner, 2026-10-11: *"we absolutely CANNOT risk anything that will potentially harm
 my unit."*)
 
-    DT2_SECTIONS=../sec111 python scripts/ship_gate.py ../Digitone_II_OS1.11.syx BUILD.syx
+    DT2_SECTIONS=../sec112 python scripts/ship_gate.py ../Digitone_II_OS1.12.syx BUILD.syx
 
 It runs, in order, and stops at the first failure: preflight (bootstrap, updater,
 metadata, Outbox untouched; signature; DSP size) → DSP identity → DSP hardware rules → ColdFire
@@ -61,7 +61,7 @@ When a build prints `CLEARED TO FLASH`, in the same session:
    and a section: file name, sha256, gate date, source commit, what it adds, numbered
    tests, known issues).
 2. Copy it and its `.gate.json` to the `builds` branch as
-   `vX.Y-NAME/DN2mod_vX.Y_NAME_OS1.11.syx` (a worktree), with `FIRMWARE.md` as that
+   `vX.Y-NAME/DN2mod_vX.Y_NAME_OS1.12.syx` (a worktree), with `FIRMWARE.md` as that
    branch's `README.md`, and push. Renaming keeps the sha256, so the gate record holds.
 3. Bundle it for the in-browser patcher (`docs/patcher.md`):
    `python scripts/web_bundle.py BUILD.syx X.Y NAME ../../dn2mk2/patcher`, then commit and

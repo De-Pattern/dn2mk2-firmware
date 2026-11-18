@@ -25,12 +25,12 @@ from emulib.machine import Machine                             # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 SRC, STATE = 0x80003AF0, 0x8000DE60
-OWNER, FRAMES, TEMPO_AT = 0x80005308, 0x4058E8D4, 0x80005E60 + 216
+OWNER, FRAMES, TEMPO_AT = 0x80005308, 0x4058F8D4, 0x80005E60 + 216
 KIT, SOUND_STRIDE = 0x800052A0, 1163
-SYNC, UNDO, BITMAP_CLEAR = 0x4002549C, 0x400DAF44, 0x400DB052
-BUILD, APPLY = 0x400D85E8, 0x400DB092
-LOAD, SAVE, CLEAR = 0x400DE51E, 0x400DE718, 0x4003D14E
-SEQ_PLAYING, SEQ_PATTERN, TRACK_CUR = 0x42C5A918, 0x42C5A9A0, 0x42C5A984
+SYNC, UNDO, BITMAP_CLEAR = 0x4002549C, 0x400DB0A8, 0x400DB1B6
+BUILD, APPLY = 0x400D874C, 0x400DB1F6
+LOAD, SAVE, CLEAR = 0x400DE682, 0x400DE87C, 0x4003D14E
+SEQ_PLAYING, SEQ_PATTERN, TRACK_CUR = 0x42C5B918, 0x42C5B9A0, 0x42C5B984
 PAT_LENGTH, PAT_MODE = 122196, 122201
 REC, RECS, INDEX, TABLE_BYTES = 258, 80, 20640, 22256 + 2048
 LIST_BYTES = 20 + 202 * 8
@@ -137,7 +137,7 @@ def main() -> int:
     put32(SEQ_PLAYING, 0)
     table = pat + PAT_LOCK_TABLE
     # the model's table getter (vtable +40: *(model + 16)) must give the same address
-    APP, TRACK_CTX = 0x4018A97A, 0x4003EFDE
+    APP, TRACK_CTX = 0x4018AC5A, 0x4003EFDE
     app = call(APP)[0]
     ctx = call(TRACK_CTX, app)[0]
     model = machine.long(ctx + 44)
@@ -423,7 +423,7 @@ def main() -> int:
         panel.settle(5_000_000)
         # v0.45: the trig LEDs (stock's LedManager, docs/leds.md: modes at +40, palette values at
         # +256, 4 bytes an LED; the trig keys are ids 26..41) -- stock's before the panel opens
-        LM_PTR = 0x446478E0
+        LM_PTR = 0x446488E0
 
         def leds():
             lm = machine.long(LM_PTR)
@@ -534,7 +534,7 @@ def main() -> int:
     # ---- v0.46 (depaffect: BOUNCE's BUF read 0%..100%): the header's text for BUF (record 244) on a
     # BOUNCE track is the buffer, 1..8, over its whole range; on any other machine 244 keeps stock's
     if "smp_formats" in lay:
-        REC244 = 0x401F7F94 + 60 * 244
+        REC244 = 0x401F83A4 + 60 * 244
         stock_f = machine.long(REC244 + 0x34)
         lo = struct.unpack(">i", machine.read(REC244 + 8, 4))[0] >> 8
         call(lay["smp_formats"], 13)                         # SMP_BOUNCE_KIND (type 17 - 4)
@@ -555,7 +555,7 @@ def main() -> int:
     # v0.47: the Monomachine's TUNE (knob H, record 240): its header text a signed knob
     # (-64..+63, 0 in tune), not stock's percentage; FUNC + turn steps by semitones (32)
     if "smp_quant" in lay:
-        REC240 = 0x401F7F94 + 60 * 240
+        REC240 = 0x401F83A4 + 60 * 240
         stock_t = machine.long(REC240 + 0x34)
         call(lay["smp_formats"], 2)                          # SID 6581 (type 6, kind 2)
         f_t = machine.long(REC240 + 0x34)

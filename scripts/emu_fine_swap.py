@@ -36,9 +36,9 @@ sys.path.insert(0, str(HERE.parent / "src"))
 
 SNAP = str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap")
 KIT, STRIDE = 0x800052A0, 1163
-UI_TRACK = 0x42431A6C
-REC = lambda i: 0x401F7F94 + 60 * i            # noqa: E731
-ENT = lambda i: 0x4243325C + 68 * i            # noqa: E731
+UI_TRACK = 0x42432A6C
+REC = lambda i: 0x401F83A4 + 60 * i            # noqa: E731
+ENT = lambda i: 0x4243425C + 68 * i            # noqa: E731
 IDS = (239, 258, 257)                           # STRT, LEN, LOOP
 SLOTS = {239: 26, 258: 45, 257: 44}
 FREQ = 36
@@ -116,7 +116,7 @@ def main() -> int:
     lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
 
     def commit(t, ty):                               # MACHINE SEL's commit as the UI makes it: through
-        owner = guest(m, 0x4018A97A)                 # its call at 0x4005bba0, which the mod points at
+        owner = guest(m, 0x4018AC5A)                 # its call at 0x4005bba0, which the mod points at
         guest(m, lay["smp_machine_commit"], owner + 0xF4, t, ty, 1, 1)   # smp_machine_commit (rec.c)
         panel.settle(5_000_000)
 

@@ -15,7 +15,7 @@ nothing but wall-clock and runs unattended.
 
 Three outcomes, and they are deliberately not the same:
 
-- **fault** -- the firmware's own reporter at `0x4011ea6a` ran. That routine
+- **fault** -- the firmware's own reporter at `0x4011ed4a` ran. That routine
   formats `V%02x M%x P%08x`, so the vector, the mode and the faulting PC come
   from the machine rather than from a photograph of the screen.
 - **no UI** -- it never faulted and never composed a frame either. A hang looks
@@ -48,7 +48,7 @@ from unicorn.m68k_const import UC_M68K_REG_A2, UC_M68K_REG_D3  # noqa: E402
 ROOT = pathlib.Path("/mnt/d/01_Code/Z_Personal/dn2_firmware")
 SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
 CACHE = ROOT / "out/boot-check/control.json"
-REPORTER = 0x4011EA6A
+REPORTER = 0x4011ED4A
 ANIZ_LIMIT = 700_000_000                 # v0.37: past the intro's first frame (measured: shown before 700M)
 
 # **The control is only a control while the emulator it was measured on stays

@@ -19,14 +19,14 @@ from dnfw.mods import platform, waverider
 from dnfw.waverider import coldfire as CF
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.12_dist.zip"  # the shipping build targets 1.12 (docs/os112-port.md)
 BASE = waverider.BASE
 
 
 @pytest.fixture(scope="module")
 def dn2_111():
     if not STOCK_111.exists():
-        pytest.skip("Digitone II 1.11 is not in 00_Resources")
+        pytest.skip("Digitone II 1.12 is not in 00_Resources")
     from dnfw.cli.files import read_image
     from dnfw.firmware.load import load
     return load(read_image(STOCK_111))
@@ -130,7 +130,7 @@ def test_the_list_offers_our_machines_then_the_sample_machines_before_midi(appli
 
 def test_rows_5_to_12_of_the_name_table(applied):
     main = applied.payloads[3]
-    table = long_at(main, 0x400DC344)
+    table = long_at(main, 0x400DC4A8)
     # v0.26: 6, 7 (and 14..) the Monomachine's machines (RESONATOR's and CZ's until v0.25)
     assert CF.MACHINE_NAMES[5] == ("Perc", "PRC") and CF.MACHINE_NAMES[13] == ("Slice", "SLC")
     assert CF.MACHINE_NAMES[6] == ("SID 6581", "SID") and CF.MACHINE_NAMES[7] == ("DPRO Wave", "DPW")
@@ -138,17 +138,17 @@ def test_rows_5_to_12_of_the_name_table(applied):
         lo, sh = (n.encode() + b"\0" for n in CF.MACHINE_NAMES[row])
         long_ptr, short_ptr = _clong(table + 12 * row), _clong(table + 12 * row + 4)
         assert _chunked(long_ptr, len(lo)) == lo and _chunked(short_ptr, len(sh)) == sh
-    for bound in (0x400DC332, 0x400DC358, 0x400DC37E):
+    for bound in (0x400DC496, 0x400DC4BC, 0x400DC4E2):
         assert at(main, bound, 2) == bytes([0x72, CF.TYPES_LAST])    # rows to TYPES_LAST (v0.19: 13)
 
 
 def test_attribute_rows_5_to_12_are_wavetones(applied, stock):
     main = applied.payloads[3]
-    rows = long_at(main, 0x400DC168)
+    rows = long_at(main, 0x400DC2CC)
     assert _chunked(rows, 20) == at(stock, CF.ATTR_STOCK_VA, 20)
     for row in CF.NEW_TYPES:
         assert _chunked(rows + 4 * row, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
-    assert at(main, 0x400DC19C, 2) == bytes([0x74, CF.TYPES_LAST])   # v0.19: to 13 (v0.26: TYPES_LAST)
+    assert at(main, 0x400DC300, 2) == bytes([0x74, CF.TYPES_LAST])   # v0.19: to 13 (v0.26: TYPES_LAST)
 
 
 def test_the_stored_sound_load_keeps_types_5_to_12(applied):
@@ -287,12 +287,12 @@ def test_the_key_handler_slot_points_into_the_renderer_and_stock_is_kept():
 
 def test_the_recorder_screen_hooks_replace_exactly_the_stock_calls():
     # v0.22: the UI loop's queue receive and screen draw become jsr's into the renderer
-    # chunk (which call stock's own: 0x40001928, 0x4011d32a); FUNC + VOICE's branch of the
+    # chunk (which call stock's own: 0x40001928, 0x4011d60a); FUNC + VOICE's branch of the
     # key handler becomes jsr rec_combo + bra to the handler's common exit
     c = waverider.SPEC["c_chunk"]
     lo, hi = c["load"], c["load"] + len(bytes.fromhex(c["code"]))
     for site, stock_bytes, called in ((CF.UI_POP_SITE, CF.UI_POP_STOCK, 0x40001928),
-                                      (CF.SCREEN_SITE, CF.SCREEN_STOCK, 0x4011D32A)):
+                                      (CF.SCREEN_SITE, CF.SCREEN_STOCK, 0x4011D60A)):
         e = _edit(site)
         assert bytes.fromhex(e["stock"]) == stock_bytes
         new = bytes.fromhex(e["new"])
@@ -411,14 +411,14 @@ def test_v045_ping_is_gone_and_its_sites_are_stock(applied, dn2_111):
     # descriptor and its response curve -- so a sound saved with filter 6 loads as stock
     # loads it, as Multi-Mode (the gate's engine step round-trips 6, 7 and 8 to 0)
     sites = (0x4004DB0C, 0x4004DB2C, 0x4004DB32, 0x4004DB36,      # the FLTR list
-             0x400DC3A4, 0x400DC3B6, 0x400DC3CA, 0x400DC3DE,      # the name accessors
-             0x400DD2BC,                                          # the LOAD bound
-             0x400DC096, 0x400C24B0, 0x4006ECA0)                  # slot_to_id, descriptor, curve
+             0x400DC508, 0x400DC51A, 0x400DC52E, 0x400DC542,      # the name accessors
+             0x400DD420,                                          # the LOAD bound
+             0x400DC1FA, 0x400C2614, 0x4006ECA0)                  # slot_to_id, descriptor, curve
     for e in waverider.SPEC["edits"]:
         assert not any(e["va"] <= va < e["va"] + len(e["new"]) // 2 for va in sites), hex(e["va"])
     main, _ = platform.split(applied.payloads[3])
     stock = dn2_111.container.find(3).unpack()
     for va in sites:
         assert at(main, va, 8) == at(stock, va, 8), hex(va)
-    assert at(main, 0x401DDD40, 24) == struct.pack(">6I", 0, 1, 4, 3, 5, 2)   # stock's six filters
+    assert at(main, 0x401DE150, 24) == struct.pack(">6I", 0, 1, 4, 3, 5, 2)   # stock's six filters
     assert "ping_chunk" not in waverider.SPEC and not any(k.startswith("ping_") for k in waverider.SPEC["layout"])
