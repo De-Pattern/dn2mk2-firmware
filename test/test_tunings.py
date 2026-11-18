@@ -1,4 +1,4 @@
-"""v0.60: the factory tunings against their definitions (docs/microtuning.md)."""
+"""v0.61: the factory tunings against their definitions (docs/microtuning.md)."""
 from dnfw.waverider import tunings as T
 
 
@@ -42,3 +42,10 @@ def test_negative_control():
         assert "BAD" in str(e)
     finally:
         T.FACTORY = old
+
+
+def test_c_header():
+    h = T.c_header()
+    assert "#define TN_FACTORY 11" in h and "#define TN_USER 8" in h
+    assert h.count("{0, ") >= 11 and '"JMAJ"' in h and '"POOLE ROD12"' in h
+    assert all(s.isupper() or not s.isalpha() for _, s, _ in T.FACTORY)   # the screen's font: capitals

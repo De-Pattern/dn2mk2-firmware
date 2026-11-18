@@ -624,6 +624,8 @@ static void fx_save(void)
 
 void rec_poll(void)
 {
+    extern void tn_poll(void);                  /* v0.61: the project's tuning (tune.c) */
+    tn_poll();
     /* v0.48: a turned control's value shows for a second (smp_page.c shows()); then its
      * label again, drawn once more when the second is up */
     static int val_shown __attribute__((section(".data"))) = 0;
@@ -1914,6 +1916,13 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     if (!rec_overlay && it[0] == IT_KNOB) {     /* parameter slides: E and F on TRIG page 2 */
         extern int sl_knob(u32 index, int delta);
         if (sl_knob(code, (signed char)it[8])) {
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+    }
+    if (!rec_overlay && !smp_lst_open && !smp_fb_open) {   /* v0.61: TUNING, KB SETUP's H (tune.c) */
+        extern int tn_pop(u8 *it);
+        if (tn_pop(it)) {
             it[0] = IT_DROP;
             return (u32)it;
         }

@@ -1,4 +1,4 @@
-"""v0.60 microtuning: the factory tunings (docs/microtuning.md).
+"""v0.61 microtuning: the factory tunings (docs/microtuning.md).
 
 A tuning is 12 offsets in tenths of a cent, one per semitone above its ROOT (pc 0..11), against
 12-TET, repeating every octave. The audio side adds them to a voice's NOTE word
@@ -33,9 +33,9 @@ _QC = 1200 * log2(Fraction(3, 2)) - 1200 * log2(Fraction(81, 80)) / 4
 # (full name, short name, offsets in cents by pc above ROOT)
 FACTORY = [
     ("12-TET", "12TET", [0.0] * 12),
-    ("JUST MAJOR", "JUSTM", _ratios(["1", "16/15", "9/8", "6/5", "5/4", "4/3", "45/32", "3/2",
+    ("JUST MAJOR", "JMAJ", _ratios(["1", "16/15", "9/8", "6/5", "5/4", "4/3", "45/32", "3/2",
                                      "8/5", "5/3", "9/5", "15/8"])),
-    ("JUST MINOR", "JUSTm", _ratios(["1", "16/15", "10/9", "6/5", "5/4", "4/3", "64/45", "3/2",
+    ("JUST MINOR", "JMIN", _ratios(["1", "16/15", "10/9", "6/5", "5/4", "4/3", "64/45", "3/2",
                                      "8/5", "5/3", "16/9", "15/8"])),
     ("PYTHAGOREAN", "PYTH", _ratios(["1", "256/243", "9/8", "32/27", "81/64", "4/3", "729/512",
                                      "3/2", "128/81", "27/16", "16/9", "243/128"])),
@@ -77,3 +77,17 @@ def check():
         assert abs(c[0]) < 1e-9, n
         assert all(-999 <= t <= 999 for t in tenths(c)), n
     return True
+
+
+def c_header() -> str:
+    """The factory tunings for csrc/sampler/tune.c (wr_gen.h, under TUNE_C): their tenths of a cent
+    and their names, the user slots' count."""
+    t = table()
+    rows = ",\n ".join("{" + ", ".join(str(v) for v in c) + "}" for _, _, c in t)
+    longs = ", ".join(f'"{n}"' for n, _, _ in t)
+    shorts = ", ".join(f'"{s}"' for _, s, _ in t)
+    return (f"\n/* v0.61 microtuning (dnfw.waverider.tunings) */\n#ifdef TUNE_C\n"
+            f"#define TN_FACTORY {len(t)}\n#define TN_USER {USER_SLOTS}\n"
+            f"static const short tn_factory[TN_FACTORY][12] = {{\n {rows}}};\n"
+            f"static const char *const tn_long[TN_FACTORY] = {{{longs}}};\n"
+            f"static const char *const tn_short[TN_FACTORY] = {{{shorts}}};\n#endif\n")
