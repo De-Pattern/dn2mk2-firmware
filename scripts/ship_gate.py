@@ -2435,9 +2435,15 @@ def main() -> int:
             nw = "0000" + "".join(f"{w:04x}" for w in words)
             M = lambda n, k=4: f"mem:{L[n]:#x}:{k}"                       # noqa: E731
             ts = ["wait:3", f"poke:{vt_va:#x}:{vtrack}"]
+            from dnfw.sampler import machines as SMt     # noqa: PLC0415
+            ty5 = 0x4210C08C + 52 + 1163 * 5 + 0xDE      # track 6's machine (the snapshot's kit)
             for tun, mask in ((9, 0xFFFF & ~(1 << 3)), (0, 0xFFFF)):
                 ts += [f"call:{L['tn_set']:#x}:{tun}:2:{mask}", f"poke:{scratch:#x}:{nw}",
                        f"call:{L['tn_retune']:#x}:{scratch:#x}", f"mem:{scratch:#x}:34"]
+            # track 6 made a SLICE track: its voice never retuned (the note picks the slice)
+            ts += [f"mem:{ty5:#x}:1", f"poke:{ty5:#x}:{SMt.TYPE_OF['SLICE']:02x}",
+                   f"call:{L['tn_set']:#x}:9:2:{0xFFFF & ~(1 << 3)}", f"poke:{scratch:#x}:{nw}",
+                   f"call:{L['tn_retune']:#x}:{scratch:#x}", f"mem:{scratch:#x}:34"]
             ts += [f"call:{L['tn_set']:#x}:0:0:0"]
             # the negative control first: the main page, H turned and pushed
             ts += ["spin:7:4", "wait:3", "tap:48", "wait:3", M("tn_mask"), M("tn_ui"), "png:main_h"]
@@ -2486,8 +2492,11 @@ def main() -> int:
                 u8 = TUg.USER_SLOTS - 1                # USER 8
                 facts = {
                     "POOLE ROD12 at ROOT D: each tuned voice its offset; track 4's and voice 15's as they were":
-                        len(frames) == 2 and frames[0] == want({3}) and frames[0] != words,
-                    "12-TET on every track: no NOTE word moved": len(frames) == 2 and frames[1] == words,
+                        len(frames) == 3 and frames[0] == want({3}) and frames[0] != words,
+                    "12-TET on every track: no NOTE word moved": len(frames) == 3 and frames[1] == words,
+                    "a SLICE track's voice never retuned; the others as before":
+                        len(frames) == 3 and frames[2] == [w if v == 5 else x for v, (w, x) in enumerate(zip(words, want({3})))]
+                        and frames[2] != frames[0],
                     "the main page: H turned and pushed, nothing of ours moved (stock's)":
                         mk[:1] == [0] and ui[:1] == [0],
                     "KB SETUP: H tunes this track (JUST MAJOR, then JUST MINOR)":

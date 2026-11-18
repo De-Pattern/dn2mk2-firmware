@@ -31,6 +31,10 @@ typedef unsigned char u8;
 #define VOICE_TRACK ((volatile u32 *)0x80005308u)
 #define FRAME_NOTE(v) (1u + (v))                       /* u16 index: byte 2 + 2v */
 #define UI_TRACK (*(volatile u8 *)0x42431A6Cu)
+#define KIT (*(volatile u32 *)0x800052A0u)
+#define SOUND_TYPE(t) (*(volatile signed char *)(KIT + 52u + 1163u * (u32)(t) + 0xDEu))
+#define GRID_TYPE 12                            /* dnfw.sampler.machines.TYPE_OF */
+#define SLICE_TYPE 13
 #define NOW (*(volatile u32 *)0x4058E8D4u)               /* the UI's clock (1,500 a second) */
 #define ACTIVE_PROJECT (*(volatile signed char *)0x405CD899u)
 
@@ -169,6 +173,13 @@ void tn_retune(volatile u16 *f)
         u32 t = VOICE_TRACK[v];
         if (t >= 16 || !(s->mask >> t & 1u))
             continue;
+        /* SLICE and GRID: the note picks the slice (the DSP truncates it: a note a fraction
+         * flat would play the slice below) and the sample keeps its pitch: never retuned */
+        if (KIT) {
+            int ty = SOUND_TYPE(t);
+            if (ty == SLICE_TYPE || ty == GRID_TYPE)
+                continue;
+        }
         u32 w = f[FRAME_NOTE(v)];
         int pc = ((int)(w >> 8) - s->root) % 12;
         if (pc < 0)
