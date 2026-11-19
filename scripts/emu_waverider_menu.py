@@ -1641,7 +1641,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         # smp_save_keep cleared by the save. The first take is its negative control
         for j, pk in enumerate((4000, 32000, 10, 0, 4000)):
             keep = j == 4
-            nslot, nplace, nfr = 41 + j, (20 + 4 * j) << 20, 2000
+            nslot, nplace, nfr = 41 + j, (16 if keep else 20 + 4 * j) << 20, 2000   # (inside REC_BYTES)
             noff = SM.REC_OFFSET + nplace
             fr = [int(round(pk * _m.sin(2 * _m.pi * 7 * k / nfr + 0.3))) for k in range(nfr)]
             fr[123] = -pk                        # (its peak, exactly; 0: all zero)
