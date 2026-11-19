@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.61 | 2026-11-19 | **microtuning**: KB SETUP's H is TUNE; a tuning per project (11 factory, 8 USER), switched per track; TUNING and EDIT pages | `builds/v0.61-MICROTUNING/` | yes |
 | v0.60 | 2026-11-18 | fixes: **FM+** pages (knobs on the right parameters, the frequency bars drawn); **GRID** ALLOCATE SLICE RANDOM keeps its locks on NO | `builds/v0.60-FIXES/` | yes |
 | v0.59 | 2026-11-18 | the Monomachine's **FM+ STAT / PAR / DYN** machines; **MON** on the RECORDER (hear the input while armed or recording) | `builds/v0.59-FMPLUS/` | yes |
 | ~~v0.58~~ PULLED | 2026-11-17 | two microtonal scales in KB SETUP: **Poole Rod12** and **Poole12 Min** after Locr. bb3 bb7, each note tuned by its cents above ROOT | `builds/v0.58-SCALES/` | yes |
@@ -98,6 +99,55 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.61 — MICROTUNING (a tuning per project, chosen per track)
+
+`DN2mod_v0.61_MICROTUNING_OS1.11.syx`
+sha256 `6c945a66b627e2bbbfcc29ed0bf4f42c41ef276a560baba2f2a2b924301fb4de`
+Gate: CLEARED TO FLASH, 2026-11-19 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the new tune/tunerec and the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `796f5d6` (branch `microtuning`). Docs: `docs/microtuning.md`.
+
+Everything in v0.60, plus:
+
+**Microtuning.** One tuning per project: 12 offsets in tenths of a cent, one per semitone above
+its ROOT, repeating every octave. Each of the 16 tracks is tuned or not.
+- Factory tunings: 12-TET, Just Major, Just Minor, Pythagorean, Meantone 1/4, Werckmeister III,
+  Kirnberger III, Vallotti, Arabic Rast, Poole Rod12, Poole12 Min. Plus USER 1..8, your own.
+- Everything played on a tuned track is retuned voice by voice: keyboard, trigs, chords, arp,
+  slides. MIDI tracks and MIDI out stay 12-TET. KB SETUP's SCALE, ROOT and MODE stay stock's.
+- **KB SETUP** (FUNC + KEYBOARD): the empty H slot is **TUNE**. Turn H to tune the active track
+  (OFF or a tuning); push H to open TUNING.
+- **TUNING**: A TUNE, B ROOT, C TRK (this track on/off), D ALL (every track on/off). YES on a
+  USER tuning opens EDIT; NO closes. The [TRIG] keys and the keyboard play through.
+- **EDIT**: A NOTE (or LEFT/RIGHT), B CENT, C .1CT, D FROM; FUNC + YES copies FROM into the slot
+  (copy 12-TET to reset it); NO goes back.
+- Saved with the project on the unit's flash, two seconds after the last change and before a
+  LOAD or NEW; read back on LOAD and at power-on.
+- It never touches stock's scale tables (v0.58's chord MODE crash cannot come back).
+
+**Gate (new steps):**
+- `tune`: Poole Rod12 at ROOT D moves each tuned voice by its offset; an untuned track, a voice
+  with no track, 12-TET, and a SLICE track move nothing; on the main page H is stock's; the KB
+  SETUP, TUNING and EDIT flows; every screen drawn.
+- `tunerec`: the record per project: written two seconds after a change into its own sectors,
+  LOAD/NEW/power cycle, corrupted copies and another project's record refused, ERASE's lock,
+  every write inside 0x6E0400..0x6E04FF.
+
+**Tests**
+1. FUNC + KEYBOARD: H reads TUNE OFF; turning it shows the tunings; the main page's H is unchanged.
+2. Track 1 on POOLE ROD12 (or JUST MAJOR), play a C major chord: it sounds retuned against a
+   12-TET track playing the same chord.
+3. Push H: TUNING. Change ROOT and hear the tuning move; C TRK and D ALL switch tracks (the boxes follow).
+4. A USER slot: YES opens EDIT; move a note's CENT and .1CT; FUNC + YES copies FROM; NO, NO closes.
+5. Wait two seconds, LOAD another project, LOAD this one back: the tuning, ROOT, tracks and USER slot are kept. Power cycle: still kept.
+6. Chords, arp and slides on a tuned track: all retuned, nothing crashes.
+7. A SLICE or GRID track stays where it was (never retuned).
+8. The regression check (top of this file).
+
+**Known issues**
+- ERASE MOD DATA does not yet clear the tunings: a project's tuning survives an erase.
+- One tuning per project. USER slots are USER 1..8; they cannot be renamed.
+- SLICE and GRID tracks are never retuned (their note picks the slice).
+- Everything listed for v0.60.
 
 ## v0.60 — FIXES (FM+ pages, GRID's ALLOCATE SLICE)
 
