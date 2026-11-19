@@ -715,6 +715,8 @@ static u32 ms_mask_now(void)
 void ms_frame(void *dst, const void *src, u32 n)
 {
     STOCK_COPY(dst, src, n);                          /* the stock call this replaces */
+    extern void tn_retune(volatile u16 *f);           /* v0.61: microtuning (tune.c) */
+    tn_retune(CTL_FRAME);
     ms_frames++;
     u32 m = ms_mask_now();
     ms_mask = m;

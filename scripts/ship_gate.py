@@ -216,6 +216,8 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("flexcore", "FLEX on the ColdFire: recorder trigs, ARM, the panel, an older BOUNCE track's trigs (ColdFire)"),
        ("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)"),
        ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
+       ("tune", "microtuning: KB SETUP's TUNE, the TUNING page, the frame's retune (ColdFire)"),
+       ("tunerec", "microtuning: each project's tuning record (ColdFire)"),
        ("thres", "THRES on both processors (coupled)"),
        ("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)"),
        ("flexplay", "FLEX buffers played by a ONESHOT track, on both processors (coupled)"),
@@ -547,7 +549,9 @@ def main() -> int:
                               ("smp_machine_commit", "SAMP kept across sample machines (ColdFire)"),
                               ("smp_knob_at", "FUNC + turn (ColdFire)"),
                               ("smp_pl_on", "per-project pools (ColdFire)"),
-                              ("jmp_on", "DIRECT JUMP (ColdFire)")):
+                              ("jmp_on", "DIRECT JUMP (ColdFire)"),
+                              ("tn_retune", "microtuning: KB SETUP's TUNE, the TUNING page, the frame's retune (ColdFire)"),
+                              ("tn_poll", "microtuning: each project's tuning record (ColdFire)")):
                 if re.search(rf"\b{sym}\b", csrc_text) and sym not in lay:
                     gate(what, False, f"{sym} is in the C but not in the layout: the check cannot run")
             results["symbols"] = "PASS: every C-keyed check has its symbol in the layout"
@@ -2412,6 +2416,132 @@ def main() -> int:
                           "RECORD twice leaves it off")
         later("kbrec", "KEYBOARD kept through grid recording (ColdFire)",
               "KEYBOARD kept through grid recording (ColdFire)", [kb_cmd, sorted(EMU_ENV.items())], kb_body)
+
+        # v0.61: microtuning (csrc/sampler/tune.c, docs/microtuning.md). The frame: tn_retune on 16
+        # voices (voice 15 of no track), POOLE ROD12 at ROOT D with every track tuned but track 4:
+        # each tuned voice its pitch class's offset, track 4's and voice 15's NOTE words as they
+        # were (the negative controls), and 12-TET on every track: nothing moved. The UI: KB SETUP
+        # (FUNC + KEYBOARD) draws TUNE in its empty H slot; H turned tunes this track (JUST MAJOR,
+        # then JUST MINOR), pushed opens TUNING; A, B, C, D there; YES on a factory tuning stays,
+        # on USER 8 opens EDIT, whose B moves the note's cents; NO, NO closes; FUNC + YES copies
+        # FROM in. And on the main page (KB SETUP closed) H and its push are stock's: nothing of
+        # ours moves (the negative control)
+        if "tn_retune" in lay:
+            from dnfw.waverider import tunings as TUg     # noqa: PLC0415
+            L = {n: lay[n] for n in ("tn_retune", "tn_set", "tn_mask", "tn_cur", "tn_root", "tn_ui", "tn_user", "tn_opens")}
+            scratch, vt_va = 0x46A08000, 0x80005308
+            vtrack = "".join(f"{v if v < 15 else 0xFF:08x}" for v in range(16))
+            words = [((60 + v) << 8) | 0x10 for v in range(16)]
+            nw = "0000" + "".join(f"{w:04x}" for w in words)
+            M = lambda n, k=4: f"mem:{L[n]:#x}:{k}"                       # noqa: E731
+            ts = ["wait:3", f"poke:{vt_va:#x}:{vtrack}"]
+            from dnfw.sampler import machines as SMt     # noqa: PLC0415
+            ty5 = 0x4210C08C + 52 + 1163 * 5 + 0xDE      # track 6's machine (the snapshot's kit)
+            for tun, mask in ((9, 0xFFFF & ~(1 << 3)), (0, 0xFFFF)):
+                ts += [f"call:{L['tn_set']:#x}:{tun}:2:{mask}", f"poke:{scratch:#x}:{nw}",
+                       f"call:{L['tn_retune']:#x}:{scratch:#x}", f"mem:{scratch:#x}:34"]
+            # track 6 made a SLICE track: its voice never retuned (the note picks the slice)
+            ts += [f"mem:{ty5:#x}:1", f"poke:{ty5:#x}:{SMt.TYPE_OF['SLICE']:02x}",
+                   f"call:{L['tn_set']:#x}:9:2:{0xFFFF & ~(1 << 3)}", f"poke:{scratch:#x}:{nw}",
+                   f"call:{L['tn_retune']:#x}:{scratch:#x}", f"mem:{scratch:#x}:34"]
+            ts += [f"call:{L['tn_set']:#x}:0:0:0"]
+            # the negative control first: the main page, H turned and pushed
+            ts += ["spin:7:4", "wait:3", "tap:48", "wait:3", M("tn_mask"), M("tn_ui"), "png:main_h"]
+            ts += ["press:17", "tap:18", "release:17", "wait:6", "png:kb0",
+                   "spin:7:2", "wait:3", M("tn_mask"), M("tn_cur"), "png:kb1",
+                   "spin:7:2", "wait:3", M("tn_cur"),
+                   "tap:48", "wait:3", M("tn_ui"), "png:tuning",
+                   "spin:1:3", "wait:2", "spin:3:2", "wait:2", M("tn_root"), M("tn_mask"),
+                   "tap:10", "wait:2", M("tn_ui"),
+                   "spin:0:30", "wait:2", M("tn_cur"), "tap:10", "wait:2", M("tn_ui"), "png:edit",
+                   "spin:1:4", "wait:2", M("tn_user", 192),
+                   "spin:3:9", "wait:2", "press:17", "tap:10", "release:17", "wait:2", M("tn_user", 192), "png:edit2",
+                   "tap:12", "wait:2", M("tn_ui"), "tap:12", "wait:3", M("tn_ui"), "png:closed"]
+            tu_js = work / "tune.json"
+            tu_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", ",".join(ts), "--png-dir", work / "tune", "--json", tu_js]
+
+            def tu_body(tdir):
+                rc, out = run("microtuning", tu_cmd, logs, env=EMU_ENV, trace=tdir)
+                if rc != 0 or not tu_js.exists():
+                    return False, out[-900:]
+                r = json.loads(tu_js.read_text())
+                mem = r["memory"]
+
+                def seq(addr):
+                    a_ = hex(addr)
+                    ks = sorted((k for k in mem if k == a_ or k.startswith(a_ + "@")),
+                                key=lambda k: int(k.split("@")[1]) if "@" in k else -1)
+                    return [bytes.fromhex(mem[k]) for k in ks]
+                frames = [list(struct.unpack(">17H", b))[1:] for b in seq(scratch)]
+                i32s = {n: [struct.unpack(">i", b)[0] for b in seq(L[n])] for n in ("tn_mask", "tn_cur", "tn_root", "tn_ui")}
+                users = [list(struct.unpack(">96h", b)) for b in seq(L["tn_user"])]
+                pr = TUg.tenths(TUg.FACTORY[9][2])
+
+                def want(skip):
+                    o = []
+                    for v, w in enumerate(words):
+                        pc = ((w >> 8) - 2) % 12
+                        n = pr[pc] * 256
+                        f = (n + 500) // 1000 if n >= 0 else -((-n + 500) // 1000)
+                        o.append(w if v == 15 or v in skip else max(0, min(0x7FFF, w + f)))
+                    return o
+                shots = {n: pathlib.Path(r["screens"][n]).read_bytes() if n in r["screens"] else b""
+                         for n in ("main_h", "kb0", "kb1", "tuning", "edit", "edit2", "closed")}
+                mk, cu, ui = i32s["tn_mask"], i32s["tn_cur"], i32s["tn_ui"]
+                u8 = TUg.USER_SLOTS - 1                # USER 8
+                facts = {
+                    "POOLE ROD12 at ROOT D: each tuned voice its offset; track 4's and voice 15's as they were":
+                        len(frames) == 3 and frames[0] == want({3}) and frames[0] != words,
+                    "12-TET on every track: no NOTE word moved": len(frames) == 3 and frames[1] == words,
+                    "a SLICE track's voice never retuned; the others as before":
+                        len(frames) == 3 and frames[2] == [w if v == 5 else x for v, (w, x) in enumerate(zip(words, want({3})))]
+                        and frames[2] != frames[0],
+                    "the main page: H turned and pushed, nothing of ours moved (stock's)":
+                        mk[:1] == [0] and ui[:1] == [0],
+                    "KB SETUP: H tunes this track (JUST MAJOR, then JUST MINOR)":
+                        mk[1:2] == [1] and cu[:2] == [1, 2],
+                    "H pushed: TUNING; B ROOT D#, D ALL on": ui[1:2] == [1] and i32s["tn_root"] == [3] and mk[2:3] == [0xFFFF],
+                    "YES on a factory tuning: TUNING stays; on USER 8: EDIT":
+                        ui[2:4] == [1, 2] and cu[2:3] == [TUg.USER_SLOTS + len(TUg.FACTORY) - 1],
+                    "EDIT: B moves the note's cents by whole cents; FUNC + YES copies FROM (POOLE ROD12) in":
+                        len(users) == 2 and users[0][12 * u8] == 40
+                        and users[1][12 * u8:12 * u8 + 12] == TUg.tenths(TUg.FACTORY[9][2]),
+                    "NO back to TUNING, NO closes": ui[4:6] == [1, 0],
+                    "the screens drawn, each its own": all(shots.values()) and len(set(shots.values())) == len(shots),
+                }
+                good = all(facts.values())
+                return good, ("tn_retune tunes only tuned tracks' voices by their pitch class; KB SETUP's H and the "
+                              "TUNING / EDIT pages work; H elsewhere is stock's" if good else
+                              json.dumps({k: v for k, v in facts.items() if not v}) + f" frames={frames} i32={i32s} "
+                              f"users={[u[84:96] for u in users]}")
+            later("tune", "microtuning: KB SETUP's TUNE, the TUNING page, the frame's retune (ColdFire)",
+                  "microtuning: KB SETUP's TUNE, the TUNING page, the frame's retune (ColdFire)",
+                  [tu_cmd, sorted(EMU_ENV.items())], tu_body)
+
+        # v0.61: each project's tuning record (scripts/emu_tune.py: power-on, a change written
+        # after two seconds into its own sectors, LOAD / NEW / a power cycle, a corrupted copy, both
+        # corrupted, another project's record refused, ERASE's lock, every write in its region)
+        if "tn_poll" in lay:
+            tr_syms = work / "tune_syms.json"
+            tr_syms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith(("smp_", "tn_"))}))
+            tr_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", f"link16:{tr_syms}:tune", "--png-dir", work / "tunerec"]
+
+            def tr_body(tdir):
+                rc, out = run("tuning record", tr_cmd, logs, env=EMU_ENV, trace=tdir)
+                res = work / "tunerec" / "link16_tune.json"
+                if rc != 0 or not res.exists():
+                    return False, out[-900:]
+                r = json.loads(res.read_text())
+                facts = r.get("facts", {})
+                good = bool(r.get("ok")) and len(facts) >= 9 and all(facts.values())
+                return good, ("each project's tuning: written after two seconds into its own sectors, read on "
+                              "LOAD and at power-on, reset by NEW, a corrupted copy falls back, another project's "
+                              "refused, nothing written under ERASE's lock, every write in its region" if good else
+                              json.dumps({k: v for k, v in facts.items() if not v})[:800] + f" writes={r.get('writes')}")
+            later("tunerec", "microtuning: each project's tuning record (ColdFire)",
+                  "microtuning: each project's tuning record (ColdFire)", [tr_cmd, sorted(EMU_ENV.items())], tr_body)
 
         # v0.48 (Error Kit): THRES on the coupled emulator (emu_coupled.py: the ColdFire and the
         # DSP together, block by block): a -34 dB tone on IN; THRES 30 (tick -45 dB) starts the

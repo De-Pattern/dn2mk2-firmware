@@ -192,8 +192,13 @@ void wr_screen(void *screen, void *canvas)
         sl_screen(1, 1);
         return;
     }
-    sl_screen(1, rec_visible() || slc_visible() || smp_fb_visible() || smp_list_visible());
-    if (rec_visible())
+    extern int tn_visible(void);                /* v0.61: TUNING (csrc/sampler/tune.c) */
+    extern void tn_draw(void *canvas);
+    extern void tn_kb_draw(void *canvas);
+    sl_screen(1, rec_visible() || slc_visible() || smp_fb_visible() || smp_list_visible() || tn_visible());
+    if (tn_visible())
+        tn_draw(canvas);
+    else if (rec_visible())
         rec_screen_draw(canvas);
     else if (slc_visible())
         slc_draw(canvas);
@@ -201,6 +206,8 @@ void wr_screen(void *screen, void *canvas)
         smp_fb_draw(canvas, smp_samp_of(UI_TRACK));
     else if (smp_list_visible())                /* v0.25: the sample list, over the title bar too */
         smp_list_draw(canvas);
+    else
+        tn_kb_draw(canvas);                     /* KB SETUP's H slot, when KB SETUP is on top */
 }
 
 /* the UI loop's redraw test, as stock (and the names kept current, once a loop; and

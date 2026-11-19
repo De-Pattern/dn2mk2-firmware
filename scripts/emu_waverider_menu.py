@@ -1384,6 +1384,19 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out.update(res)
         out["ok"] = bool(res["ok"]) and not route.get("changed")
         out["routing_changed"] = route.get("changed", 0)
+    elif scenario == "tune":
+        # v0.61: microtuning's record per project (csrc/sampler/tune.c): scripts/emu_tune.py
+        sys.path.insert(0, str(HERE))
+        import emu_tune                         # noqa: PLC0415
+        for _ in range(200):                    # the snapshot's own boot first (the RAM check)
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        res = emu_tune.run({"machine": machine, "call": call, "disk": disk, "io": io, "syms": syms,
+                            "guest_call": guest_call, "scratch": SENTINEL + 0x2000})
+        disk.clear()
+        out.update(res)
     elif scenario == "live":
         # v0.38 (the testers: "after 10-20 added samples, new ones are silent until a restart";
         # v0.37: "nothing I record plays, though I see its waveform"): a pool of three samples
