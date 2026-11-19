@@ -289,9 +289,12 @@ def mnm_c_header() -> str:
         "}",
         f"#define MNM_WAVES {MNM_WAVES}",
         f"#define MNM_PCH {MNM_PCH}",
-        f"static const unsigned char mnm_pch_idx[128] = {{{', '.join(map(str, pidx))}}};",
+        # v0.63: the tables every reader shares are weak, not static: one copy in the image
+        # instead of one a file (md_page.c, page.c, fmt.c: about 2.7 KB, the room the keyboard
+        # HOLD needed under the 2 MiB USB upgrade buffer); their contents are unchanged
+        f"__attribute__((weak)) const unsigned char mnm_pch_idx[128] = {{{', '.join(map(str, pidx))}}};",
         f"#define MNM_FLIST {MNM_FLIST}\n#define MNM_LIN2 {MNM_LIN2}\n#define MNM_SQR4 {MNM_SQR4}",
-        f"static const unsigned char mnm_flist_idx[128] = {{{', '.join(map(str, _flist_names()[0]))}}};",
+        f"__attribute__((weak)) const unsigned char mnm_flist_idx[128] = {{{', '.join(map(str, _flist_names()[0]))}}};",
         # v0.60: one place for every reader (md_page.c, page.c, fmt.c): how many choices a
         # control has, the knob's choice, and whether it is a knob shown as a number
         "static inline int mnm_cont(int n) { return n == MNM_LIN2 || n == MNM_SQR4; }",
@@ -299,12 +302,12 @@ def mnm_c_header() -> str:
         "static inline int mnm_choice(int n, int k) { k = k < 0 ? 0 : k > 127 ? 127 : k; return n == MNM_PCH ? mnm_pch_idx[k] : n == MNM_FLIST ? mnm_flist_idx[k] : mnm_cont(n) ? k : (k * n) >> 7; }",
         # DYN's (truncated, as the manual's 1.33 at 74): x.x = 2 k / 128 (2.0 at 127: the DSP's 1.0 there), x.xx = 4 (k / 128)^2 (4.00 at 127)
         "static inline const char *mnm_cont_text(int n, int k, char *b) { int h = k >= 127 ? (n == MNM_LIN2 ? 200 : 400) : n == MNM_LIN2 ? 200 * k / 128 : 400 * k * k / 16384; int i = 0; b[i++] = (char)('0' + h / 100); b[i++] = '.'; b[i++] = (char)('0' + h / 10 % 10); if (n == MNM_SQR4) b[i++] = (char)('0' + h % 10); b[i] = 0; return b; }",
-        f"static const char mnm_labels[MNM_N][8][6] = {{{labels}}};",
-        f"static const unsigned char mnm_lo[8] = {{{', '.join(str(lo) for _r, _s, lo, _t in _perc.PARAMS)}}};",
-        f"static const unsigned char mnm_top[8] = {{{', '.join(str(t) for _r, _s, _lo, t in _perc.PARAMS)}}};",
-        f"static const unsigned char mnm_choices[MNM_N][8] = {{{arr(rows_n)}}};",
-        f"static const unsigned char mnm_choice_at[MNM_N][8] = {{{arr(rows_at)}}};",
-        f"static const char mnm_choice_names[{max(1, len(names))}][5] = {{{', '.join(q + n + q for n in names)}}};",
+        f"__attribute__((weak)) const char mnm_labels[MNM_N][8][6] = {{{labels}}};",
+        f"__attribute__((weak)) const unsigned char mnm_lo[8] = {{{', '.join(str(lo) for _r, _s, lo, _t in _perc.PARAMS)}}};",
+        f"__attribute__((weak)) const unsigned char mnm_top[8] = {{{', '.join(str(t) for _r, _s, _lo, t in _perc.PARAMS)}}};",
+        f"__attribute__((weak)) const unsigned char mnm_choices[MNM_N][8] = {{{arr(rows_n)}}};",
+        f"__attribute__((weak)) const unsigned char mnm_choice_at[MNM_N][8] = {{{arr(rows_at)}}};",
+        f"__attribute__((weak)) const char mnm_choice_names[{max(1, len(names))}][5] = {{{', '.join(q + n + q for n in names)}}};",
         # v0.27: the frame slot of each of the eight (smp_quant's 4 detents a choice), and each
         # control's widget as the Monomachine draws it (docs/mnm-pages-plan.md)
         f"static const unsigned char mnm_slot[8] = {{{', '.join(str(sl) for _r, sl, _lo, _t in _perc.PARAMS)}}};",
