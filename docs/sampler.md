@@ -798,3 +798,30 @@ Its SYN page: TUNE, PLAY, (empty), **BUF** (1..8; record 244, PERC's slot 35, fr
 sample machines), STRT, LEN, (empty), LEV. One detent a choice on PLAY as on the others
 (`fmt.c` takes a machine's row from `SMP_IDX`, as page.c does: the seven names are no longer
 contiguous types, 8..13 and 17, and every table that was indexed by `type - 8` goes through it).
+
+## v0.62: the SLICE editor (impbox's requests)
+
+impbox (Discord, 2026-11-10) asked for four things in EDIT SLICE POINTS; `slice.c` and `link.c`.
+
+- **Live edits.** A slice's key plays the edit without YES: 0.3 s after the knobs rest
+  (`live_at`, 300 UI ticks), `edit_poll` sends the table with `smp_slices_set`
+  (`slc_live_sends` counts them). YES / NO still close the editor as before.
+- **Playing a slice selects it.** A note on a voice of the editor's track whose SLCE is NOTE
+  (below 2) picks slice `(note - 24) mod n`, the DSP's own pick (`slc_follows`). The note is read
+  from the frame (CTL_FRAME), so the keyboard, the trig keys and the sequencer all count. Limit:
+  the same note again on the same voice is not seen as new, so it does not re-pick.
+- **Finer zoom.** ZOOM now goes down to a view of 128 frames (`zmax()`), past v0.23's 32x. When
+  the view is 8,192 frames or fewer, the frames themselves are read from the +Drive
+  (`smp_frames_read`: int16 only, only while the link is idle, never a recording; the FINE buffer
+  at mirror + 0x79000, below META) and drawn signed, min and max a column (`slc_fv_lo`/`hi`). The
+  read happens in `edit_poll`, never while drawing; until it lands the 1,024-column picture is
+  drawn as before.
+- **Zero crossings.** FUNC + turning E (START) or H (END) moves the point to the nearest frame
+  whose sign differs from the one before it, within 512 frames, inside the slice's neighbours
+  (`snap_zero`, `slc_snaps`). Without FUNC, E and H move as before.
+
+**Gate:** `slicefine` (`scripts/emu_slicefine.py`, a link16 scenario with the +Drive played by
+Python: a 100-frame-period tone, 120,000 frames, 4 slices): the editor opens; a change is sent
+0.3 s after the knobs rest and not before; a note on the track picks its slice; the deepest zoom
+reads the frames and draws them; FUNC + E and FUNC + H land on zero crossings; nothing is read
+while a recording is running.
