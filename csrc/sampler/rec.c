@@ -1800,99 +1800,9 @@ int smp_knob_d __attribute__((section(".data"))) = 0;       /* v0.32: the last k
 u32 smp_knob_at __attribute__((section(".data"))) = 0;
 int smp_knob_code __attribute__((section(".data"))) = 0;     /* v0.48: which knob (1..8: A..H), its value shown */
 
-/* v0.63 KEYBOARD HOLD (docs/kbhold.md; the owner, 2026-11-19): PTN + KEYBOARD (jump.c jmp_key)
- * turns kh_on. A [TRIG] key played as a keyboard note (stock's KeyboardView asked for its notes:
- * slice.c slc_keynotes marks kh_kb) keeps sounding when let go: its release item is kept
- * (kh_rel) and dropped. The next fresh [TRIG] or KEYBOARD press with no [TRIG] down, or HOLD
- * turned off, sends the kept releases first: they and then the press come out of kh_q, one a
- * call of the receive, before the stock queue is read again. Items are 16 bytes (type, code,
- * flags, time). A queued item is stock's own copy, handed on untouched by the hold */
-#define KH_ITEM 16
-#define KH_PRESS 0xFFu                          /* kh_qc: the press kept in kh_press */
-u32 kh_on __attribute__((section(".data"))) = 0;
-u32 kh_kb __attribute__((section(".data"))) = 0;        /* trig 0..15 pressed as a keyboard note */
-u32 kh_kept __attribute__((section(".data"))) = 0;      /* trig 0..15 whose release is kept */
-u32 kh_last __attribute__((section(".data"))) = 0;      /* the trig (1..16) last pressed, 0 none */
-u32 kh_flushes __attribute__((section(".data"))) = 0;   /* counted for the gate */
-u32 kh_kept_n __attribute__((section(".data"))) = 0;
-/* (the image has ~300 bytes to spare: a kept release is its code only, rebuilt from the last
- * release item seen, kh_rel; the queue holds codes, the press its own copy) */
-static u8 kh_rel[KH_ITEM] __attribute__((section(".data")));
-static u8 kh_press[KH_ITEM] __attribute__((section(".data")));
-static u8 kh_out[KH_ITEM] __attribute__((section(".data")));
-static u8 kh_qc[18] __attribute__((section(".data")));
-static u32 kh_qn __attribute__((section(".data"))) = 0, kh_qi __attribute__((section(".data"))) = 0;
-static u32 kh_serving __attribute__((section(".data"))) = 0;
-
-static void kh_copy(u8 *to, const u8 *from)
-{
-    for (int k = 0; k < KH_ITEM; k++)
-        to[k] = from[k];
-}
-
-/* the kept releases into the queue (behind whatever is in it), then ITEM (a press) if given */
-static void kh_flush(const u8 *item)
-{
-    if (kh_qi >= kh_qn)
-        kh_qi = kh_qn = 0;
-    for (u32 k = 0; k < 16; k++)
-        if (kh_kept >> k & 1u && kh_qn < 17)
-            kh_qc[kh_qn++] = (u8)(25u + k);
-    kh_kept = 0;
-    if (item && kh_qn < 17) {
-        kh_copy(kh_press, item);
-        kh_qc[kh_qn++] = KH_PRESS;
-    }
-    kh_flushes++;
-}
-
-static u8 *kh_next(void)                        /* the queue's next item, built in kh_out */
-{
-    u8 c = kh_qc[kh_qi++];
-    if (c == KH_PRESS) {
-        kh_copy(kh_out, kh_press);
-    } else {
-        kh_copy(kh_out, kh_rel);
-        kh_out[4] = kh_out[5] = kh_out[6] = 0;
-        kh_out[7] = c;
-    }
-    return kh_out;
-}
-
-void kh_set(u32 on)                             /* jump.c: PTN + KEYBOARD */
-{
-    kh_on = on ? 1u : 0u;
-    if (!kh_on && kh_kept)
-        kh_flush(0);
-}
-
-void kh_keynotes(void)                          /* slice.c: the KeyboardView asked for a key's notes */
-{
-    if (kh_last >= 1 && kh_last <= 16)
-        kh_kb |= 1u << (kh_last - 1);
-}
-
-static int kh_trigs_down(u32 except)            /* a [TRIG] key down now, other than code EXCEPT */
-{
-    for (u32 c = 25; c <= 40; c++) {
-        u32 on = c < 32 ? smp_held_lo >> c & 1u : smp_held_hi >> (c - 32) & 1u;
-        if (on && c != except)
-            return 1;
-    }
-    return 0;
-}
-
 u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock receive returns it */
 {
-    u8 *it;
-    kh_serving = 0;
-    if (kh_qi < kh_qn) {                        /* v0.63: the hold's queue before stock's */
-        it = kh_next();
-        kh_serving = 1;
-    } else {
-        kh_qi = kh_qn = 0;
-        it = (u8 *)UI_POP(queue);
-    }
+    u8 *it = (u8 *)UI_POP(queue);
     if (!it)
         return (u32)it;
     u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
@@ -1927,33 +1837,6 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         *h = down ? *h | bit : *h & ~bit;
         if (down && code >= 25 && code <= 40)   /* v0.33: when each [TRIG] went down */
             smp_trig_at[code - 25] = *(volatile u32 *)0x4058E8D4u;
-    }
-    /* v0.63 KEYBOARD HOLD (above kh_flush) */
-    if (it[0] == IT_KEY && !kh_serving && ((code >= 25 && code <= 40) || code == 18)) {
-        u32 fresh = down && !(flags & F_REPEAT);
-        if (fresh && code != 18)
-            kh_last = code - 24;                /* (the KeyboardView asks for its notes next) */
-        if (fresh && kh_kept && !kh_trigs_down(code) && !rec_overlay) {
-            kh_flush(it);                       /* the kept releases, then this press */
-            it[0] = IT_DROP;
-            it = kh_next();
-            kh_serving = 1;
-            return (u32)it;
-        }
-        if (code != 18) {
-            u32 bit = 1u << (code - 25);
-            if (!down) {
-                if (kh_on && (kh_kb & bit) && !rec_overlay) {
-                    kh_copy(kh_rel, it);
-                    kh_kept |= bit;
-                    kh_kept_n++;
-                    kh_kb &= ~bit;
-                    it[0] = IT_DROP;
-                    return (u32)it;
-                }
-                kh_kb &= ~bit;
-            }
-        }
     }
     if (it[0] == IT_KEY && code == K_SRC) {     /* v0.35: SYN held: the pages' values (O14) */
         if (down && (flags & F_REPEAT))
