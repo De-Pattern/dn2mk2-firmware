@@ -1395,6 +1395,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         disk.clear()
         out.update(res)
         out["ok"] = bool(res["ok"]) and not route.get("changed")
+        out["routing_changed"] = route.get("changed", 0)
     elif scenario == "tune":
         # v0.61: microtuning's record per project (csrc/sampler/tune.c): scripts/emu_tune.py
         sys.path.insert(0, str(HERE))

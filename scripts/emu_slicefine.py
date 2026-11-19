@@ -223,7 +223,8 @@ def run(cx):
         and long("slc_fine_views") - reads0 == 1)
 
     # 4. follow: a played note picks its slice
-    vt = [0xFF] * 16
+    vt_stock = m.read(VOICE_TRACK, 64)           # put back after: stock's frame builder derives the
+    vt = [0xFF] * 16                            # DSP's routing words from it (the runner checks those)
     vt[3], vt[4] = trk, (trk + 1) % 16
 
     def play(v, note):
@@ -239,6 +240,7 @@ def run(cx):
     set_rec(SM.SLICE_REC, 10)                   # SLCE a fixed slice
     c4 = play(3, 24 + 3)
     set_rec(SM.SLICE_REC, 0)
+    m.write(VOICE_TRACK, vt_stock)
     facts["4 follow: a note on the track's voice picks (note - 24) mod 4; another track's or a fixed SLCE: nothing"] = (
         c1 == 2 and c2 == 1 and c3 == 1 and c4 == 1)
 
