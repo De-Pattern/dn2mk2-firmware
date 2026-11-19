@@ -819,6 +819,9 @@ impbox (Discord, 2026-11-10) asked for four things in EDIT SLICE POINTS; `slice.
 - **Zero crossings.** FUNC + turning E (START) or H (END) moves the point to the nearest frame
   whose sign differs from the one before it, within 512 frames, inside the slice's neighbours
   (`snap_zero`, `slc_snaps`). Without FUNC, E and H move as before.
+- **CREATE SLICE GRID, FUNC + E** (Wolljamin, Discord 2026-11-19): SLICES jumps through 2, 4, 8,
+  16, 32, 64, a detent a jump; from a count between two stops, to the next one. E alone still moves
+  one at a time (`slc_grid_jumps` counts the jumps).
 
 **Gate:** `slicefine` (`scripts/emu_slicefine.py`, a link16 scenario with the +Drive played by
 Python: a 100-frame-period tone, 120,000 frames, 4 slices): the editor opens on the four slices;
@@ -826,4 +829,6 @@ a change is not sent while turning, and is sent once 0.2 s after, the DSP's and 
 then the editor's; FUNC + END lands on a zero crossing (the next slice's start with it), END alone
 does not snap; the deepest zoom reads its own frames and each column is the sample's lowest and
 highest there, zoom 0 reads nothing; a note on the track's voice picks `(note - 24) mod 4`, another
-track's note or a fixed SLCE picks nothing; NO closes with the table kept, on the +Drive too.
+track's note or a fixed SLCE picks nothing; NO closes with the table kept, on the +Drive too;
+in CREATE SLICE GRID, FUNC + E goes 13 → 16 → 32 → 16 → 8 → 4 → 2 → 2 and five detents to 64,
+while E alone moves one (the negative control).
