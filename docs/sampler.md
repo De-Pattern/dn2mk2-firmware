@@ -803,7 +803,7 @@ contiguous types, 8..13 and 17, and every table that was indexed by `type - 8` g
 
 impbox (Discord, 2026-11-10) asked for four things in EDIT SLICE POINTS; `slice.c` and `link.c`.
 
-- **Live edits.** A slice's key plays the edit without YES: 0.3 s after the knobs rest
+- **Live edits.** A slice's key plays the edit without YES: 0.2 s after the knobs rest
   (`live_at`, 300 UI ticks), `edit_poll` sends the table with `smp_slices_set`
   (`slc_live_sends` counts them). YES / NO still close the editor as before.
 - **Playing a slice selects it.** A note on a voice of the editor's track whose SLCE is NOTE
@@ -821,7 +821,9 @@ impbox (Discord, 2026-11-10) asked for four things in EDIT SLICE POINTS; `slice.
   (`snap_zero`, `slc_snaps`). Without FUNC, E and H move as before.
 
 **Gate:** `slicefine` (`scripts/emu_slicefine.py`, a link16 scenario with the +Drive played by
-Python: a 100-frame-period tone, 120,000 frames, 4 slices): the editor opens; a change is sent
-0.3 s after the knobs rest and not before; a note on the track picks its slice; the deepest zoom
-reads the frames and draws them; FUNC + E and FUNC + H land on zero crossings; nothing is read
-while a recording is running.
+Python: a 100-frame-period tone, 120,000 frames, 4 slices): the editor opens on the four slices;
+a change is not sent while turning, and is sent once 0.2 s after, the DSP's and the +Drive's table
+then the editor's; FUNC + END lands on a zero crossing (the next slice's start with it), END alone
+does not snap; the deepest zoom reads its own frames and each column is the sample's lowest and
+highest there, zoom 0 reads nothing; a note on the track's voice picks `(note - 24) mod 4`, another
+track's note or a fixed SLCE picks nothing; NO closes with the table kept, on the +Drive too.
