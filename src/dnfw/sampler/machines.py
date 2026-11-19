@@ -183,6 +183,13 @@ MON_BIT = 30
 # measured on hardware: the runner does not model everything after the per-track buffer; GAIN's
 # range (-24..+38 dB) covers either way
 TRK_UNITY = 0.1696 / 0.0725                # 2.339 (+7.4 dB): x the 1 / TRK_GAIN the RECORDER keeps
+# v0.63 (the owner, measured on his unit 2026-11-19: "the number for flex gain is +24"): on the
+# DN2 itself a v0.62 take of a single track at GAIN 0 played 24 dB under its source; GAIN +24 made
+# it match by ear. The loss is in stages the SHARC runner does not model (on the runner the same
+# take came out at its source's level, and a synth track's 7 dB over: scratch probe, bench STATE
+# 2026-11-19 09:30), so it is the unit's number, not the runner's. A FLEX take of a track is made
+# TRK_HW_DB louder on top of TRK_UNITY: GAIN 0 is what was +24; GAIN -24 is v0.50..v0.62's unity
+TRK_HW_DB = 24
 GAIN_ZERO = 25                             # the index of 0 dB: 1..63 is -24..+38 dB
 CMD_OFFSET = 0xF00                         # the command block in the pool's directory page:
 CMD_WORDS = 6                              #   seq, cmd, src, chan, thres (0..32767), dest << 24 | frames

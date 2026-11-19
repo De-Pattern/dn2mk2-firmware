@@ -2197,7 +2197,8 @@ def recorder(p: Prog, L: Layout) -> None:
             p.fop(3, 3, "*", 12)              # at its defaults made up
             p.ld(8, C["rsrc"])
             p.iconst(12, 2)
-            p.if_(8, "GE", 12, lambda: (p.fconst(12, SM.TRK_UNITY), p.fop(3, 3, "*", 12)), kind="i")
+            p.if_(8, "GE", 12, lambda: (p.fconst(12, SM.TRK_UNITY * 10.0 ** (SM.TRK_HW_DB / 20.0)),
+                                        p.fop(3, 3, "*", 12)), kind="i")   # v0.63: + TRK_HW_DB (the unit's)
         p.ld(8, SM.REC_GAIN)
         p.ifz(8, "NE", gained)
         p.fconst(12, 0.999969)

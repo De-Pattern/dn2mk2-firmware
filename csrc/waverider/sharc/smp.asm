@@ -1036,7 +1036,7 @@ wr_sm_else_80.:
       R12 = 0x2;
       COMP(R8, R12);
       IF LT JUMP 0xbf2803;                   // -> wr_sm_else_82.
-      R12 = 0x4015b743;                 // 2.33931040763855
+      R12 = 0x42144d62;                 // 37.07556915283203
       F3 = F3 * F12;
 .GLOBAL wr_sm_else_82.;
 wr_sm_else_82.:

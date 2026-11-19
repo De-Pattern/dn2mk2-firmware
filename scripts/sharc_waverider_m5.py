@@ -2509,8 +2509,8 @@ def step_flexlevel(init, sound, machines) -> dict:
     take's playback at the amp's output against the source's there, RMS over the same stretch (the
     take a block late: the bucket is the last block's): within 0.5 dB. Negative control: the same
     with index 0 (the RECORDER's command, v0.49's scaling): 6 dB under, and
-    must fail the 0.5 dB test; and GAIN -6 (index 19) plays 6 dB under, within 0.5 dB (+6 would
-    clip this loud a source: the meter's CLIP).
+    must fail the 0.5 dB test. v0.63: that unity is GAIN -24 now (index 1); GAIN 0 is 24 dB over
+    it (TRK_HW_DB, the owner's number from his unit), frame for frame where it does not clip.
     Measured 2026-11-12 (v0.50's first take on it): v0.49's scaling 0.4991 of the source; a
     x 12.44 first guess clipped (+9.4 dB); x 2.0 (the output's ratio) came out -1.8 dB (the
     chain compresses a little); TRK_UNITY is the render's ratio, 2.339."""
@@ -2569,23 +2569,41 @@ def step_flexlevel(init, sound, machines) -> dict:
         return {"out_db": db(flat[per * (n - w): per * n], flat[per * p0: per * (p0 + w)]),
                 "render_db": db(ren[per * (n - w): per * n], ren[per * p0: per * (p0 + w)]),
                 "take_rms": rms(take[per * (n - w): per * n]), "take_frames": ent[1],
-                "take_peak": max((abs(v) for v in take), default=0.0)}
-    unity, recorder, minus6 = run(SM.GAIN_ZERO), run(0), run(SM.GAIN_ZERO - 6)
+                "take_peak": max((abs(v) for v in take), default=0.0), "take": take[: per * n]}
+    # v0.63: GAIN 0 is TRK_HW_DB (24 dB) over v0.50's unity, the owner's number from his unit, where
+    # the stages the runner lacks take those 24 dB. On the runner v0.50's unity is GAIN -TRK_HW_DB
+    # (index GAIN_ZERO - 24 = 1); GAIN 0's take is the same recording 24 dB up, clipping this loud a
+    # source, so it is compared sample by sample where it does not clip
+    low = SM.GAIN_ZERO - SM.TRK_HW_DB
+    unity, recorder, zero = run(low), run(0), run(SM.GAIN_ZERO)
+    want = 10.0 ** (SM.TRK_HW_DB / 20.0)
+
+    def ratio_ok(a, b, k):
+        """b's unclipped frames are a's x k within 1 % (and at least 200 of them, away from zero)"""
+        if a is None or b is None:
+            return False
+        pairs = [(x, y) for x, y in zip(a["take"], b["take"]) if abs(y) < 0.99 and abs(x) > 1e-3]
+        return len(pairs) >= 200 and all(abs(y / x - k) <= 0.01 * k for x, y in pairs)
     checks = {
-        "v0.50: a FLEX take of a track (GAIN 0) reaches its track's chain at its source's level: the "
-        "take's render against the source's, within 0.5 dB (RMS)":
+        "v0.50: a FLEX take of a track at v0.50's unity (GAIN -24 since v0.63) reaches its track's chain "
+        "at its source's level: the take's render against the source's, within 0.5 dB (RMS)":
             unity is not None and abs(unity["render_db"]) <= 0.5,
         "v0.50: .. and comes out of the amp within 1 dB of its source (the chain compresses a little)":
             unity is not None and abs(unity["out_db"]) <= 1.0,
         "v0.50 negative control: the RECORDER's command (no GAIN: v0.49's scaling) renders the same take "
         "over 4 dB under its source":
             recorder is not None and recorder["render_db"] < -4.0,
-        "v0.50: GAIN -6 records the take 6 dB under GAIN 0's (its frames' RMS, within 0.1 dB), unclipped":
-            unity is not None and minus6 is not None and unity["take_peak"] < 1.0
-            and abs(20 * _m.log10((minus6["take_rms"] or 1e-30) / (unity["take_rms"] or 1e-30)) + 6.0) <= 0.1,
+        "v0.63: GAIN 0 records the same take TRK_HW_DB (24 dB, the owner's number) over GAIN -24, frame "
+        "for frame where unclipped (within 1 %), and clipped at full scale, never past it":
+            ratio_ok(unity, zero, want) and zero["take_peak"] <= 1.0,
+        "v0.63 negative control: the same comparison at 0 dB (no TRK_HW_DB) is refused":
+            not ratio_ok(unity, zero, 1.0),
     }
+    for r in (unity, recorder, zero):
+        if r:
+            r.pop("take", None)
     return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"unity": unity, "recorder": recorder, "minus6": minus6}}
+            "numbers": {"unity": unity, "recorder": recorder, "zero": zero}}
 
 
 # -- step 3e: the fast link (v0.16, docs/sampler.md) -------------------------------------------------
