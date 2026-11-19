@@ -2579,10 +2579,11 @@ def step_flexlevel(init, sound, machines) -> dict:
     want = 10.0 ** (SM.TRK_HW_DB / 20.0)
 
     def ratio_ok(a, b, k):
-        """b's unclipped frames are a's x k within 1 % (and at least 200 of them, away from zero)"""
+        """b's unclipped frames are a's x k within 1 % (at least 200 of them, a's at 0.01 or more:
+        an int16 frame's step, 1 / 32768, is 0.3 % of that)"""
         if a is None or b is None:
             return False
-        pairs = [(x, y) for x, y in zip(a["take"], b["take"]) if abs(y) < 0.99 and abs(x) > 1e-3]
+        pairs = [(x, y) for x, y in zip(a["take"], b["take"]) if abs(y) < 0.99 and abs(x) >= 0.01]
         return len(pairs) >= 200 and all(abs(y / x - k) <= 0.01 * k for x, y in pairs)
     checks = {
         "v0.50: a FLEX take of a track at v0.50's unity (GAIN -24 since v0.63) reaches its track's chain "
@@ -2593,10 +2594,14 @@ def step_flexlevel(init, sound, machines) -> dict:
         "v0.50 negative control: the RECORDER's command (no GAIN: v0.49's scaling) renders the same take "
         "over 4 dB under its source":
             recorder is not None and recorder["render_db"] < -4.0,
-        "v0.63: GAIN 0 records the same take TRK_HW_DB (24 dB, the owner's number) over GAIN -24, frame "
-        "for frame where unclipped (within 1 %), and clipped at full scale, never past it":
+        "v0.63: GAIN 0 records the same take 24 dB over GAIN -24, frame for frame where unclipped "
+        "(within 1 %), and clipped at full scale, never past it":
             ratio_ok(unity, zero, want) and zero["take_peak"] <= 1.0,
-        "v0.63 negative control: the same comparison at 0 dB (no TRK_HW_DB) is refused":
+        "v0.63 (TRK_HW_DB, the owner's number): GAIN 0's take plays far over its source on the runner "
+        "(over 12 dB, the 24 dB the unit loses after the per-track buffer; clipped here) -- the check "
+        "above at GAIN -24 holds only because TRK_HW_DB is applied":
+            zero is not None and zero["render_db"] > 12.0,
+        "v0.63 negative control: the frame-for-frame comparison at 0 dB is refused":
             not ratio_ok(unity, zero, 1.0),
     }
     for r in (unity, recorder, zero):
