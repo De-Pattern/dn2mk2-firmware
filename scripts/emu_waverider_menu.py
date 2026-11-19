@@ -1635,14 +1635,22 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         # quiet one by +24 dB at most
         import math as _m
         norms = []
-        for j, pk in enumerate((4000, 32000, 10, 0)):
+        # v0.63 (the owner: saving a FLEX buffer normalised the take its buffer still plays): a
+        # fifth take, peak 4,000 as the first, saved as rec.c's bn_save saves one (smp_save_keep
+        # set): kept exactly as it lies on the +Drive, never normalised (no state 3 or 4), and
+        # smp_save_keep cleared by the save. The first take is its negative control
+        for j, pk in enumerate((4000, 32000, 10, 0, 4000)):
+            keep = j == 4
             nslot, nplace, nfr = 41 + j, (20 + 4 * j) << 20, 2000
             noff = SM.REC_OFFSET + nplace
             fr = [int(round(pk * _m.sin(2 * _m.pi * 7 * k / nfr + 0.3))) for k in range(nfr)]
             fr[123] = -pk                        # (its peak, exactly; 0: all zero)
             for k in range(nfr // 2):
                 pool[noff // 4 + k] = (fr[2 * k] & 0xFFFF) | (fr[2 * k + 1] & 0xFFFF) << 16
+            if keep:
+                machine.write(syms["smp_save_keep"], struct.pack(">I", 1))
             call("smp_save_recording", nslot, nplace, nfr)
+            keep_cleared = struct.unpack(">I", machine.read(syms["smp_save_keep"], 4))[0] == 0
             # v0.41 (the owner: NORMALIZING sat, then the RECORDER came back; rec.c gives a save
             # up after 20 s in which smp_save_mark() does not move): the mark, read each period
             # (its bits 28..31 are the save's state), must move while the normalised take goes
@@ -1661,7 +1669,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                 by_state.setdefault(mk >> 28, set()).add(mk)
             raw = b"".join(disk.get(STORE_SECTOR + 1 + noff // 512 + k, bytes(512)) for k in range((nfr * 2 + 511) // 512))
             back = list(struct.unpack_from(f"<{nfr}h", raw))
-            g = (32767 << 16) // pk if 0 < pk < 32767 else 1 << 16
+            g = (32767 << 16) // pk if 0 < pk < 32767 and not keep else 1 << 16
             gi, gf = g >> 16, g & 0xFFFF
 
             def scale(v):
@@ -1673,12 +1681,16 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                           "clipped": any(not -32768 <= v * gi + ((v * gf) >> 16) <= 32767 for v in fr),
                           "saved": struct.unpack(">i", machine.read(syms["smp_saved"], 4))[0],
                           "mark_states": {str(k): len(v) for k, v in sorted(by_state.items())},
-                          "mark_moves_in_reload": len(by_state.get(4, ())) >= 2})
+                          "mark_moves_in_reload": len(by_state.get(4, ())) >= 2,
+                          "normalising_states": sorted(k for k in by_state if k in (3, 4)),
+                          "keep": keep, "keep_cleared": keep_cleared})
         out["norm"] = norms
         ok_norm = (all(n["exact"] and n["saved"] == 1 for n in norms)
                    and all(n["peak_out"] in (32767, 32768) and not n["clipped"] for n in norms[:3])
                    and norms[3]["peak_out"] == 0
-                   and all(n["mark_moves_in_reload"] for n in norms[:3]))     # (the zero take is not normalised)
+                   and all(n["mark_moves_in_reload"] for n in norms[:3])      # (the zero take is not normalised)
+                   and norms[4]["peak_out"] == 4000 and norms[4]["normalising_states"] == []
+                   and norms[4]["keep_cleared"] and norms[0]["peak_out"] != 4000)   # v0.63: a FLEX save kept as it lies
         out["ok"] = bool(ok_norm)
     out["log"] = log[-8:]
     return out

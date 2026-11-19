@@ -1299,6 +1299,12 @@ static u32 s_since __attribute__((section(".data"))) = 0;
 static u32 s_tries __attribute__((section(".data"))) = 0;
 static u32 s_frames __attribute__((section(".data"))) = 0;
 static u32 s_peak __attribute__((section(".data"))) = 0;      /* v0.25: for the normalising */
+/* v0.63 (the owner: saving a FLEX buffer normalised it, and the slot shares the frames the
+ * buffer is still playing, so the playing take jumped to full scale): set by rec.c's bn_save
+ * before smp_save_recording, the save keeps its frames as they lie -- saved, never normalised.
+ * The RECORDER's own saves still normalise (v0.41). s_keep is the save's copy */
+u32 smp_save_keep __attribute__((section(".data"))) = 0;
+static u32 s_keep __attribute__((section(".data"))) = 0;
 static u32 s_place __attribute__((section(".data"))) = 0;
 
 /* v0.33: where the recorder's save is (the recorder's NORMALIZING waits on it): a value that
@@ -1442,6 +1448,8 @@ void smp_save_recording(int slot, u32 off, u32 frames)
         OVERVIEW[OVERVIEW_W * (u32)slot + j] = 0;
     smp_saved = 0;
     s_peak = 0;
+    s_keep = smp_save_keep;
+    smp_save_keep = 0;
     sstate = 1;
 }
 
@@ -1617,7 +1625,7 @@ static void save_poll(void)
             smp_hi = bytes;
             smp_pl_changed();                                /* v0.38: into the project's list */
             smp_head_due = 1;                                /* v0.38: and the count to the DSP */
-            if (s_peak > 0u && s_peak < NORM_PEAK) {     /* not all zero, under full scale: normalised (v0.41) */
+            if (!s_keep && s_peak > 0u && s_peak < NORM_PEAK) {     /* not all zero, under full scale: normalised (v0.41); a FLEX save never (v0.63) */
                 s_off = (REC_OFFSET + s_place) & ~511u;
                 sstate = 3;
                 return;
