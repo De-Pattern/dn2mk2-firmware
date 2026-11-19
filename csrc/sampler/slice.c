@@ -3,7 +3,7 @@
  *   YES on a SLICE track's page   the SLICE menu: EDIT SLICE POINTS, CREATE SLICE GRID,
  *                                CREATE LINEAR LOCKS, CREATE RANDOM LOCKS (v0.25)
  *   YES on a GRID track's page    ALLOCATE SLICE: CREATE LINEAR / RANDOM LOCKS, NO cancels (v0.25)
- *   CREATE SLICE GRID            SLICES (E) 2..64, TR.DET (H) off/on; YES makes them, NO cancels
+ *   CREATE SLICE GRID            SLICES (E) 2..64 (FUNC + E: 2/4/8/16/32/64), TR.DET (H) off/on; YES makes them, NO cancels
  *                                (TR.DET: a slice at each transient, as many as SLICES at most)
  *   EDIT SLICE POINTS            the sample's waveform with its slices; LEFT/RIGHT pick one,
  *                                E START, H END, D LOOP, F ZOOM (FUNC + F: the height), G POS;
@@ -83,6 +83,7 @@ static int menu_sel __attribute__((section(".data"))) = 0;
 int slc_stock_asked __attribute__((section(".data"), aligned(4))) = 0;   /* v0.29: FUNC + a key since the last YES/NO */
 #define MENU_N 5                                /* v0.29: and CLEAR SLICE GRID (owner) */
 int slc_grid_n __attribute__((section(".data"))) = 16;
+u32 slc_grid_jumps __attribute__((section(".data"))) = 0;   /* v0.62: FUNC + E's jumps (the gate counts them) */
 static int grid_tr __attribute__((section(".data"))) = 0;
 static int slot __attribute__((section(".data"))) = -1;
 u32 slc_nfr __attribute__((section(".data"))) = 0;
@@ -1023,7 +1024,22 @@ int slc_pop(u8 *it)
         if (code < 1 || code > 9)
             return 0;
         if (slc_state == S_GRID) {
-            if (code == 5)
+            if (code == 5 && func) {            /* v0.62 (Wolljamin): FUNC + E jumps */
+                static const signed char stop[6] = {2, 4, 8, 16, 32, 64};   /* a detent a jump */
+                int n = slc_grid_n, k;
+                for (; d > 0; d--) {
+                    for (k = 0; k < 5 && stop[k] <= n; k++)
+                        ;
+                    n = n >= 64 ? 64 : stop[k];
+                }
+                for (; d < 0; d++) {
+                    for (k = 5; k > 0 && stop[k] >= n; k--)
+                        ;
+                    n = n <= 2 ? 2 : stop[k];
+                }
+                slc_grid_n = n;
+                slc_grid_jumps++;
+            } else if (code == 5)
                 slc_grid_n = slc_grid_n + d < 2 ? 2 : slc_grid_n + d > 64 ? 64 : slc_grid_n + d;
             else if (code == 8)
                 grid_tr = d > 0;

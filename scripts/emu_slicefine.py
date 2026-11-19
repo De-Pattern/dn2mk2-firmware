@@ -17,7 +17,9 @@ What it checks (each a key of "facts"):
    read (the fine waveform's view);
 4. follow: a note on a voice of the editor's track picks slice (note - 24) mod 4; a note on a
    voice of another track, or with SLCE a fixed slice, picks nothing (negative controls);
-5. NO closes the editor, the table on the +Drive the editor's last.
+5. NO closes the editor, the table on the +Drive the editor's last;
+6. CREATE SLICE GRID (Wolljamin, Discord 2026-11-19): FUNC + E jumps SLICES through 2, 4, 8, 16,
+   32, 64, a detent a jump, from between stops to the next; E alone moves one (negative control).
 """
 
 from __future__ import annotations
@@ -256,7 +258,24 @@ def run(cx):
     on_disk = list(struct.unpack("<12I", disk.get(STORE_SECTOR + 1 + sec, bytes(512))[:48]))
     facts["5 NO closes; the table kept and on the +Drive the editor's last"] = (
         long("slc_state") == 0 and got == last and on_disk == last)
+    # 6. CREATE SLICE GRID: FUNC + E jumps 2/4/8/16/32/64 (Wolljamin); E alone steps by one
+    put("slc_state", 2)                         # S_GRID
+    put("slc_grid_n", 13)
+    put("smp_func_held", 1)
+    gj = []
+    for dd in (1, 1, -1, -1, -1, -1, -1, 5, 1):
+        knob(5, dd)
+        gj.append(long("slc_grid_n"))
+    put("smp_func_held", 0)
+    knob(5, -1)
+    gj.append(long("slc_grid_n"))
+    knob(5, 1)
+    gj.append(long("slc_grid_n"))
+    put("slc_state", 0)
+    put("slc_grid_n", 16)
+    facts["6 CREATE SLICE GRID: FUNC + E jumps 2/4/8/16/32/64; E alone one at a time"] = (
+        gj == [16, 32, 16, 8, 4, 2, 2, 64, 64, 63, 64] and long("slc_grid_jumps") == 9)
     return {"facts": facts, "ok": all(facts.values()),
-            "detail": {"after_turn": after_turn, "snapped": snapped, "plain": plain, "fv": fv, "want_n": want_n,
+            "detail": {"grid_jumps": gj, "after_turn": after_turn, "snapped": snapped, "plain": plain, "fv": fv, "want_n": want_n,
                        "v0": v0, "last": last, "on_disk": on_disk, "got5": got, "follow": [c1, c2, c3, c4], "reads_deep": read_deep, "loaded": loaded,
                        "st_menu": st_menu, "st_after": st_after, "ns": long("slc_ns"), "fails": long("slc_fails"), "dbg": dbg}}
