@@ -218,6 +218,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
        ("tune", "microtuning: KB SETUP's TUNE, the TUNING page, the frame's retune (ColdFire)"),
        ("tunerec", "microtuning: each project's tuning record (ColdFire)"),
+       ("slicefine", "SLICE editor: live edits, zero-crossing snap, deep zoom, a played slice picked (ColdFire)"),
        ("thres", "THRES on both processors (coupled)"),
        ("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)"),
        ("flexplay", "FLEX buffers played by a ONESHOT track, on both processors (coupled)"),
@@ -551,7 +552,8 @@ def main() -> int:
                               ("smp_pl_on", "per-project pools (ColdFire)"),
                               ("jmp_on", "DIRECT JUMP (ColdFire)"),
                               ("tn_retune", "microtuning: KB SETUP's TUNE, the TUNING page, the frame's retune (ColdFire)"),
-                              ("tn_poll", "microtuning: each project's tuning record (ColdFire)")):
+                              ("tn_poll", "microtuning: each project's tuning record (ColdFire)"),
+                              ("slc_live_sends", "SLICE editor: live edits, zero-crossing snap, deep zoom, a played slice picked (ColdFire)")):
                 if re.search(rf"\b{sym}\b", csrc_text) and sym not in lay:
                     gate(what, False, f"{sym} is in the C but not in the layout: the check cannot run")
             results["symbols"] = "PASS: every C-keyed check has its symbol in the layout"
@@ -2542,6 +2544,33 @@ def main() -> int:
                               json.dumps({k: v for k, v in facts.items() if not v})[:800] + f" writes={r.get('writes')}")
             later("tunerec", "microtuning: each project's tuning record (ColdFire)",
                   "microtuning: each project's tuning record (ColdFire)", [tr_cmd, sorted(EMU_ENV.items())], tr_body)
+
+        # v0.62: the slice editor's requests (impbox; scripts/emu_slicefine.py, the +Drive and the
+        # DSP played by Python): an edit goes to the DSP and the +Drive 0.2 s after the knobs rest
+        # (not while they move); FUNC + END lands on a zero crossing, the linked start with it
+        # (END alone: no snap); ZOOM to a view of 128..255 frames, the view's own frames read and
+        # drawn as the sample's lowest and highest per column (zoom 0: none read); a note on the
+        # editor's track picks its slice (another track's, or SLCE fixed: nothing); NO keeps it all
+        if "slc_live_sends" in lay:
+            sf_syms = work / "slicefine_syms.json"
+            sf_syms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith(("smp_", "slc_", "wr_"))}))
+            sf_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", f"link16:{sf_syms}:slicefine", "--png-dir", work / "slicefine"]
+
+            def sf_body(tdir):
+                rc, out = run("slice editor", sf_cmd, logs, env=EMU_ENV, trace=tdir)
+                res = work / "slicefine" / "link16_slicefine.json"
+                if rc != 0 or not res.exists():
+                    return False, out[-900:]
+                r = json.loads(res.read_text())
+                facts = r.get("facts", {})
+                good = bool(r.get("ok")) and len(facts) >= 6 and all(facts.values())
+                return good, ("the slice editor: live edits 0.2 s after the knobs rest, FUNC + END on a zero "
+                              "crossing, the view's own frames at deep zoom, a played slice picked, all kept" if good else
+                              json.dumps({k: v for k, v in facts.items() if not v})[:600] + f" {r.get('detail')}"[:300])
+            later("slicefine", "SLICE editor: live edits, zero-crossing snap, deep zoom, a played slice picked (ColdFire)",
+                  "SLICE editor: live edits, zero-crossing snap, deep zoom, a played slice picked (ColdFire)",
+                  [sf_cmd, sorted(EMU_ENV.items())], sf_body)
 
         # v0.48 (Error Kit): THRES on the coupled emulator (emu_coupled.py: the ColdFire and the
         # DSP together, block by block): a -34 dB tone on IN; THRES 30 (tick -45 dB) starts the

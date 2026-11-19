@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.62 | 2026-11-19 | **slice editor**: edits play live, playing a slice selects it, zoom to 128 frames, FUNC + START/END snaps to zero crossings; CREATE SLICE GRID FUNC + E jumps 2..64 | `builds/v0.62-SLICE/` | yes |
 | v0.61 | 2026-11-19 | **microtuning**: KB SETUP's H is TUNE; a tuning per project (11 factory, 8 USER), switched per track; TUNING and EDIT pages | `builds/v0.61-MICROTUNING/` | yes |
 | v0.60 | 2026-11-18 | fixes: **FM+** pages (knobs on the right parameters, the frequency bars drawn); **GRID** ALLOCATE SLICE RANDOM keeps its locks on NO | `builds/v0.60-FIXES/` | yes |
 | v0.59 | 2026-11-18 | the Monomachine's **FM+ STAT / PAR / DYN** machines; **MON** on the RECORDER (hear the input while armed or recording) | `builds/v0.59-FMPLUS/` | yes |
@@ -99,6 +100,53 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.62 — SLICE (the slice editor, impbox's requests)
+
+`DN2mod_v0.62_SLICE_OS1.11.syx`
+sha256 `33fba4ac03ca02befd2d5ace395bff4a7041577b5ac25745a210fd5c6cee3f1f`
+Gate: CLEARED TO FLASH, 2026-11-19 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the new slicefine and the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `2a37c41` (branch `slicefix`). Docs: `docs/sampler.md` (v0.62).
+
+Everything in v0.61, plus:
+
+**EDIT SLICE POINTS** (impbox):
+- **Live edits.** A slice's key plays your edit without pressing YES: the change is sent 0.2 s
+  after the knobs come to rest. YES and NO still close the editor as before.
+- **Playing a slice selects it.** A note on the editor's track (SLCE on NOTE) selects the slice it
+  plays: from the keyboard, the [TRIG] keys or the sequencer.
+- **Finer zoom.** ZOOM goes down to a 128-frame view, small enough to see single waveform cycles.
+  From 8,192 frames down, the frames themselves are read from the +Drive and drawn.
+- **Zero crossings.** FUNC + turning E (START) or H (END) snaps the point to the nearest zero
+  crossing (within 512 frames, never past the neighbouring slices). Without FUNC, E and H move as
+  before.
+
+**CREATE SLICE GRID** (Wolljamin): FUNC + E jumps SLICES through 2, 4, 8, 16, 32, 64, one detent
+a jump. E alone still moves one at a time.
+
+**Gate (new step):**
+- `slicefine`: the editor opens on the slices; a change is not sent while turning and is sent once
+  0.2 s after (the DSP's and the +Drive's tables, then the editor's); FUNC + END lands on a zero
+  crossing (moving the next slice's start with it), END alone does not snap; the deepest zoom
+  reads its own frames and each column is the sample's lowest and highest there, zoom 0 reads
+  nothing; a note on the track's voice picks its slice, another track's note or a fixed SLCE picks
+  nothing; NO closes with the table kept, on the +Drive too; in CREATE SLICE GRID, FUNC + E goes
+  13 → 16 → 32 → 16 → 8 → 4 → 2 → 2 and five detents to 64, while E alone moves one.
+
+**Tests**
+1. EDIT SLICE POINTS: move a slice's START, stop turning, play its key: you hear the new start
+   without pressing YES.
+2. Play the track (keyboard, [TRIG] keys or the sequencer): the slice that plays is the one
+   selected in the editor.
+3. ZOOM all the way in on a slice: single waveform cycles are visible.
+4. FUNC + turn E or H: the point lands on a zero crossing (no click at the slice's start/end).
+   Without FUNC: moves as before.
+5. CREATE SLICE GRID: FUNC + E steps 2/4/8/16/32/64; E alone steps one.
+6. YES and NO still close the editor; the slices are kept after a power cycle.
+7. The regression check (top of this file).
+
+**Known issues**
+- The same note again on the same voice does not re-select its slice (a new note does).
+- Everything listed for v0.61.
 
 ## v0.61 — MICROTUNING (a tuning per project, chosen per track)
 
