@@ -45,7 +45,12 @@ FRAME_BYTES = 1024
 INTRO_FPS = 30
 INTRO_FRAMES = 175
 CHUNK = b"ANIZ"
-DURATIONS_MS = (160,) + (80,) * 36 + (560,)          # (the last: frames 37..43's 7 x 80 ms, then held)
+SOURCE_DURATIONS_MS = (160,) + (80,) * 36 + (560,)   # his timing (the last: frames 37..43's 7 x 80 ms, then held)
+# v0.64 (the image was full; the owner, 2026-11-19: no pausing, room for the keyboard HOLD): his
+# frames at half the rate, the same length: every other one of his 37 moving frames, 160 ms
+# each, then his last, held as before. His frames are never changed, only fewer of them ship.
+SHIPPED = tuple(range(0, 37, 2)) + (37,)
+DURATIONS_MS = (160,) + (160,) * (len(SHIPPED) - 2) + (560,)
 SOURCE = pathlib.Path(__file__).with_name("bootanim_dn2mk2.json")
 
 
@@ -54,11 +59,11 @@ def frames_pixels() -> list[set[tuple[int, int]]]:
     import json
     doc = json.loads(SOURCE.read_text())
     raw = base64.b64decode(doc["data_base64"])
-    if tuple(doc["durations_ms"]) != DURATIONS_MS:
+    if tuple(doc["durations_ms"]) != SOURCE_DURATIONS_MS:
         raise ValueError(f"{SOURCE.name}: the timing is not DURATIONS_MS")
     n = len(raw) // FRAME_BYTES
-    if n * FRAME_BYTES != len(raw) or n != len(DURATIONS_MS):
-        raise ValueError(f"{SOURCE.name}: {len(raw)} bytes, {len(DURATIONS_MS)} durations")
+    if n * FRAME_BYTES != len(raw) or n != len(SOURCE_DURATIONS_MS):
+        raise ValueError(f"{SOURCE.name}: {len(raw)} bytes, {len(SOURCE_DURATIONS_MS)} durations")
     out = []
     for f in range(n):
         fr = raw[f * FRAME_BYTES:(f + 1) * FRAME_BYTES]
@@ -68,8 +73,10 @@ def frames_pixels() -> list[set[tuple[int, int]]]:
 
 
 def images() -> list[bytes]:
+    """the frames that ship (SHIPPED), in the intro bitmap's layout"""
     from .mods import bootscreen as B
-    return [B.image_from_pixels({(x, H - 1 - y) for x, y in lit}) for lit in frames_pixels()]
+    px = frames_pixels()
+    return [B.image_from_pixels({(x, H - 1 - y) for x, y in px[k]}) for k in SHIPPED]
 
 
 def delta(prev: bytes, cur: bytes) -> bytes:

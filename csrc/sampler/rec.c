@@ -1800,9 +1800,79 @@ int smp_knob_d __attribute__((section(".data"))) = 0;       /* v0.32: the last k
 u32 smp_knob_at __attribute__((section(".data"))) = 0;
 int smp_knob_code __attribute__((section(".data"))) = 0;     /* v0.48: which knob (1..8: A..H), its value shown */
 
+/* v0.64 KEYBOARD HOLD (docs/kbhold.md; the owner, 2026-11-19): PTN + KEYBOARD (jump.c jmp_key)
+ * turns kh_on. A [TRIG] key played as a keyboard note (stock's KeyboardView asked for its notes:
+ * slice.c slc_keynotes marks kh_kb) keeps sounding when let go: its release item is dropped and
+ * its bit kept (kh_kept; kh_rel is the last release item seen, the template a kept release is
+ * rebuilt from). The next fresh [TRIG] or KEYBOARD press with no [TRIG] down, or HOLD turned
+ * off, moves the kept bits to kh_out_m: one release a call of the receive comes out of it, then
+ * the press (kh_press, its copy, when kh_pend), before the stock queue is read again. Items are
+ * 16 bytes (type, code, flags, time) */
+#define KH_ITEM 16
+u32 kh_on __attribute__((section(".data"))) = 0;
+u32 kh_kb __attribute__((section(".data"))) = 0;        /* trig 0..15 pressed as a keyboard note */
+u32 kh_kept __attribute__((section(".data"))) = 0;      /* trig 0..15 whose release is kept */
+u32 kh_last __attribute__((section(".data"))) = 0;      /* the trig (1..16) last pressed, 0 none */
+u32 kh_out_m __attribute__((section(".data"))) = 0;     /* kept releases being sent */
+static u32 kh_pend __attribute__((section(".data"))) = 0;
+static u8 kh_rel[KH_ITEM] __attribute__((section(".data")));
+static u8 kh_press[KH_ITEM] __attribute__((section(".data")));
+static u8 kh_out[KH_ITEM] __attribute__((section(".data")));
+
+static void kh_copy(u8 *to, const u8 *from)
+{
+    for (int k = 0; k < KH_ITEM; k++)
+        to[k] = from[k];
+}
+
+static void kh_flush(const u8 *item)            /* the kept releases out, then ITEM (a press) if given */
+{
+    kh_out_m |= kh_kept;
+    kh_kept = 0;
+    if (item) {
+        kh_copy(kh_press, item);
+        kh_pend = 1;
+    }
+}
+
+static u8 *kh_next(void)                        /* the next held-back item, 0 none */
+{
+    if (kh_out_m) {
+        u32 k = 0;
+        while (!(kh_out_m >> k & 1u))
+            k++;
+        kh_out_m &= ~(1u << k);
+        kh_copy(kh_out, kh_rel);
+        kh_out[4] = kh_out[5] = kh_out[6] = 0;
+        kh_out[7] = (u8)(25u + k);
+        return kh_out;
+    }
+    if (kh_pend) {
+        kh_pend = 0;
+        return kh_press;
+    }
+    return 0;
+}
+
+void kh_set(u32 on)                             /* jump.c: PTN + KEYBOARD */
+{
+    kh_on = on;
+    if (!on)
+        kh_flush(0);
+}
+
+void kh_keynotes(void)                          /* slice.c: the KeyboardView asked for a key's notes */
+{
+    if (kh_last)
+        kh_kb |= 1u << (kh_last - 1);
+}
+
 u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock receive returns it */
 {
-    u8 *it = (u8 *)UI_POP(queue);
+    u8 *it = kh_next();                         /* v0.64: the hold's items before stock's */
+    u32 kh_serving = it != 0;
+    if (!it)
+        it = (u8 *)UI_POP(queue);
     if (!it)
         return (u32)it;
     u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
@@ -1837,6 +1907,30 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         *h = down ? *h | bit : *h & ~bit;
         if (down && code >= 25 && code <= 40)   /* v0.33: when each [TRIG] went down */
             smp_trig_at[code - 25] = *(volatile u32 *)0x4058E8D4u;
+    }
+    /* v0.64 KEYBOARD HOLD (above kh_flush) */
+    if (it[0] == IT_KEY && !kh_serving && ((code >= 25 && code <= 40) || code == 18)) {
+        u32 fresh = down && !(flags & F_REPEAT);
+        if (fresh && code != 18)
+            kh_last = code - 24;                /* (the KeyboardView asks for its notes next) */
+        if (fresh && kh_kept && !rec_overlay && !(((smp_held_lo >> 25) | (smp_held_hi & 0x1FFu) << 7) & ~(code != 18 ? 1u << (code - 25) : 0u))) {
+            kh_flush(it);                       /* the kept releases, then this press */
+            it[0] = IT_DROP;
+            return (u32)kh_next();
+        }
+        if (code != 18) {
+            u32 bit = 1u << (code - 25);
+            if (!down) {
+                if (kh_on && (kh_kb & bit) && !rec_overlay) {
+                    kh_copy(kh_rel, it);
+                    kh_kept |= bit;
+                    kh_kb &= ~bit;
+                    it[0] = IT_DROP;
+                    return (u32)it;
+                }
+                kh_kb &= ~bit;
+            }
+        }
     }
     if (it[0] == IT_KEY && code == K_SRC) {     /* v0.35: SYN held: the pages' values (O14) */
         if (down && (flags & F_REPEAT))
