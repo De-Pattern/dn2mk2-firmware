@@ -23,6 +23,9 @@ failure:
    stock's end *and* outside every `CODE` chunk (i.e. in data that never executes).
 5. **boot from reset** (`emu_boot_check.py`): boots and draws its UI, no fault (v0.37: and the
    start-up animation's first frame is s!Rwa²'s).
+5c. **repacked sections** (v0.65, `emu_depack_check.py`, docs/packer.md): the instrument's own
+   aPLib depacker (the bootstrap's, run in the emulator) gives back exactly our bytes for every
+   compressed section the build changed; one flipped byte does not.
 5b. **start-up animation** (v0.37, `emu_aniz_check.py`): from the snapshot before the intro,
    with the build's hook and appended area installed, every frame (v0.39: 38, his own), each his, in
    order, to the intro's last frame.
@@ -194,6 +197,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("functurn", "FUNC + turn (ColdFire)"),
        ("flexpool", "FLEX buffers in every sample machine's SAMP (ColdFire)"),
        ("aniz", "start-up animation, every frame"),
+       ("depack", "the instrument's own depacker on every repacked section"),
        ("recorder", "recorder screen (ColdFire)"),
        ("mnmpages", "Monomachine pages and detents (ColdFire)"),
        ("playdet", "PLAY two detents a choice (ColdFire)"),
@@ -659,6 +663,21 @@ def main() -> int:
                 return good, (f"all {n_anim} frames, each his, in order, to the intro's end; the panel showed "
                               f"each, the version label over the last only" if good else out[-800:])
             later("aniz", "start-up animation, every frame", "start-up animation", [aniz_cmd], aniz_body)
+
+        # 5c. v0.65 (docs/packer.md): the sections the build changes are packed by the optimal
+        # parse (codec.aplibopt); the instrument's own aPLib depacker (the bootstrap's 0x80000432,
+        # from stock's untouched section 2, run in digikit's Unicorn machine) must give back
+        # exactly what ours does for each, and a stream with one byte flipped must not
+        depack_cmd = [a.venv, "-u", "scripts/emu_depack_check.py", a.stock, a.build]
+
+        def depack_body(tdir):
+            rc, out = run("depack_check", depack_cmd, logs, trace=tdir)
+            good = rc == 0 and out.strip().endswith("DEPACK PASS") and "does not give its content back" in out
+            secs = [ln.split(":")[0] for ln in out.splitlines() if "identical to ours" in ln]
+            return good, (f"{', '.join(secs)}: the instrument's depacker gives exactly our bytes; a flipped "
+                          "byte does not" if good else out[-800:])
+        later("depack", "the instrument's own depacker on every repacked section", "repacked sections",
+              [depack_cmd], depack_body)
 
         # 6. engine + LOAD/SAVE
         # PERC (5), the Monomachine's (6, 7, v0.26: 14..) and the sample machines (8..13,

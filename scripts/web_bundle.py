@@ -66,7 +66,10 @@ def isolated_rebuild(zbytes: bytes, version: str) -> str:
             " mnm=sys.argv[5]))\n")
         r = subprocess.run([sys.executable, "-I", "-c", prog, str(run), str(ROOT.parent / "Digitone_II_OS1.11.syx"),
                             str(STOCK / STOCK_FILES["dt2"]), str(STOCK / STOCK_FILES["md"]),
-                            str(STOCK / STOCK_FILES["mnm"])], cwd=td, capture_output=True, text=True)
+                            str(STOCK / STOCK_FILES["mnm"])], cwd=td, capture_output=True, text=True,
+                           # v0.65: the packer's planner as the browser runs it, apopt.wasm (here under
+                           # node), not the native library: the zip must rebuild the cleared file so
+                           env={**os.environ, "DNFW_APOPT": "node"})
         for line in r.stdout.splitlines():
             if line.startswith("SHA="):
                 return line[4:]
