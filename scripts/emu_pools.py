@@ -476,7 +476,7 @@ def run(cx):
     first = {}
     case = power_cycle(7)
     notes["7"] = {"case": case, "dsp": dsp_pool()}
-    order = list(m.read(syms["smp_l_order"], 4))
+    order = list(struct.unpack(">2H", m.read(syms["smp_l_order"], 4)))   # (v0.65: u16 global slots)
     r9 = switch(os_load, 9)
     facts["7 a power cycle: 7's pool loads (its kit's sample first); 9's change kept"] = (
         case == 9 and notes["7"]["dsp"] == {0: "KICK", 1: "SNARE", 2: "HAT", 3: "LIBX ON"}
