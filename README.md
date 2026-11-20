@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.64 | 2026-11-20 | **keyboard HOLD**: PTN + KEYBOARD sustains every track (held notes latch, MIDI in, arp); start-up animation at half rate | `builds/v0.64-HOLD/` | yes |
 | v0.63 | 2026-11-19 | **FLEX level**: a FLEX take of a track plays at the level heard (+24 dB built in; GAIN 0 = old +24); a FLEX save never normalises | `builds/v0.63-FLEXLEVEL/` | yes |
 | v0.62 | 2026-11-19 | **slice editor**: edits play live, playing a slice selects it, zoom to 128 frames, FUNC + START/END snaps to zero crossings; CREATE SLICE GRID FUNC + E jumps 2..64 | `builds/v0.62-SLICE/` | yes |
 | v0.61 | 2026-11-19 | **microtuning**: KB SETUP's H is TUNE; a tuning per project (11 factory, 8 USER), switched per track; TUNING and EDIT pages | `builds/v0.61-MICROTUNING/` | yes |
@@ -101,6 +102,54 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.64 — HOLD (PTN + KEYBOARD holds the keyboard's notes)
+
+`DN2mod_v0.64_HOLD_OS1.11.syx`
+sha256 `b155e97db50a6e35a6871849beac3b67085a61073b9adead91bf42733acf52bf`
+Gate: CLEARED TO FLASH, 2026-11-20 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the new kbhold and the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `1541dab` (branch `holdv64`). Docs: `docs/kbhold.md`.
+
+Everything in v0.63, plus:
+
+**KEYBOARD HOLD.** Hold **PTN** and press **KEYBOARD** to turn HOLD on; again to turn it off.
+The screen says KB HOLD ON / KB HOLD OFF while PTN is held.
+- HOLD works like a sustain pedal held down on every track: notes keep sounding after you let
+  go of the key, or after a MIDI note-off arrives.
+- Notes you are **already holding** when HOLD comes on are latched as you let go of them.
+- Notes played while HOLD is on are added to the held ones.
+- Works with [TRIG] keys in KEYBOARD mode, MIDI in, chords, microtuning and the arpeggiator
+  (the arp keeps running on the latched keys).
+- HOLD off releases every held note. HOLD starts off after a power cycle.
+- PTN alone, KEYBOARD alone, PTN + [TRIG], PTN + YES / NO and DIRECT JUMP work as before.
+
+**Start-up animation at half the frame rate.** Every other frame of s!Rwa²'s animation, each
+shown twice as long: the same length and the same last frame. This made room for HOLD (the
+firmware image was full).
+
+**Gate:** `kbhold` (new, ColdFire emulator): PTN + KEYBOARD turns sustain on for all 16 tracks
+and off again, with the message on the PTN screen and the PTN view closed at PTN's release; a
+key held before HOLD and a key played during HOLD are not released when let go; a MIDI
+note-off is kept; HOLD off releases both voices and empties every list. Negative controls:
+with HOLD off the same MIDI note-off and key release go through at once. KEYBOARD mode and
+DIRECT JUMP's setting are unchanged.
+
+**Tests**
+1. KEYBOARD on, hold a chord on the [TRIG] keys, PTN + KEYBOARD (KB HOLD ON), let go: the chord keeps sounding.
+2. While held, play more notes: they join the held chord.
+3. PTN + KEYBOARD again (KB HOLD OFF): everything releases.
+4. From a MIDI keyboard: hold notes, HOLD on, let go: they keep sounding; HOLD off releases them.
+5. Arp on, hold a chord, HOLD on, let go: the arp keeps running; HOLD off stops it.
+6. PTN alone, KEYBOARD alone, PTN + [TRIG] (pattern change), DIRECT JUMP: as before.
+7. Power cycle: HOLD is off.
+8. The start-up animation plays, slightly less smooth, ending on the same frame.
+9. The regression check (top of this file).
+
+**Known issues**
+- The arpeggiator with HOLD is untested on hardware (the emulator cannot run the arp).
+- New notes are added to the held ones rather than replacing them (sustain pedal behaviour).
+- PTN + KEYBOARD no longer toggles KEYBOARD mode (it did on stock while PTN was held).
+- **FLEX takes of a track are about 12 dB too loud at GAIN 0** (v0.63's built-in +24 should have been +12; measured by a tester on v0.63): set GAIN to -12 on FLEX tracks. Fixed in the next build.
+- Everything listed for v0.63.
 
 ## v0.63 — FLEXLEVEL (FLEX takes at the level you hear; a FLEX save never normalises)
 
