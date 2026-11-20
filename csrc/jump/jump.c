@@ -164,7 +164,7 @@ void jmp_hold_say(u32 on)
 int jmp_key(void *view, void *ev)
 {
     u32 code = *(u32 *)((u8 *)ev + 12);
-    if (kh_close) {                             /* v0.64: rec.c's PTN + KEYBOARD, as stock's NO */
+    if (kh_close == 2) {                        /* v0.64: rec.c's NO after PTN + KEYBOARD: stock's */
         kh_close = 0;
         return PTN_VIEW_KEY(view, ev);
     }
