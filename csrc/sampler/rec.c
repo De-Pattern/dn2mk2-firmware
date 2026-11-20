@@ -28,6 +28,7 @@
 typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
+#include "banks.h"                              /* v0.65: global slots, the banks */
 
 #define FRAMES (*(volatile u32 *)0x4058E8D4u)                         /* frames since boot, 1,500 a second */
 #define REC_THR_FLOOR 33u                       /* v0.30: THRES 0's level, -60 dB, under any real input */
@@ -91,6 +92,9 @@ static int lst_func __attribute__((section(".data"))) = 0;
 #define UI_TRACK_NOW (*(volatile unsigned char *)0x42431A6Cu)
 int smp_set_samp(int track, int value);
 int smp_samp_of(int track);
+u32 smp_samp_word(int track);                   /* v0.65 */
+int smp_set_samp_word(int track, u32 word);
+int smp_set_samp_g(int track, int g);
 extern u32 smp_frames(int k);
 extern int smp_trim(int k, u32 s, u32 e);
 extern void smp_discard(int k);
@@ -923,6 +927,38 @@ int smp_assign(int track, int slot)
     return 0;
 }
 
+/* v0.65: SAMP on TRACK set to WORD (its bank in the low byte) as the knob sets it */
+int smp_set_samp_word(int track, u32 word)
+{
+    extern int rt_samp_buf(u32 samp);
+    u32 value = (word >> 8) & 0xFFu;
+    if (track < 0 || track > 15 || (value > 127 && rt_samp_buf(value) < 0) || !KIT)
+        return -1;                              /* v0.55: or a FLEX buffer's code */
+    int ty = SOUND_TYPE(track);
+    if (!SAMP_MACHINE(ty))
+        return -1;
+    u32 owner = UI_OWNER();
+    if (!owner)
+        return -1;
+    u32 ps = PARAM_SET(owner, SMP_SAMP_ID, (u32)track);
+    if (!ps)
+        return -1;
+    /* smp_quant writes WORD as it is, through the stock call made with a value in range and
+     * other than the one held (so it is not skipped): the stock path after the write (undo, the
+     * kit, a p-lock while a [TRIG] is held, the frame) carries it */
+    extern int smp_samp_direct;
+    smp_samp_direct = (int)(0x10000u | (word & 0xFFFFu));
+    u32 sent = smp_samp_of(track) == 127 ? 126u : 127u;
+    SET_VALUE(ps, SMP_SAMP_ID, sent << 8, (u32)track, 0, 0, 1);
+    smp_samp_direct = 0;
+    return 0;
+}
+
+int smp_set_samp_g(int track, int g)            /* v0.65: SAMP on global slot G */
+{
+    return g < 0 || g >= SMP_ALL ? -1 : smp_set_samp_word(track, G_WORD(g));
+}
+
 /* v0.25: SAMP on TRACK set to VALUE (0 OFF, k slot k - 1) as the knob sets it, and read */
 int smp_set_samp(int track, int value)
 {
@@ -958,17 +994,17 @@ int smp_set_samp(int track, int value)
  * sound to the new machine's defaults, SAMP to OFF). Anything else is stock's. */
 u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
 {
-    int keep = 0;
+    u32 keep = 0;                               /* v0.65: the whole word (its bank) */
     if (track < 16 && KIT) {
         int old = SOUND_TYPE(track);
         int ty = (int)type;
         if (old != ty && SAMP_MACHINE(old) && SAMP_MACHINE(ty))
-            keep = smp_samp_of((int)track);
+            keep = smp_samp_word((int)track);
     }
     int was = track < 16 && KIT ? SOUND_TYPE(track) : -1;
     u32 r = MACHINE_COMMIT(model, track, type, a, b);
-    if (keep > 0 && SOUND_TYPE(track) == (int)type && smp_samp_of((int)track) != keep)
-        smp_set_samp((int)track, keep);
+    if ((keep >> 8) > 0 && SOUND_TYPE(track) == (int)type && smp_samp_word((int)track) != keep)
+        smp_set_samp_word((int)track, keep);
     /* v0.48: a fresh ONESHOT/STRETCH/REPITCH/BOUNCE starts at the DT2's LEN, 120.00 (fmt.c
      * smp_fine). The commit sets the shared record's default, WaveTone's 0x7f00 while the
      * records are still stock; anything left above 120.00 is put at it. */
@@ -1020,6 +1056,15 @@ int smp_samp_of(int track)
     if (track < 0 || track > 15 || !KIT)
         return 0;
     return *(volatile u8 *)(KIT + 52u + 1163u * (u32)track + 20u + 2u * 43u);
+}
+
+/* v0.65: SAMP's whole word (its bank in the low byte, docs/banks.md) */
+u32 smp_samp_word(int track)
+{
+    if (track < 0 || track > 15 || !KIT)
+        return 0;
+    volatile u8 *w = (volatile u8 *)(KIT + 52u + 1163u * (u32)track + 20u + 2u * 43u);
+    return (u32)w[0] << 8 | w[1];
 }
 
 /* a [TRIG] key's track, or -1 */
@@ -1573,7 +1618,7 @@ static void lrpt_poll(void)
         if (!smp_lib_used(trk_pend_k))
             trk_pend_k = -1;
         else if (s >= 0 && !smp_lib_pending()) {
-            smp_set_samp(trk_pend_t, s + 1);
+            smp_set_samp_g(trk_pend_t, s);          /* (v0.65: in its bank) */
             trk_pend_k = -1;
         }
     }
@@ -1849,8 +1894,11 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         int t = (int)UI_TRACK_NOW;
         if (code == 4 && smp_knob_d > 0 && !rec_overlay && !smp_fb_open && smp_samp_page()
             && SAMP_MACHINE(SOUND_TYPE(t)) && smp_samp_of(t) == 127) {
-            int r = 127 + smp_knob_d;
-            smp_set_samp(t, (int)rt_buf_code((u32)((r > 135 ? 135 : r) - 128)));
+            /* v0.65: from any bank's 127, on to the next bank's 001 (or the FLEX buffers) */
+            extern int smp_word_row(u32 w), smp_row_step(int r, int d);
+            extern u32 smp_row_word(int r);
+            (void)rt_buf_code;
+            smp_set_samp_word(t, smp_row_word(smp_row_step(smp_word_row(smp_samp_word(t)), smp_knob_d)));
             it[0] = IT_DROP;
             return (u32)it;
         }
@@ -2242,7 +2290,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     if (act == 0) {             /* v0.31: LOAD TO TRK from +DRIVE: into the pool, */
                         int s = smp_lib_slot_of(slot);      /* then the track's SAMP */
                         if (s >= 0) {
-                            smp_set_samp(t, s + 1);
+                            smp_set_samp_g(t, s);
                         } else if (smp_lib_load(slot) == 0) {
                             trk_pend_k = slot;
                             trk_pend_t = t;
@@ -2251,10 +2299,10 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 } else if (code == K_YES && slot >= 0) {
                     smp_fb_menu = 0;
                     if (act == 0) {             /* LOAD TO TRK */
-                        smp_set_samp(t, slot + 1);
+                        smp_set_samp_g(t, slot);
                         smp_fb_open = 0;
                         smp_fb_unmark_all();    /* v0.33: closed, so its ticks go (as a page key's) */
-                        smp_list_settle(slot + 1);
+                        smp_list_settle((int)G_WORD(slot));
                     } else if (act == 1) {      /* RENAME: the NAME screen, alone */
                         smp_fb_open = 0;
                         smp_list_close();
@@ -2329,8 +2377,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 smp_fb_cur = smp_fb_last_store == 1 ? 0 : 1;
             } else if (code == K_YES) {
                 smp_list_close();
-            } else {                            /* NO: as it was */
-                smp_set_samp(t, smp_lst_orig);
+            } else {                            /* NO: as it was (v0.65: the word, its bank) */
+                smp_set_samp_word(t, (u32)smp_lst_orig);
                 smp_list_settle(smp_lst_orig);
             }
             return (u32)it;
@@ -2375,13 +2423,14 @@ static void lst_step(u32 code)
     if (smp_list_view && smp_list_up(smp_list_view)) {
         int t = (int)UI_TRACK_NOW;
         smp_list_hold();
-        /* v0.55: by rows: SAMP 0..127, then the FLEX buffers B1..B8 (rows 128..135) */
-        extern int rt_samp_buf(u32 samp);
-        extern u32 rt_buf_code(u32 b);
-        int s0 = smp_samp_of(t), b0 = rt_samp_buf((u32)s0);
-        int r = (b0 >= 0 ? 128 + b0 : s0) + (code == K_DOWN ? 1 : -1);
-        if (r >= 0 && r <= 135)
-            smp_set_samp(t, r >= 128 ? (int)rt_buf_code((u32)(r - 128)) : r);
+        /* v0.55: by rows: SAMP 0..127, then the FLEX buffers B1..B8. v0.65: the rows run through
+         * the banks (smp_page.c smp_row_step); FUNC + UP / DOWN jumps a bank, as the DT2's */
+        extern int smp_word_row(u32 w), smp_row_step(int r, int d);
+        extern u32 smp_row_word(int r);
+        int r0 = smp_word_row(smp_samp_word(t)), d = code == K_DOWN ? 1 : -1;
+        int r = smp_row_step(r0, smp_func_held ? 127 * d : d);
+        if (r != r0)
+            smp_set_samp_word(t, smp_row_word(r));
         return;
     }
     lrpt_code = 0;                              /* neither up: the repeat ends */

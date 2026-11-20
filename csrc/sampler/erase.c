@@ -76,6 +76,10 @@ typedef unsigned char u8;
 #define PL_SB 0x6D0000u                                             /* pools.c */
 #define PL_END (0x6D0100u + 2u * 129u * 256u)
 #define SET_SECTOR 0x6FF000u                                        /* jump.c */
+#define BL_A 0x6E0600u                                              /* v0.65, pools.c: the bank lists, */
+#define BL_A_END (BL_A + 2u * 64u * 464u)                           /* projects 0..63 */
+#define BL_B 0x6F0800u                                              /* .. and 64..127 */
+#define BL_B_END (BL_B + 2u * 64u * 464u)
 #define LIB_SECTOR 0x700000u                                        /* lib.c */
 #define LIB_HI_AT 0x6FF800u                                         /* v0.43, lib.c: folders 64..127 */
 #define LIB_HI_END (LIB_HI_AT + 1u + 4u)
@@ -98,6 +102,8 @@ _Static_assert(SET_SECTOR >= PL_END && SET_SECTOR < LIB_SECTOR, "the settings se
 _Static_assert(LIB_HI_AT > SET_SECTOR && LIB_HI_END <= LIB_SECTOR, "v0.43: folders 64..127 between the settings and the library");
 _Static_assert(LIB_X_AT >= PL_END && LIB_X_END <= SET_SECTOR, "v0.45: the library's extension between the lists and the settings");
 _Static_assert(LIB_SECTOR > SET_SECTOR && LIB_DATA == 0x700105u, "the library's headers: 0x700000..0x700104");
+_Static_assert(BL_A >= PL_END && BL_A_END <= LIB_X_AT && BL_B >= LIB_X_END && BL_B_END <= SET_SECTOR,
+               "v0.65: the bank lists between the lists, the library's extension and the settings");
 
 int smp_er_lock D_ = 0;                 /* set at the first erase call; every writer of ours refuses */
 int smp_er_req D_ = 0;                  /* link command 28: start at the next UI pass */
@@ -125,7 +131,7 @@ static u32 er_pos D_ = 0;               /* the next sector of the job */
 static u8 er_buf[512] __attribute__((section(".data"), aligned(16)));
 
 /* job -> [start, end) */
-#define ER_JOBS 8
+#define ER_JOBS 10
 static void er_job(int j, u32 *a, u32 *b)
 {
     u32 end = BLK_SECTORS;
@@ -136,7 +142,9 @@ static void er_job(int j, u32 *a, u32 *b)
     case 3: *a = LIB_SECTOR; *b = end < LIB_DATA ? end : LIB_DATA; return;   /* the library's headers */
     case 4: *a = LIB_HI_AT; *b = LIB_HI_END; return;                /* v0.43: folders 64..127 */
     case 5: *a = LIB_X_AT; *b = LIB_X_END; return;                  /* v0.45: entries 2,048..16,383 */
-    case 6: *a = POOL_SECTOR + 1u; *b = POOL_STORE_END; return;     /* the pool's frames */
+    case 6: *a = BL_A; *b = BL_A_END; return;                       /* v0.65: the bank lists */
+    case 7: *a = BL_B; *b = BL_B_END; return;
+    case 8: *a = POOL_SECTOR + 1u; *b = POOL_STORE_END; return;     /* the pool's frames */
     default: *a = LIB_DATA; *b = end > LIB_DATA ? end : LIB_DATA; return;    /* the library's frames */
     }
 }
@@ -157,6 +165,8 @@ static int er_inside(u32 s, u32 n)
     if (s >= LIB_HI_AT && s + n <= LIB_HI_END)  /* v0.43 */
         return 1;
     if (s >= LIB_X_AT && s + n <= LIB_X_END)    /* v0.45 */
+        return 1;
+    if ((s >= BL_A && s + n <= BL_A_END) || (s >= BL_B && s + n <= BL_B_END))   /* v0.65 */
         return 1;
     if (s >= LIB_SECTOR)                        /* to the device's end (checked above) */
         return 1;
@@ -270,7 +280,8 @@ static u32 er_check_sector(u32 k)
         return LIB_HI_AT + (k - (h - 1u - (LIB_HI_END - LIB_HI_AT)));
     k -= h;
     u32 j = k / ER_SPREAD, i = k % ER_SPREAD, a, b;
-    er_job(j == 0 ? 6 : j == 1 ? 1 : 7, &a, &b);    /* the pool's frames, the lists, the library */
+    static const u8 spread_job[5] = {8, 1, 9, 6, 7};   /* the pool's frames, the lists, the library; v0.65 the bank lists */
+    er_job(spread_job[j < 5u ? j : 4u], &a, &b);
     if (b <= a)
         return a;
     u32 span = b - a - 1u;
@@ -329,7 +340,7 @@ int smp_er_start(void)
         er_job(j, &a, &b);
         smp_er_total += b - a;
     }
-    smp_er_nchecks = er_nhead() + 3u * ER_SPREAD;
+    smp_er_nchecks = er_nhead() + 5u * ER_SPREAD;     /* (v0.65: and the two bank-list ranges) */
     u32 end;
     smp_er_job = 0;
     er_job(0, &er_pos, &end);

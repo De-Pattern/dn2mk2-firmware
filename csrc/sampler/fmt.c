@@ -210,6 +210,8 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
     if (smp_samp_direct && slot == SMP_SAMP_SLOT) {     /* v0.55: smp_set_samp's own write */
         extern u32 smp_samp_turned;
         smp_samp_turned = *(volatile u32 *)0x4058E8D4u;    /* (as below, for every SAMP write) */
+        if (smp_samp_direct & 0x10000)                     /* v0.65: a whole word (its bank) */
+            return smp_samp_direct & 0xFFFF;
         return smp_samp_direct > 0 ? smp_samp_direct << 8 : value;
     }
     int fk = func_kind(s, slot, id);
@@ -273,20 +275,17 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
     }
     if (slot == SMP_SAMP_SLOT && type < SMP_N0 && smp_knob_d
         && *(volatile u32 *)0x4058E8D4u - smp_knob_at <= KNOB_FRESH) {
-        /* v0.55: past SAMP 127 the list goes on to the eight FLEX buffers (rows 128..135, each
-         * the buffer's code: rt_buf_code), turned by the knob's own steps */
-        extern int rt_samp_buf(unsigned int samp);
-        extern unsigned int rt_buf_code(unsigned int b);
+        /* v0.55: past SAMP 127 the list goes on to the eight FLEX buffers, turned by the knob's
+         * own steps. v0.65 (docs/banks.md): one run of rows, OFF, A001..A127, B001.., C.., D..,
+         * then the FLEX buffers (smp_page.c smp_row_step: banks not in use skipped); the word
+         * written carries the row's bank in its low byte */
+        extern int smp_word_row(unsigned int w), smp_row_step(int r, int d);
+        extern unsigned int smp_row_word(int r);
         int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
-        int oc = old >> 8, nc = (value >> 8) & 0xFF;
-        int ob = rt_samp_buf((unsigned int)oc);
-        int row = ob >= 0 ? 128 + ob : oc;
-        if (ob >= 0 || nc > 127 || (smp_knob_d > 0 && row + smp_knob_d > 127)) {
-            int r = row + smp_knob_d;
-            r = r < 0 ? 0 : r > 135 ? 135 : r;
-            return (r >= 128 ? (int)rt_buf_code((unsigned int)(r - 128)) : r) << 8;
-        }
+        return (int)smp_row_word(smp_row_step(smp_word_row((unsigned int)old), smp_knob_d));
     }
+    /* (v0.65: any other write -- a MIDI CC, a sound or kit loaded -- is written as it comes: a CC
+     * names a slot of bank A, as before; a loaded sound keeps the bank it was saved with) */
     int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
     int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
     for (int k = 0; k < SMP_NQ; k++) {

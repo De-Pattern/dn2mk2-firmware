@@ -159,6 +159,10 @@ BANK_META = 0x1000
 BANK_SLICES = 0x3000
 BANK_TAGS = (0x00, 0x40, 0x80, 0xC0)
 BANK_SLOTS = 127                            # SAMP 1..127 in each bank (bank A's 124..127 the recorder's)
+BANK_RAM = 0x47100000                       # the ColdFire's copies of banks B..D's pages (3 x BANK_PAGE), then
+                                            # their slots' overviews, slice columns and sums (link.c, banks.h)
+BANK_RAM_BYTES = 0x80000
+assert TABLE_LOAD + TABLE_ROOM <= BANK_RAM and BANK_RAM + BANK_RAM_BYTES <= 0x47800000   # below the stack's 8 MB
 assert BANK_SLICES + POOL_SLOTS * SLICE_TABLE_BYTES <= BANK_PAGE and BANK_META + 0x2000 <= BANK_SLICES
 REC_BYTES = BANK_AREA - REC_OFFSET         # v0.23: the recordings' area ends at the slice area (v0.26: the tables; v0.65: the banks)
 

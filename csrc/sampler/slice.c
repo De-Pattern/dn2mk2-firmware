@@ -20,6 +20,7 @@
 typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
+#include "banks.h"                              /* v0.65: global slots, the banks */
 
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90)
 #define LABEL_FONT 0x40291760u
@@ -164,7 +165,8 @@ static int track_slot(void)                     /* the active track's sample, if
     volatile u8 *s = (volatile u8 *)SOUND(t);
     if ((signed char)s[0xDE] != SLICE_TYPE)
         return -2;
-    return SOUND_VALUE(SOUND(t), SMP_SAMP_ID) - 1;   /* SAMP 0 is OFF */
+    /* SAMP 0 is OFF; v0.65: the global slot, in SAMP's bank (-1 OFF or a FLEX buffer) */
+    return smp_word_g(*(volatile u16 *)(SOUND(t) + 20u + 2u * (u32)RECORD(SMP_SAMP_ID)[1]));
 }
 
 /* -- drawing --------------------------------------------------------------------------- */

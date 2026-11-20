@@ -73,11 +73,12 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
                    "POOL_SLOTS": SM.POOL_SLOTS}
         for name in ("POOL_BYTES", "REC_OFFSET", "REC_END", "RAM_PROVEN", "SLICE_AREA", "TABLE_AREA", "TABLE_ROOM", "TABLE_READY", "TABLE_MAGIC", "TABLE_LOAD", "CMD_OFFSET", "STATUS_MAGIC", "TDM_TAG",
                      "RX_MAGIC", "TX_MAGIC", "POS_MAGIC", "POS_NONE", "POS_ONE", "META_PTR", "META_PTR_MAGIC", "META_MAGIC", "META_FOLDERS",
-                     "META_FOLDER_BYTES", "META_SLOT_BYTES", "META_NAME_BYTES", "META_BYTES", "LIBID_OFFSET"):      # v0.16; v0.25 POS
+                     "META_FOLDER_BYTES", "META_SLOT_BYTES", "META_NAME_BYTES", "META_BYTES", "LIBID_OFFSET",
+                     "BANK_AREA", "BANK_PAGE", "BANK_MAGIC", "BANK_META", "BANK_SLICES", "BANK_RAM"):      # v0.16; v0.25 POS; v0.65 banks
             defines[name] = hex(getattr(SM, name)) + "u"
         for name in ("REC_FIRST", "REC_SLOTS", "REC_SLOT_SHIFT", "CMD_SEND", "CMD_VERIFY", "CMD_PROBE", "CMD_PREVIEW", "CMD_SCAN",
                      "RX_WORDS", "TX_WORDS", "CMD_WORDS",
-                     "BUF_N", "BUF_HALVES", "BUF_ENTRY", "BUF_DIR", "BUF_SLOT0", "BOUNCE_TYPE"):   # v0.44 BOUNCE
+                     "BUF_N", "BUF_HALVES", "BUF_ENTRY", "BUF_DIR", "BUF_SLOT0", "BOUNCE_TYPE", "BANK_N"):   # v0.44 BOUNCE; v0.65
             defines[name] = int(getattr(SM, name))
         import os
         if os.environ.get("DNFW_SMP_STORE_TEST"):
