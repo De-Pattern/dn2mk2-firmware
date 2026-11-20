@@ -107,6 +107,38 @@ static int mnm_tune_step(int old, int dir)
     return v < 0 ? old : v << 8;                /* at the end already: as it is */
 }
 
+/* v0.66 (owner, 2026-11-20: "i would like it to jump when func is held"): FUNC + turn on FM+
+ * DYN's continuous frequencies jumps to the next whole ratio the knob's way, as TUNE jumps a
+ * semitone; a plain turn stays continuous (the Monomachine's: "set continuously"). The ratio
+ * is the page's (mnm_cont_text): 1FRQ (LIN2) 2 k / 128, 2FRQ (SQR4) 4 (k / 128)^2, so the
+ * whole ratios sit at knob 0, 64, 127 (LIN2) and 0, 64, 91, 111, 127 (SQR4: 2.02 and 3.00,
+ * the nearest the knob's 128 steps reach). */
+static const unsigned char frq_lin2[] = {0, 64, 127};
+static const unsigned char frq_sqr4[] = {0, 64, 91, 111, 127};
+int mnm_frq_target(int n, int k, int dir)       /* the whole ratio's knob past K, or K */
+{
+    const unsigned char *w = n == MNM_LIN2 ? frq_lin2 : frq_sqr4;
+    int c = n == MNM_LIN2 ? (int)sizeof frq_lin2 : (int)sizeof frq_sqr4;
+    if (dir > 0) {
+        for (int i = 0; i < c; i++)
+            if (w[i] > k)
+                return w[i];
+    } else
+        for (int i = c - 1; i >= 0; i--)
+            if (w[i] < k)
+                return w[i];
+    return k;
+}
+
+static int mnm_frq_step(int j, int n, int old, int dir)
+{
+    int k = mnm_kn(j, old >> 8), t = mnm_frq_target(n, k, dir);
+    if (t == k)
+        return old;                             /* at the end already: as it is */
+    int v = mnm_val_for(j, k, t, dir);
+    return v < 0 ? old : v << 8;
+}
+
 static int fq_click __attribute__((section(".data"))) = 0;      /* v0.32: a FUNC click (+1/-1), else 0 */
 
 static int mnm_quant(int mi, int slot, int old, int value)
@@ -162,7 +194,7 @@ extern int smp_func_held;
 extern int smp_knob_d;
 extern u32 smp_knob_at;
 #define KNOB_FRESH 150u                         /* 100 ms: the turn this write comes from */
-enum { F_OFF, F_KEEP, F_CHOICE, F_NONE, F_TUNE };
+enum { F_OFF, F_KEEP, F_CHOICE, F_NONE, F_TUNE, F_FRQ };
 #define OWN_REC_FIRST 238u                      /* our records (dnfw.perc / dnfw.sampler machines) */
 #define OWN_REC_LAST 260u
 
@@ -184,7 +216,9 @@ static int func_kind(u8 *s, int slot, u32 id)
             if (mnm_slot[j] == slot) {
                 if (j == MNM_TUNE_J && mnm_labels[mi][j][0] == 'T' && mnm_labels[mi][j][1] == 'U')
                     return F_TUNE;              /* v0.47: by semitones (the owner) */
-                return mnm_choices[mi][j] && !mnm_cont(mnm_choices[mi][j]) ? F_CHOICE : F_NONE;
+                if (mnm_choices[mi][j] && mnm_cont(mnm_choices[mi][j]))
+                    return F_FRQ;               /* v0.66: FM+ DYN's 1FRQ / 2FRQ by whole ratios */
+                return mnm_choices[mi][j] ? F_CHOICE : F_NONE;
             }
         return F_NONE;
     }
@@ -220,6 +254,14 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
         return old0;
     if (fk == F_TUNE)
         return mnm_tune_step(old0, smp_knob_d > 0 ? 1 : -1);
+    if (fk == F_FRQ) {                          /* v0.66: FM+ DYN's 1FRQ / 2FRQ */
+        int mi = mnm_index((signed char)s[SOUND_TYPE] - 4), j = 0;
+        while (j < 8 && mnm_slot[j] != slot)
+            j++;
+        if (mi < 0 || j == 8)
+            return old0;
+        return mnm_frq_step(j, mnm_choices[mi][j], old0, smp_knob_d > 0 ? 1 : -1);
+    }
     if (fk == F_CHOICE) {                       /* one choice a click, the knob's way: a */
         fq_click = smp_knob_d > 0 ? 1 : -1;     /* detent's worth past the old value, */
         int oc0 = old0 >> 8;                    /* each table's own step below */

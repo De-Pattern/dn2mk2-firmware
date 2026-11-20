@@ -137,3 +137,13 @@ The shipped tables came to 65 KB (94 KB with the words as they are).
 `test/test_mnm.py`: every golden case of every machine in run mode, with the increments
 exactly the Monomachine's, at 60 dB signal-to-error or better (DPRO-WAVE 63.8..99 dB, SID
 94..110 dB so far); each machine's float `pitch` within 1e-4 of the exact increments. FM+ (v0.59): 69..99 dB, but its self feedback at 32 and up (STAT's 1FB, DYN's 2FB): chaotic on the Monomachine itself (any LSB, even 37-bit phases with five bits off the increments, sends it elsewhere), so those cases are held to `bench.likeness` (level, octave bands), and that test refuses the same output 6 dB down.
+
+## v0.66: FM+ DYN's frequencies jump with FUNC
+
+The owner, 2026-11-20: "i would like it to jump when func is held". FM+ DYN's 1FRQ (shown x.x,
+2 knob / 128) and 2FRQ (x.xx, 4 (knob / 128)^2) stay continuous, as the Monomachine's manual has
+them ("the frequencies are set continuously instead of using the listed frequency"). FUNC + turn
+jumps to the next whole ratio the knob's way, as TUNE jumps a semitone: 1FRQ 0, 1, 2 (knob 0,
+64, 127); 2FRQ 0, 1, 2, 3, 4 (knob 0, 64, 91, 111, 127: 2.02 and 3.00 are the nearest the knob's
+128 steps reach). `fmt.c` mnm_frq_step; gate: `functurn` (seven FUNC cases and a plain turn).
+STAT's and PAR's FRQs are the Monomachine's listed ratios already, one a detent.

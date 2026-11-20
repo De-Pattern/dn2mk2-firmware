@@ -1937,6 +1937,43 @@ def main() -> int:
                      ("v0.33: an LFO control on PERC: stock's FUNC jump kept", (5, lfo_slot, 0x2000, 1, 1, True, 0x4000), 0x4000),
                      ("v0.33: an LFO control on a Monomachine track: stock's", (dwave, lfo_slot, 0x2000, 1, 1, True, 0x4000), 0x4000),
                      ("v0.33: an LFO control on ONESHOT: stock's", (8, lfo_slot, 0x2000, 1, 1, True, 0x4000), 0x4000)]
+            # v0.66 (owner: FM+ DYN's FRQs "jump when func is held"): FUNC + turn on 1FRQ (x.x, 2 k/128)
+            # and 2FRQ (x.xx, 4 (k/128)^2) goes to the next whole ratio the knob's way (knob 0, 64, 127;
+            # 0, 64, 91, 111, 127), written as the record value nearest that knob (fmt.c mnm_val_for);
+            # without FUNC both stay continuous
+            dyn = MMf.TYPES[MMf.NAMES.index("FM+DYN")]
+
+            def kn(j, v):
+                lo, top = PMf.PARAMS[j][2], PMf.PARAMS[j][3]
+                v = min(max(v - lo, 0), top)
+                return (v * 254 + top) // (2 * top)
+
+            def val_for(j, k_, t_, d_):
+                lo, top = PMf.PARAMS[j][2], PMf.PARAMS[j][3]
+                best, bd = -1, 1000
+                for v in range(top + 1):
+                    kv = (v * 254 + top) // (2 * top)
+                    if (kv <= k_) if d_ > 0 else (kv >= k_):
+                        continue
+                    dd = abs(kv - t_)
+                    if dd < bd or (dd == bd and d_ > 0):
+                        bd, best = dd, v
+                return lo + best
+
+            def at_knob(j, k_):                       # a record value whose knob is K_
+                lo, top = PMf.PARAMS[j][2], PMf.PARAMS[j][3]
+                return next(lo + v for v in range(top + 1) if (v * 254 + top) // (2 * top) == k_)
+            for j, nm, start, d_, tgt in ((0, "1FRQ", 30, 1, 64), (0, "1FRQ", 64, 1, 127), (0, "1FRQ", 30, -1, 0),
+                                          (4, "2FRQ", 64, 1, 91), (4, "2FRQ", 91, 1, 111), (4, "2FRQ", 100, -1, 91),
+                                          (4, "2FRQ", 127, 1, None)):
+                old_v = at_knob(j, start)
+                want = (old_v << 8) if tgt is None else (val_for(j, kn(j, old_v), tgt, d_) << 8)
+                cases.append((f"v0.66: FM+ DYN {nm} at knob {start}, FUNC + turn {'right' if d_ > 0 else 'left'}: "
+                              + ("stays at the end" if tgt is None else f"knob {tgt}"),
+                              (dyn, PMf.PARAMS[j][1], old_v << 8, 1, d_, True, ((old_v + d_) & 0xFF) << 8), want))
+            o1 = at_knob(0, 30)
+            cases.append(("v0.66: FM+ DYN 1FRQ without FUNC: continuous, as it is",
+                          (dyn, PMf.PARAMS[0][1], o1 << 8, 0, 1, True, (o1 + 1) << 8), (o1 + 1) << 8))
             fs = ["wait:3"]
             for _n, args, _w in cases:
                 fs += fcase(*args)
