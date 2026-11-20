@@ -153,6 +153,11 @@ int smp_bank_live(int b)
         return 1;
     if (b < 0 || b >= BANK_N || smp_bank_blocked || !smp_dir_ok)
         return 0;
+    /* nor while another project's list names frames there (an older firmware's recording):
+     * the pages are never written over them (pools.c's reserved extents) */
+    extern u32 smp_pl_clash(u32 lo, u32 hi);
+    if (smp_pl_clash(BANK_AREA, TABLE_AREA))
+        return 0;
     const u8 *p = BPAGE(b);
     return ((u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24) == BANK_MAGIC;
 }

@@ -23,6 +23,8 @@ Negative controls:
 9. after the LFOs (the hook at 0x400272d4, smp_lfo_fix): a sample voice's SAMP keeps its target's
    bank whatever offset an LFO left in the low byte (B001 + 0x53 is B001's bank; A004 + 0x57 is
    A's); a FLEX buffer's code is left alone; the hook is the one installed at the site.
+10. control: another project's list naming a recording where the pages go (pools.c's reserved
+   extents): bank B is off at once; the list gone, B is live again.
 """
 import struct
 
@@ -256,5 +258,33 @@ def run(ctx):
     facts["9 after the LFOs: SAMP keeps its target's bank (B001 + 0x53 -> 0x0140, A004 + 0x57 -> 0x0400), FLEX untouched"] = (
         hooked and got == [0x0140, 0x0400, 0x8155])
     notes["9"] = {"hooked": hooked, "got": [hex(x) for x in got]}
+
+    # 10. control: another project's recording where the pages go ------------------------------------
+    write_image()
+    boot()
+    plr = ctx["mirror"] + 0x140000
+    linfo = lambda p: plr + 0xD3000 + 16 * p
+    ldir = lambda p: plr + 0x1000 + 0x1000 * p
+    p = 40
+    saved = (machine.read(syms["smp_pl_on"], 4), machine.read(linfo(p), 16), machine.read(ldir(p), 0x1000),
+             machine.read(syms["smp_pl_owner"], 4))
+    before = ret("smp_bank_live", 1)
+    d = bytearray(0x1000)
+    struct.pack_into("<II", d, 0, SM.POOL_MAGIC, 126)
+    struct.pack_into("<IIfI", d, 8 + 16 * (SM.REC_FIRST + 1), base + SM.BANK_AREA + 0x1000, 4000, 1.0, 1)
+    machine.write(ldir(p), bytes(d))
+    machine.write(linfo(p), bytes([1, 0, 0, 0]) + bytes(12))
+    machine.write(syms["smp_pl_on"], struct.pack(">i", 1))
+    machine.write(syms["smp_pl_owner"], struct.pack(">i", 41))          # (a new owner: the extents rebuilt)
+    during = ret("smp_bank_live", 1)
+    machine.write(linfo(p), saved[1])
+    machine.write(ldir(p), saved[2])
+    machine.write(syms["smp_pl_owner"], struct.pack(">i", 42))
+    after = ret("smp_bank_live", 1)
+    machine.write(syms["smp_pl_on"], saved[0])
+    machine.write(syms["smp_pl_owner"], saved[3])
+    facts["10 control: another project's recording where the pages go: bank B off; gone, live again"] = (
+        before == 1 and during == 0 and after == 1)
+    notes["10"] = {"before": before, "during": during, "after": after}
     disk.clear()
     return {"facts": facts, "notes": notes, "ok": all(facts.values())}

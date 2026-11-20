@@ -1415,7 +1415,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             return m[3], m[4:]
         res = emu_banks.run({"machine": machine, "call": call, "long": long, "period": period,
                              "disk": disk, "io": io, "pool": pool, "syms": syms, "SL": SL, "SM": SM,
-                             "base": base, "returned_d0": returned_d0, "sx": sx})
+                             "base": base, "returned_d0": returned_d0, "sx": sx, "mirror": SM.MIRROR})
         uc.hook_del(hs)
         out.update(res)
         out["ok"] = bool(res["ok"]) and not route.get("changed")
