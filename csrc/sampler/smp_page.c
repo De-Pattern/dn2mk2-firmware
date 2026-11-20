@@ -2145,7 +2145,8 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     for (int i = 4; i < 8; i++)
         if (ids[i] && locked(view, ids[i]))
             invert(c, CELL_X(i - 4) - 1, 0, CELL_X(i - 4) + 24, 6);
-    sample_list(c, view, slot, kind);
+    u8 fl2;
+    sample_list(c, view, (int)((u32)GET_VALUE(view, SMP_SAMP_ID, &fl2) & 0xFFFFu), kind);   /* v0.65: the word */
 }
 
 /* v0.22: the RECORDER, the DT2's SAMPLING screen as the DN2 has room for it, over the
