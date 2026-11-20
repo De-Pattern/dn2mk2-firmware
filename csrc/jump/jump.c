@@ -149,6 +149,7 @@ static void say(void *view, const char *text)
  * any view): its message on the PTN view's line, that view found in the screen's list by its
  * class (0x402008c4, measured: put at the list's end when PTN goes down; rec.c smp_view_of) */
 #define PTN_VIEW_VT 0x402008C4u
+u32 kh_close __attribute__((section(".data"))) = 0;
 void jmp_hold_say(u32 on)
 {
     extern u32 smp_view_of(u32 want);
@@ -163,6 +164,10 @@ void jmp_hold_say(u32 on)
 int jmp_key(void *view, void *ev)
 {
     u32 code = *(u32 *)((u8 *)ev + 12);
+    if (kh_close) {                             /* v0.64: rec.c's PTN + KEYBOARD, as stock's NO */
+        kh_close = 0;
+        return PTN_VIEW_KEY(view, ev);
+    }
     if ((code == K_YES || code == K_NO) && EV_PRESSED(ev) && !EV_FUNC(ev)
         && KEY_HELD(K_PTN) && !KEY_HELD(K_FUNC)) {
         jmp_on = code == K_YES;

@@ -1810,8 +1810,7 @@ int smp_knob_code __attribute__((section(".data"))) = 0;     /* v0.48: which kno
 /* v0.64 KEYBOARD HOLD (docs/kbhold.md; the owner, 2026-11-19): PTN + KEYBOARD (jump.c jmp_key)
  * turns kh_on. A [TRIG] key played as a keyboard note (stock's KeyboardView asked for its notes:
  * slice.c slc_keynotes marks kh_kb) keeps sounding when let go: its release item is dropped and
- * its bit kept (kh_kept; kh_rel is the last release item seen, the template a kept release is
- * rebuilt from). The next fresh [TRIG] or KEYBOARD press with no [TRIG] down, or HOLD turned
+ * its bit kept (kh_kept) and the item copied (kh_rel, one a key). The next fresh [TRIG] or KEYBOARD press with no [TRIG] down, or HOLD turned
  * off, moves the kept bits to kh_out_m: one release a call of the receive comes out of it, then
  * the press (kh_press, its copy, when kh_pend), before the stock queue is read again. Items are
  * 16 bytes (type, code, flags, time) */
@@ -1822,9 +1821,8 @@ u32 kh_kept __attribute__((section(".data"))) = 0;      /* trig 0..15 whose rele
 u32 kh_last __attribute__((section(".data"))) = 0;      /* the trig (1..16) last pressed, 0 none */
 u32 kh_out_m __attribute__((section(".data"))) = 0;     /* kept releases being sent */
 static u32 kh_pend __attribute__((section(".data"))) = 0;
-static u8 kh_rel[KH_ITEM] __attribute__((section(".data")));
+static u8 kh_rel[16][KH_ITEM] __attribute__((section(".data")));     /* each key's own release */
 static u8 kh_press[KH_ITEM] __attribute__((section(".data")));
-static u8 kh_out[KH_ITEM] __attribute__((section(".data")));
 
 static void kh_copy(u8 *to, const u8 *from)
 {
@@ -1849,10 +1847,7 @@ static u8 *kh_next(void)                        /* the next held-back item, 0 no
         while (!(kh_out_m >> k & 1u))
             k++;
         kh_out_m &= ~(1u << k);
-        kh_copy(kh_out, kh_rel);
-        kh_out[4] = kh_out[5] = kh_out[6] = 0;
-        kh_out[7] = (u8)(25u + k);
-        return kh_out;
+        return kh_rel[k];
     }
     if (kh_pend) {
         kh_pend = 0;
@@ -1916,13 +1911,17 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             smp_trig_at[code - 25] = *(volatile u32 *)0x4058E8D4u;
     }
     /* v0.64 KEYBOARD HOLD: PTN held, a fresh KEYBOARD without FUNC turns it on or off (stock:
-     * KEYBOARD's own toggle; the item is dropped) */
+     * KEYBOARD's own toggle, taken before any view). The item goes on as a NO press, which
+     * jump.c hands to the PTN view's stock handler (kh_close): NO closes the PTN view as a
+     * PTN + [TRIG] does (left open, the next [TRIG] would pick a pattern; measured) */
     if (it[0] == IT_KEY && code == 18 && down && !(flags & F_REPEAT)
         && (smp_held_lo >> 23 & 1u) && !(smp_held_lo >> 17 & 1u)) {
         extern void jmp_hold_say(u32 on);
+        extern u32 kh_close;
         kh_set(!kh_on);
         jmp_hold_say(kh_on);
-        it[0] = IT_DROP;
+        it[7] = 12;                             /* K_NO */
+        kh_close = 1;
         return (u32)it;
     }
     /* v0.64 KEYBOARD HOLD (above kh_flush) */
@@ -1939,7 +1938,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             u32 bit = 1u << (code - 25);
             if (!down) {
                 if (kh_on && (kh_kb & bit) && !rec_overlay) {
-                    kh_copy(kh_rel, it);
+                    kh_copy(kh_rel[code - 25], it);
                     kh_kept |= bit;
                     kh_kb &= ~bit;
                     it[0] = IT_DROP;
