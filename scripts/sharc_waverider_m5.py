@@ -2698,15 +2698,18 @@ def step_mainmark(init, sound, machines) -> dict:
     out, nums = {}, {}
     for name, src, gidx in (("MAIN", 1, SM.GAIN_ZERO), ("IN", 0, SM.GAIN_ZERO), ("TRK", 2, SM.GAIN_ZERO),
                             ("MAIN plain", 1, 0)):
-        st, info = record(src, gidx)
-        res = {"info": info}
-        if st is not None:
+        st, info = record(src, gidx)               # (a run takes its state: the same take is
+        res = {"info": info}                       # recorded again for each playback; it is
+        if st is not None:                         # deterministic, its entry checked below)
             for ty, tn in ((ONE, "ONESHOT"), (STR, "STRETCH")):
-                import copy as _c
-                a_ = playback(_c.deepcopy(st), ty, False)
-                b_ = playback(_c.deepcopy(st), ty, True)
+                a_ = playback(st, ty, False)
+                st, again = record(src, gidx)
+                b_ = playback(st, ty, True) if st is not None and again == info else None
                 res[tn] = (rms(a_) / rms(b_)) if a_ and b_ and rms(b_) > 0 else None
                 res[tn + "_peak"] = max((abs(x) for x in a_ or []), default=0.0)
+                st, again = record(src, gidx)
+                if st is None or again != info:
+                    break
         out[name] = res
         nums[name] = {k: (round(v, 5) if isinstance(v, float) else v) for k, v in res.items() if k != "info"}
         nums[name]["entry_steps_word"] = hex(info["entry"][2]) if info else None
