@@ -1405,7 +1405,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         hs = uc.hook_add(UC_HOOK_CODE, at_sender, begin=SYSEX_SENDER, end=SYSEX_SENDER)
 
         def sx(cmd, payload=b""):
-            msg = bytes([0xF0, 0, 0x20, 0x3C, 0x7D, 1]) + pack7(struct.pack(">HB", 7, cmd) + payload) + b"÷"
+            msg = bytes([0xF0, 0, 0x20, 0x3C, 0x7D, 1]) + pack7(struct.pack(">HB", 7, cmd) + payload) + b"\xF7"
             machine.write(buf, msg)
             replies.clear()
             call("smp_rx", buf, len(msg), 2)
