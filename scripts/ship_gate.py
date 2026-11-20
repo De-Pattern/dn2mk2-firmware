@@ -2587,14 +2587,14 @@ def main() -> int:
                   "KEYBOARD HOLD: PTN + KEYBOARD, held notes, chords, release (ColdFire)",
                   [kh_cmd, sorted(EMU_ENV.items())], kh_body)
 
-        # v0.67: the arpeggiator on MIDI tracks (the midiarp mod, on the instrument 2026-09-17 as
-        # arp-midi-play4; docs/midiarp.md). Three runs, KEYBOARD on, [TRIG 1] held then let go, a frame
+        # v0.67: the arpeggiator on MIDI tracks (the midiarp mod from upstream, Angel Linares's
+        # dn2_firmware_explore: tested on his unit 2026-09-17 as arp-midi-play4; docs/midiarp.md). Three runs, KEYBOARD on, [TRIG 1] held then let go, a frame
         # after each: track 1 MIDI (the kit's synth/MIDI mask, kit + 0x5cda, bit 0) with the arp on (its
         # sound's MODE, + 0x15f, UP): the key goes the synth road (the voice starter 0x40137d3c, never the
         # MIDI sender 0x4012b8b0), through the key gate; the ISR's voice trigger reaches the hook that
         # turns the note into a MIDI record (0x402d06dc), and the engine's voice trigger (0x400db524) is
         # never called for it. (The ISR still sets the voice slot's note-on bit after the hook, stock code
-        # past it, measured here: on the unit a MIDI track's slot makes no sound, heard 2026-09-17 with
+        # past it, measured here: on upstream's unit a MIDI track's slot made no sound, heard 2026-09-17 with
         # arp-midi-diag, which also called the stock trigger; docs/midiarp.md.)
         # Negative controls: the same MIDI track, arp off: the MIDI sender, as stock, never the starter;
         # a synth track (arp off): the starter and a voice in the frame, as stock

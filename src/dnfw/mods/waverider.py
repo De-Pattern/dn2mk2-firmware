@@ -178,8 +178,8 @@ def apply(firmware) -> Result:
         raise ModError(f"0x{bspec['intro_va']:08x} (the intro routine) is not stock; this mod is "
                        "for unmodified Digitone II 1.11")
     base_os[at:at + 8] = b"\x4e\xf9" + struct.pack(">I", bspec["stamp"]) + b"\x4e\x71"
-    # v0.67 (owner, 2026-11-20: "just arp on midi tracks"): the midiarp mod (on the instrument
-    # 2026-09-17 as arp-midi-play4), its sites checked stock in this image first
+    # v0.67 (owner, 2026-11-20: "just arp on midi tracks"): the midiarp mod (upstream's, Angel Linares's
+    # dn2_firmware_explore; tested on his unit 2026-09-17 as arp-midi-play4), its sites checked stock in this image first
     from . import midiarp as MA
     MA.check(bytes(base_os))
     MA.write(base_os, main_os)
