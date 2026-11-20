@@ -172,7 +172,8 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_sampler_relatch.py", "test/test_pools.py",
          "test/test_gate_cache_foreign.py",                 # v0.48: the cache's cross-worktree guard and its control
          "test/test_slides.py",
-         "test/test_libtree.py", "test/test_web_tool.py"]   # v0.40: nested folders (the model, the page's levels)
+         "test/test_libtree.py", "test/test_web_tool.py",   # v0.40: nested folders (the model, the page's levels)
+         "test/test_apopt.py", "test/test_banks.py"]        # v0.65: the optimal packer; banks B..D on the DSP's model
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
@@ -231,6 +232,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"),
        ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
+       ("banks", "PROJECT RAM banks B..D: loaded, played, edited, LOAD TO PROJECT, controls (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
        ("engine", "engine + LOAD/SAVE"),
@@ -806,6 +808,32 @@ def main() -> int:
                                   "every write in its region, the DSP never another project's sample" if good else why)
                 later("pools", "per-project pools (ColdFire)", "per-project pools (ColdFire)",
                       [pl_cmd, sorted(EMU_ENV.items())], pl_body)
+
+            # 6q. v0.65 (docs/banks.md; scripts/emu_banks.py): banks B..D's pages loaded with the image
+            # and played by the DSP's own rule; the list's rows through the banks; an edit and a
+            # LOAD TO PROJECT into bank B on the +Drive, the DSP and the header; a power cycle.
+            # Controls: the header's word for B wrong (B empty), an old recording where the pages go
+            # (banks off, nothing written or sent there)
+            if "smp_bank_live" in lay:
+                bk_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                          "--build", bdir, "--snapshot", snap, "--steps", f"link16:{syms}:banks",
+                          "--png-dir", work / "banks"]
+
+                def bk_body(tdir):
+                    rc, out = run("banks", bk_cmd, logs, env=EMU_ENV, trace=tdir)
+                    res = work / "banks" / "link16_banks.json"
+                    why, good = out[-800:], False
+                    if rc == 0 and res.exists():
+                        r = json.loads(res.read_text())
+                        facts = r.get("facts", {})
+                        good = bool(r.get("ok")) and len(facts) == 8 and all(facts.values())
+                        why = json.dumps({k: v for k, v in facts.items() if not v})[:800] or out[-800:]
+                    return good, ("banks B..D: B005 plays from B's page, A005 does not, C and D empty; rows "
+                                  "A127 > B001; an edit and a LOAD TO PROJECT into bank B on the +Drive, the DSP "
+                                  "and the header; a power cycle; controls: a wrong header word (B empty), a "
+                                  "recording where the pages go (off, nothing written)" if good else why)
+                later("banks", "PROJECT RAM banks B..D: loaded, played, edited, LOAD TO PROJECT, controls (ColdFire)",
+                      "PROJECT RAM banks (ColdFire)", [bk_cmd, sorted(EMU_ENV.items())], bk_body)
 
             # 6e. v0.39: ERASE MOD DATA (csrc/sampler/erase.c, docs/erase-mod-data.md;
             # scripts/emu_erase.py): the key path (+DRIVE, RIGHT, two questions; NO at either and

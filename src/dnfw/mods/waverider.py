@@ -127,7 +127,9 @@ def ram() -> list[Extent]:
     return ([Extent(RAM, load, len(code), what) for load, code, what in _chunks()]
             + B.ram()
             + [Extent(RAM, SM.MIRROR, SM.MIRROR_BYTES,
-                      "the sample link's mirror of the pool (csrc/sampler/link.c, v0.14)")])
+                      "the sample link's mirror of the pool (csrc/sampler/link.c, v0.14)"),
+               Extent(RAM, SM.BANK_RAM, SM.BANK_RAM_BYTES,
+                      "PROJECT RAM banks B..D: their pages, their slots' RAM, the bank lists (v0.65)")])
 
 
 def _main_os(original: bytes) -> bytes:

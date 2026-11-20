@@ -458,6 +458,7 @@ extern int smp_bank_blocked;
 static u8 bl_valid[128] D_;
 static u8 bl_copy[128] D_;
 static u32 bl_seq[128] D_;
+static u32 bl_sum[128] D_;                      /* each valid list's body's sum (unchanged banks: no write) */
 #define BL_BODY ((BL_SPAN - 1u) * 512u)
 
 static u32 bl_sector(int p, int c)
@@ -519,6 +520,9 @@ static int bl_write(int p)
 {
     if (p < 0 || p >= 128)
         return 0;                               /* (the legacy list has no banks) */
+    u32 body = csum(BL_W, BL_BODY);
+    if (bl_valid[p] && bl_sum[p] == body)
+        return 0;                               /* the banks as that list has them: nothing to write */
     int c = bl_valid[p] ? 1 - bl_copy[p] : 0;
     u32 s = bl_sector(p, c), seq = bl_seq[p] + 1u;
     u32 *h = BL_H;
@@ -529,7 +533,7 @@ static int bl_write(int p)
     h[2] = (u32)p;
     h[3] = seq;
     h[4] = smp_pl_gen;
-    h[5] = csum(BL_W, BL_BODY);
+    h[5] = body;
     h[11] = bl_check(h);
     for (u32 o = 0; o < BL_BODY; o += 0x10000u) {
         u32 n = BL_BODY - o < 0x10000u ? BL_BODY - o : 0x10000u;
@@ -549,6 +553,7 @@ static int bl_write(int p)
     bl_valid[p] = 1;
     bl_copy[p] = (u8)c;
     bl_seq[p] = seq;
+    bl_sum[p] = body;
     bl_cache(p);
     return 0;
 }
@@ -580,6 +585,7 @@ static int bl_read(int p)
             continue;
         bl_valid[p] = 1;
         bl_copy[p] = (u8)c;
+        bl_sum[p] = want;
         bl_cache(p);
         return 0;
     }

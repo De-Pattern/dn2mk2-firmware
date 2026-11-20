@@ -432,8 +432,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                    disk_errors=io.get("errors", [])[:3], routing_changed=route.get("changed", 0),
                    lstate=long("smp_lstate"))
         out["loaded_at"] = done_at
-        if "smp_l_order" in syms:
-            out["order"] = list(machine.read(syms["smp_l_order"], 4))
+        if "smp_l_order" in syms:               # (v0.65: u16 global slots)
+            out["order"] = list(struct.unpack(">2H", machine.read(syms["smp_l_order"], 4)))
         if scenario == "fast":
             out["ok"] = (not wrong and not frames_wrong and periods < limit and out["cmd_packets"] > 0
                          and not route.get("changed"))
@@ -1381,6 +1381,42 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                              "SL": SL, "SM": SM, "base": base, "guest_call": guest_call,
                              "scratch": SENTINEL + 0x2000, "mirror": SMx.MIRROR})
         disk.clear()
+        out.update(res)
+        out["ok"] = bool(res["ok"]) and not route.get("changed")
+        out["routing_changed"] = route.get("changed", 0)
+    elif scenario == "banks":
+        # v0.65: PROJECT RAM banks (docs/banks.md): scripts/emu_banks.py
+        sys.path.insert(0, str(HERE))
+        sys.path.insert(0, str(HERE.parent / "tools"))
+        import emu_banks                        # noqa: PLC0415
+        from dn2probe import pack7, unpack7     # noqa: PLC0415
+        for _ in range(200):                    # the snapshot's own boot first (the RAM check)
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        buf = SENTINEL + 0x1000
+        replies = []
+
+        def at_sender(uc_, address, size, user):
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            b_, n_, _ab, _port = struct.unpack(">4I", bytes(uc.mem_read(sp + 4, 16)))
+            replies.append(bytes(uc.mem_read(b_, n_)))
+        hs = uc.hook_add(UC_HOOK_CODE, at_sender, begin=SYSEX_SENDER, end=SYSEX_SENDER)
+
+        def sx(cmd, payload=b""):
+            msg = bytes([0xF0, 0, 0x20, 0x3C, 0x7D, 1]) + pack7(struct.pack(">HB", 7, cmd) + payload) + b"÷"
+            machine.write(buf, msg)
+            replies.clear()
+            call("smp_rx", buf, len(msg), 2)
+            if not replies:
+                return None, b""
+            m = unpack7(replies[-1][6:-1])
+            return m[3], m[4:]
+        res = emu_banks.run({"machine": machine, "call": call, "long": long, "period": period,
+                             "disk": disk, "io": io, "pool": pool, "syms": syms, "SL": SL, "SM": SM,
+                             "base": base, "returned_d0": returned_d0, "sx": sx})
+        uc.hook_del(hs)
         out.update(res)
         out["ok"] = bool(res["ok"]) and not route.get("changed")
         out["routing_changed"] = route.get("changed", 0)

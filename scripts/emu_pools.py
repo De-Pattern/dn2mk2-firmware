@@ -49,6 +49,7 @@ STUB_OPEN, STUB_TEMP = 0x40042B92, 0x40040190      # the load's +Drive read, its
 NEW_SITE, NEW_AFTER = 0x40042AF0, 0x40042AFA
 STORE_SECTOR = 0x600000
 PL_SB, PL_LISTS, PL_SPAN, PL_END = 0x6D0000, 0x6D0100, 256, 0x6D0100 + 2 * 129 * 256
+BL_RANGES = ((0x6E0600, 0x6E0600 + 2 * 64 * 464), (0x6F0800, 0x6F0800 + 2 * 64 * 464))   # v0.65: the bank lists
 LIB, LIB_DATA = 0x700000, 0x700000 + 1 + 256 + 4
 
 
@@ -639,7 +640,8 @@ def run(cx):
     # 12. where everything was written, and the image as v0.37 reads it ------------------------------
     written = sorted(disk)
     outside = [hex(s) for s in written if not (STORE_SECTOR <= s < STORE_SECTOR + 1 + SM.POOL_BYTES // 512
-                                               or PL_SB <= s < PL_END or LIB <= s < LIB_DATA + 64)]
+                                               or PL_SB <= s < PL_END or LIB <= s < LIB_DATA + 64
+                                               or any(a <= s < b for a, b in BL_RANGES))]
     hdr = struct.unpack(">5I", disk[STORE_SECTOR][:20])
     d = image_dir()
     v037 = (hdr[0] == 0x444E3251 and hdr[4] == (~hdr[0] ^ hdr[2] ^ hdr[3]) & 0xFFFFFFFF
