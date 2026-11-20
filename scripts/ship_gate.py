@@ -2427,17 +2427,18 @@ def main() -> int:
         # (the ISR's, bytes 0x22..0x29: trig and release masks): [TRIG 1] let go: no release, kept;
         # [TRIG 5]: 1 released as 5 plays; 5 let go: kept; [TRIG 8] + [TRIG 11] together: 5
         # released, both play, both kept when let go; PTN + KEYBOARD again (HOLD off): both
-        # released. Negative control: HOLD off, [TRIG 1] let go: released at once, nothing kept
+        # released. Negative control: HOLD off, [TRIG 1] let go: released at once, nothing kept.
+        # (The message is on the screen 10 waits after the tap, not 4: measured)
         if "kh_on" in lay:
             HL = {n: lay[n] for n in ("kh_on", "kh_kept", "kh_close", "jmp_on", "wr_screen_obj")}
             HM = lambda: [f"mem:{HL['kh_on']:#x}:4", f"mem:{HL['kh_kept']:#x}:4", "mem:0x42431a99:4"]   # noqa: E731
             hw = f"walk:{HL['wr_screen_obj']:#x}"
             hs = ["wait:6", "tap:18", "wait:6", f"mem:{HL['jmp_on']:#x}:4", "png:before", "frame:z",
-                  "press:23", "wait:6", hw, "tap:18", "wait:4", "png:holdon", "release:23", "wait:10", hw, *HM(),
+                  "press:23", "wait:10", hw, "tap:18", "wait:10", "png:holdon", "release:23", "wait:10", hw, *HM(),
                   "press:25", "wait:4", "frame:p1", "release:25", "wait:4", "frame:r1", *HM(),
                   "press:29", "wait:4", "frame:p5", "release:29", "wait:4", "frame:r5", *HM(),
                   "press:32", "press:35", "wait:4", "frame:p8", "release:32", "release:35", "wait:4", "frame:r8", *HM(),
-                  "press:23", "wait:6", "tap:18", "wait:4", "png:holdoff", "release:23", "wait:10", hw,
+                  "press:23", "wait:10", hw, "tap:18", "wait:10", "png:holdoff", "release:23", "wait:10", hw,
                   "frame:off", *HM(),
                   "press:25", "wait:4", "frame:q1", "release:25", "wait:4", "frame:qr1", *HM(),
                   f"mem:{HL['kh_close']:#x}:4", f"mem:{HL['jmp_on']:#x}:4"]
