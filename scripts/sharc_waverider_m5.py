@@ -2594,13 +2594,13 @@ def step_flexlevel(init, sound, machines) -> dict:
         "v0.50 negative control: the RECORDER's command (no GAIN: v0.49's scaling) renders the same take "
         "over 4 dB under its source":
             recorder is not None and recorder["render_db"] < -4.0,
-        "v0.63: GAIN 0 records the same take 24 dB over GAIN -24, frame for frame where unclipped "
+        f"v0.63: GAIN 0 records the same take {SM.TRK_HW_DB} dB over GAIN -{SM.TRK_HW_DB}, frame for frame where unclipped "
         "(within 1 %), and clipped at full scale, never past it":
             ratio_ok(unity, zero, want) and zero["take_peak"] <= 1.0,
         "v0.63 (TRK_HW_DB, the owner's number): GAIN 0's take plays far over its source on the runner "
-        "(over 12 dB, the 24 dB the unit loses after the per-track buffer; clipped here) -- the check "
-        "above at GAIN -24 holds only because TRK_HW_DB is applied":
-            zero is not None and zero["render_db"] > 12.0,
+        f"(over {SM.TRK_HW_DB / 2:g} dB, half the {SM.TRK_HW_DB} dB the unit loses after the per-track buffer) -- the check "
+        f"above at GAIN -{SM.TRK_HW_DB} holds only because TRK_HW_DB is applied":
+            zero is not None and zero["render_db"] > SM.TRK_HW_DB / 2.0,
         "v0.63 negative control: the frame-for-frame comparison at 0 dB is refused":
             not ratio_ok(unity, zero, 1.0),
     }

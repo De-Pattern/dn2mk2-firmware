@@ -66,3 +66,10 @@ byte is free in every place a value is kept: the sound, the kit, presets, the pa
   Negative controls: a page without its magic plays nothing; old values (low byte 0) are bank A.
 - `pools`: switching projects keeps each project's banks; `link16`: the pages load and verify.
 - SHARC runner: the sampler's bank read on the runner.
+
+## Also in v0.65: FLEX level, 12 dB (not 24)
+
+v0.63 built +24 dB into a FLEX take of a single track (`TRK_HW_DB`), the owner's number. He has
+since found it was read on another firmware; on the mod itself NiKo measured v0.63 (every level
+at 127, through Ableton over USB): a take matched its source at GAIN -12. So `TRK_HW_DB` is 12:
+GAIN 0 is v0.62's +12. The SHARC runner's `flexlevel` follows the constant.
