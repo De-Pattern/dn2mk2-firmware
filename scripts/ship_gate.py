@@ -2420,33 +2420,35 @@ def main() -> int:
         later("kbrec", "KEYBOARD kept through grid recording (ColdFire)",
               "KEYBOARD kept through grid recording (ColdFire)", [kb_cmd, sorted(EMU_ENV.items())], kb_body)
 
-        # v0.64 KEYBOARD HOLD (docs/kbhold.md; csrc/sampler/rec.c smp_ui_pop, jump.c): KEYBOARD on,
-        # then PTN held + KEYBOARD: HOLD on, KB HOLD ON on the PTN view's line while PTN is held,
-        # KEYBOARD itself left on, DIRECT JUMP's setting untouched, and at PTN's release the PTN
-        # view closed (left open, the next [TRIG] picked a pattern: measured). Each step's frame
-        # (the ISR's, bytes 0x22..0x29: trig and release masks): [TRIG 1] let go: no release, kept;
-        # [TRIG 5]: 1 released as 5 plays; 5 let go: kept; [TRIG 8] + [TRIG 11] together: 5
-        # released, both play, both kept when let go; PTN + KEYBOARD again (HOLD off): both
-        # released. Negative control: HOLD off, [TRIG 1] let go: released at once, nothing kept.
-        # (The message is on the screen 10 waits after the tap, not 4: measured)
+        # v0.64 KEYBOARD HOLD (docs/kbhold.md; csrc/sampler/rec.c smp_ui_pop, jump.c): PTN held +
+        # KEYBOARD turns HOLD on and off: stock's own sustain (MIDI CC 64's 0x40126d4a) on all 16
+        # tracks. The screens first (after the harness's own ISR entry, frame:, the panel's
+        # picture stops following the UI: measured): KB HOLD ON / OFF on the PTN view's line
+        # (10 waits after the tap: measured), the PTN view up while PTN is held and closed at its
+        # release (left open, the next [TRIG] picked a pattern: measured), KEYBOARD left on,
+        # DIRECT JUMP's setting untouched. Then the ISR's frame (bytes 0x22..0x25: the trig and
+        # release masks): [TRIG 1] held BEFORE HOLD comes on, let go after: no release (a note
+        # already playing is latched); [TRIG 5] played and let go: held too; MIDI in: a note-off
+        # on channel 1 (track 1's), through stock's MIDI note-off entry 0x40121aae, is kept in
+        # track 1's sustain list; HOLD off: both voices released, every sustain off, every list
+        # empty. Negative controls: HOLD off, a MIDI note-off is not kept and [TRIG 1] let go is
+        # released at once
         if "kh_on" in lay:
-            HL = {n: lay[n] for n in ("kh_on", "kh_kept", "kh_close", "jmp_on", "wr_screen_obj")}
-            HM = lambda: [f"mem:{HL['kh_on']:#x}:4", f"mem:{HL['kh_kept']:#x}:4", "mem:0x42431a99:4"]   # noqa: E731
+            HL = {n: lay[n] for n in ("kh_on", "kh_close", "jmp_on", "wr_screen_obj")}
+            SUS, LISTS, MSG = 0x445FE6E0, 0x445FE6F0, 0x46A08000
             hw = f"walk:{HL['wr_screen_obj']:#x}"
-            # the screens first: after the harness's own entry of the ISR (frame:) the panel's
-            # picture stops following the UI (measured: three identical screens), so every
-            # png: comes before the first frame:
+            combo = ["press:23", "wait:10", "tap:18", "wait:10", "release:23", "wait:10"]
+            midi = [f"poke:{MSG:#x}:803c40", f"call:0x40121aae:{MSG:#x}", f"mem:{LISTS:#x}:8"]
+            state = [f"mem:{HL['kh_on']:#x}:4", f"mem:{SUS:#x}:16"]
             hs = ["wait:6", "tap:18", "wait:6", f"mem:{HL['jmp_on']:#x}:4", "png:before",
                   "press:23", "wait:10", hw, "tap:18", "wait:10", "png:holdon", "release:23", "wait:10", hw,
                   "press:23", "wait:10", hw, "tap:18", "wait:10", "png:holdoff", "release:23", "wait:10", hw,
-                  "press:23", "wait:10", "tap:18", "wait:10", "release:23", "wait:10", *HM(),
-                  "press:25", "wait:4", "frame:p1", "release:25", "wait:4", "frame:r1", *HM(),
-                  "press:29", "wait:4", "frame:p5", "release:29", "wait:4", "frame:r5", *HM(),
-                  "press:32", "press:35", "wait:4", "frame:p8", "release:32", "release:35", "wait:4", "frame:r8", *HM(),
-                  "press:23", "wait:10", "tap:18", "wait:10", "release:23", "wait:10",
-                  "frame:off", *HM(),
-                  "press:25", "wait:4", "frame:q1", "release:25", "wait:4", "frame:qr1", *HM(),
-                  f"mem:{HL['kh_close']:#x}:4", f"mem:{HL['jmp_on']:#x}:4"]
+                  "press:25", "wait:4", "frame:p1", *combo, *state,
+                  "release:25", "wait:4", "frame:r1",
+                  "press:29", "wait:4", "frame:p5", "release:29", "wait:4", "frame:r5", *midi,
+                  *combo, "frame:off", *state, f"mem:{LISTS:#x}:128", *midi,
+                  "press:25", "wait:4", "frame:q1", "release:25", "wait:4", "frame:qr1",
+                  f"mem:{HL['kh_close']:#x}:4", f"mem:{HL['jmp_on']:#x}:4", "mem:0x42431a99:4"]
             kh_js = work / "kbhold.json"
             kh_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                       "--snapshot", snap, "--steps", ",".join(hs), "--png-dir", work / "kbhold", "--json", kh_js]
@@ -2458,43 +2460,44 @@ def main() -> int:
                 r = json.loads(kh_js.read_text())
                 mem = list(r["memory"].items())
                 walks = [v for k, v in mem if k.startswith("walk")]
-                vals = [int(v, 16) for k, v in mem if not k.startswith("walk")]
-                jmp0, rest = vals[0], vals[1:]
-                trip = [rest[3 * i:3 * i + 3] for i in range(6)]          # (kh_on, kh_kept, KEYBOARD)
-                close_end, jmp1 = rest[18], rest[19]
+                v = [bytes.fromhex(x) for k, x in mem if not k.startswith("walk")]
+                if len(v) != 11:
+                    return False, f"{len(v)} memory reads, wanted 11"
+                u = lambda b: int.from_bytes(b, "big")                  # noqa: E731
                 fr = {}
-                for f in ("p1", "r1", "p5", "r5", "p8", "r8", "off", "q1", "qr1"):
+                for f in ("p1", "r1", "p5", "r5", "off", "q1", "qr1"):
                     b = pathlib.Path(r["frames"][f]["file"]).read_bytes()
                     fr[f] = struct.unpack(">2H", b[0x22:0x26])            # (trig, release)
                 shots = {n: pathlib.Path(r["screens"][n]).read_bytes() if n in r["screens"] else b""
                          for n in ("before", "holdon", "holdoff")}
                 ptn = "402008c4"
-                t1, t5, t8, tq = fr["p1"][0], fr["p5"][0], fr["p8"][0], fr["q1"][0]
+                t1, t5, tq = fr["p1"][0], fr["p5"][0], fr["q1"][0]
                 facts = {
                     "PTN + KEYBOARD: the PTN view up while PTN is held, closed at its release, both times":
                         len(walks) == 4 and ptn in walks[0] and ptn not in walks[1] and ptn in walks[2]
                         and ptn not in walks[3],
-                    "HOLD on, KEYBOARD left on; off again with KEYBOARD still on":
-                        [x[0] for x in trip] == [1, 1, 1, 1, 0, 0] and all(x[2] == 1 for x in trip),
-                    "the message on the PTN view's line (each screen its own)":
+                    "KB HOLD ON / OFF on the PTN view's line (each screen its own)":
                         all(shots.values()) and len(set(shots.values())) == 3,
-                    "a held note: [TRIG 1] let go, no release, kept": t1 and fr["r1"] == (0, 0) and trip[0][1] == 0 and trip[1][1] == 1,
-                    "a new key releases the held note as it plays": t5 and t5 != t1 and fr["p5"][1] == t1
-                        and fr["r5"] == (0, 0) and trip[2][1] == 1 << 4,
-                    "a chord: both play, the held note released, both kept":
-                        bin(t8).count("1") == 2 and not (t8 & t5) and fr["p8"][1] == t5 and fr["r8"] == (0, 0)
-                        and trip[3][1] == (1 << 7 | 1 << 10),
-                    "HOLD off releases every held note": fr["off"] == (0, t8) and trip[4][1] == 0,
+                    "HOLD on: stock's sustain on all 16 tracks": u(v[1]) == 1 and v[2] == b"\x01" * 16,
+                    "a note already held when HOLD came on is latched when let go":
+                        t1 and fr["p1"][1] == 0 and fr["r1"] == (0, 0),
+                    "a note played while HOLD is on is held too": t5 and t5 != t1 and fr["r5"] == (0, 0),
+                    "MIDI in: a note-off on track 1's channel is kept in its sustain list": u(v[3][:4]) != 0,
+                    "HOLD off: every held voice released, every sustain off, every list empty":
+                        fr["off"] == (0, t1 | t5) and u(v[4]) == 0 and v[5] == bytes(16) and v[6] == bytes(128),
+                    "negative control: HOLD off, a MIDI note-off is not kept": u(v[7][:4]) == 0,
                     "negative control: HOLD off, a key let go is released at once":
-                        tq and fr["q1"][1] == 0 and fr["qr1"] == (0, tq) and trip[5][1] == 0,
-                    "DIRECT JUMP's setting untouched; nothing left pending": jmp1 == jmp0 and close_end == 0,
+                        tq and fr["q1"][1] == 0 and fr["qr1"] == (0, tq),
+                    "KEYBOARD left on; DIRECT JUMP's setting untouched; nothing pending":
+                        u(v[10]) == 1 and v[9] == v[0] and u(v[8]) == 0,
                 }
                 good = all(facts.values())
-                return good, ("PTN + KEYBOARD turns HOLD on and off (KEYBOARD and DIRECT JUMP untouched, the PTN "
-                              "view closed); held notes, a new key replacing them, a chord, HOLD off releasing; "
-                              "off, keys release as stock's" if good else
-                              json.dumps({k: v for k, v in facts.items() if not v}) + f" frames={fr} trip={trip} "
-                              f"walks={walks} close={close_end} jmp={jmp0},{jmp1}")
+                return good, ("PTN + KEYBOARD turns stock's sustain on and off on every track (KEYBOARD and DIRECT "
+                              "JUMP untouched, the PTN view closed, the message shown); a note already held is "
+                              "latched, a new one held, a MIDI note-off kept; HOLD off releases all; off, keys and "
+                              "MIDI release as stock's" if good else
+                              json.dumps({k: x for k, x in facts.items() if not x}) + f" frames={fr} "
+                              f"mem={[x.hex()[:40] for x in v]} walks={walks}")
             later("kbhold", "KEYBOARD HOLD: PTN + KEYBOARD, held notes, chords, release (ColdFire)",
                   "KEYBOARD HOLD: PTN + KEYBOARD, held notes, chords, release (ColdFire)",
                   [kh_cmd, sorted(EMU_ENV.items())], kh_body)
