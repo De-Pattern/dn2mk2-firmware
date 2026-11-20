@@ -2433,12 +2433,17 @@ def main() -> int:
             HL = {n: lay[n] for n in ("kh_on", "kh_kept", "kh_close", "jmp_on", "wr_screen_obj")}
             HM = lambda: [f"mem:{HL['kh_on']:#x}:4", f"mem:{HL['kh_kept']:#x}:4", "mem:0x42431a99:4"]   # noqa: E731
             hw = f"walk:{HL['wr_screen_obj']:#x}"
-            hs = ["wait:6", "tap:18", "wait:6", f"mem:{HL['jmp_on']:#x}:4", "png:before", "frame:z",
-                  "press:23", "wait:10", hw, "tap:18", "wait:10", "png:holdon", "release:23", "wait:10", hw, *HM(),
+            # the screens first: after the harness's own entry of the ISR (frame:) the panel's
+            # picture stops following the UI (measured: three identical screens), so every
+            # png: comes before the first frame:
+            hs = ["wait:6", "tap:18", "wait:6", f"mem:{HL['jmp_on']:#x}:4", "png:before",
+                  "press:23", "wait:10", hw, "tap:18", "wait:10", "png:holdon", "release:23", "wait:10", hw,
+                  "press:23", "wait:10", hw, "tap:18", "wait:10", "png:holdoff", "release:23", "wait:10", hw,
+                  "press:23", "wait:10", "tap:18", "wait:10", "release:23", "wait:10", *HM(),
                   "press:25", "wait:4", "frame:p1", "release:25", "wait:4", "frame:r1", *HM(),
                   "press:29", "wait:4", "frame:p5", "release:29", "wait:4", "frame:r5", *HM(),
                   "press:32", "press:35", "wait:4", "frame:p8", "release:32", "release:35", "wait:4", "frame:r8", *HM(),
-                  "press:23", "wait:10", hw, "tap:18", "wait:10", "png:holdoff", "release:23", "wait:10", hw,
+                  "press:23", "wait:10", "tap:18", "wait:10", "release:23", "wait:10",
                   "frame:off", *HM(),
                   "press:25", "wait:4", "frame:q1", "release:25", "wait:4", "frame:qr1", *HM(),
                   f"mem:{HL['kh_close']:#x}:4", f"mem:{HL['jmp_on']:#x}:4"]
@@ -2458,7 +2463,7 @@ def main() -> int:
                 trip = [rest[3 * i:3 * i + 3] for i in range(6)]          # (kh_on, kh_kept, KEYBOARD)
                 close_end, jmp1 = rest[18], rest[19]
                 fr = {}
-                for f in ("z", "p1", "r1", "p5", "r5", "p8", "r8", "off", "q1", "qr1"):
+                for f in ("p1", "r1", "p5", "r5", "p8", "r8", "off", "q1", "qr1"):
                     b = pathlib.Path(r["frames"][f]["file"]).read_bytes()
                     fr[f] = struct.unpack(">2H", b[0x22:0x26])            # (trig, release)
                 shots = {n: pathlib.Path(r["screens"][n]).read_bytes() if n in r["screens"] else b""
