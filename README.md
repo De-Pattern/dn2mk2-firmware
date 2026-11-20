@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.65 | 2026-11-20 | **PROJECT RAM banks**: four banks A–D (508 slots), the DT2's bank box, FUNC + UP/DOWN jumps a bank; FLEX takes of a track at unity with GAIN 0 (12 dB, not 24); about 87 KB more room (optimal packer) | `builds/v0.65-BANKS/` | yes |
 | v0.64 | 2026-11-20 | **keyboard HOLD**: PTN + KEYBOARD sustains every track (held notes latch, MIDI in, arp); start-up animation at half rate | `builds/v0.64-HOLD/` | yes |
 | v0.63 | 2026-11-19 | **FLEX level**: a FLEX take of a track plays at the level heard (+24 dB built in; GAIN 0 = old +24); a FLEX save never normalises | `builds/v0.63-FLEXLEVEL/` | yes |
 | v0.62 | 2026-11-19 | **slice editor**: edits play live, playing a slice selects it, zoom to 128 frames, FUNC + START/END snaps to zero crossings; CREATE SLICE GRID FUNC + E jumps 2..64 | `builds/v0.62-SLICE/` | yes |
@@ -102,6 +103,69 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.65 — BANKS (four PROJECT RAM banks, A–D)
+
+`DN2mod_v0.65_BANKS_OS1.11.syx`
+sha256 `bec1e2f995d9d34fd159073ed5626320e5803e7f1ef22cc18e3113badf992dd3`
+Gate: CLEARED TO FLASH, 2026-11-20 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, the new `depack` and `banks` steps, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `3f33d64` (branch `banks`). Docs: `docs/banks.md`, `docs/packer.md`.
+
+Everything in v0.64, plus:
+
+**Four banks of project RAM.** The sample list now runs A001–A127, B001–B127, C001–C127,
+D001–D127 (508 slots), then the FLEX buffers, as the DT2's list runs through its banks.
+- Turn SAMP (or UP / DOWN in the list) past A127 and it goes on to B001. **FUNC + UP / DOWN**
+  in the list jumps a whole bank.
+- SAMP's box on the SRC page and the list's header show the bank letter.
+- **LOAD TO PROJECT** fills the first empty slot of the bank your track's SAMP is in, then the
+  banks after it.
+- The +Drive browser's PROJECT RAM shows every bank's samples (marked >B004 etc.).
+- p-locks, sounds, kits and presets keep the bank (it is stored in SAMP's value itself).
+- Each project keeps its own banks, as it keeps bank A.
+- Banks are slots, not more memory: the pool is still 400 MB, shared by all four banks.
+- Every existing project, sound and p-lock is bank A and plays exactly as before.
+
+**FLEX takes of a single track at unity.** v0.63 lifted a FLEX take of one track by 24 dB, which
+was 12 dB too much (thanks NiKo for measuring it: on v0.63 a take matched its source at GAIN -12).
+It is now 12 dB, so GAIN 0 plays a take at the level of its source. If you set FLEX tracks to
+GAIN -12 on v0.63/v0.64, set them back to 0.
+
+**More room in the firmware.** The build now packs the firmware optimally (the same format,
+the same limits as Elektron's own files): about 87 KB smaller, so new features fit again
+(v0.64 had 291 bytes left; this build, with banks in, has about 82 KB).
+
+**Gate:**
+- `depack` (new): the instrument's own decompressor (the bootstrap's, run in the emulator)
+  unpacks every repacked section to exactly the bytes we packed; a stream with one byte
+  flipped does not.
+- `banks` (new, ColdFire emulator): bank B's page loads with the pool and plays by the DSP's
+  own rule while A's slot of the same number does not; the list's rows run A127 > B001; an
+  edit and a LOAD TO PROJECT into bank B reach the +Drive, the DSP and the image's header; a
+  power cycle keeps them; after the LFOs SAMP keeps its bank. Controls: a wrong header word
+  (bank B comes up empty), an old recording where the banks' pages go (banks off, nothing
+  written there).
+- SHARC runner and the DSP model: a bank slot plays its own entry and slice table; bank A
+  unchanged; a page without its magic is silent (`test_banks.py`).
+
+**Tests**
+1. Turn SAMP up past 127: the list goes on to B001, the header shows B.
+2. FUNC + DOWN in the list: one bank on; FUNC + UP: one back.
+3. With a track on a B slot, +DRIVE > LOAD TO PROJECT: the sample lands in bank B.
+4. Hold a trig, turn SAMP to a C slot: the p-locked trig plays the C sample; the others the track's.
+5. Save the project, load another, load it back: its banks B..D are as they were.
+6. FLEX a single track at GAIN 0: the take plays at the source's level.
+7. An LFO on SAMP: it moves through slots, never into another bank.
+8. An old project: everything in bank A, as before.
+9. The regression check (top of this file).
+
+**Known issues**
+- The recorder records into bank A only (as before).
+- A MIDI CC on SAMP picks a slot in the bank SAMP is already in (127 slots per bank).
+- The host tool (dn2samples / the web import tool) sends into bank A only; banks B..D are
+  filled from the +Drive on the instrument.
+- If you kept more than about 31 MB of recordings on v0.64, banks B..D stay off until the
+  recording at the end of that area is deleted (it lies where the banks' pages go).
+- Everything listed for v0.64, except the FLEX level (fixed here).
 
 ## v0.64 — HOLD (PTN + KEYBOARD holds the keyboard's notes)
 
