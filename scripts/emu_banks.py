@@ -75,7 +75,7 @@ def run(ctx):
             call("smp_boot")
 
     def ret(name, *args):
-        call(name, *args)
+        call(name, *[a & 0xFFFFFFFF for a in args])     # (a negative step as the guest's int)
         return d0() & 0xFFFFFFFF
 
     def sret(name, *args):
