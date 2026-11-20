@@ -150,3 +150,26 @@ kb_rec_hook:
         addq.l  #8, %sp
         moveq   #0, %d0                         | stock's answer: off
 1:      rts
+
+| v0.65 PROJECT RAM banks (docs/banks.md): the per-frame driver's jsr 0x40137726 at 0x400272d4 (the
+| LFOs, once a frame for every track, seven arguments on the stack). Here: the caller's return
+| put aside, so the arguments lie where the evaluator expects them; the evaluator; then
+| smp_lfo_fix (link.c) puts each sample voice's bank back from its target (an LFO's raw offset
+| on SAMP's word moves its low byte, the bank); d0 as the evaluator left it, the return back.
+| The caller pops the arguments itself (lea 28(%sp),%sp). The audio interrupt does not nest.
+        .globl  smp_lfo_hook
+smp_lfo_hook:
+        move.l  (%sp)+, smp_lfo_ret
+        jsr     0x40137726
+        lea     -12(%sp), %sp
+        movem.l %d0-%d1/%a0, (%sp)
+        jsr     smp_lfo_fix
+        movem.l (%sp), %d0-%d1/%a0
+        lea     12(%sp), %sp
+        move.l  smp_lfo_ret, -(%sp)
+        rts
+        .data
+        .align  4
+smp_lfo_ret:
+        .long   0
+        .text

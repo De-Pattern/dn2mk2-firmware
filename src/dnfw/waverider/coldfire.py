@@ -509,6 +509,8 @@ MACHSEL_COMMIT_SITE = 0x4005BBA0        # v0.30: MACHINE SEL's jsr 0x40031880 (c
 MACHSEL_COMMIT_STOCK = bytes.fromhex("4eb940031880")
 MODAPPLY_SITE = 0x40027196              # v0.25: the per-frame driver's jsr 0x400db22c (apply modulation)
 MODAPPLY_STOCK = bytes.fromhex("4eb9400db22c")
+LFO_APPLY_SITE = 0x400272D4             # v0.65: the per-frame driver's jsr 0x40137726 (the LFOs)
+LFO_APPLY_STOCK = bytes.fromhex("4eb940137726")
 POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
 # v0.38: per-project pools (csrc/sampler/pools.c, hooks.S, docs/project-pools.md): the OS's
 # project LOAD 0x40042E6E (its entry, its success where it sets the slot, its exit) and NEW
@@ -722,6 +724,13 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the per-frame modulation apply: stock's 0x400db22c, then a sample machine's modulated SAMP "
          "moved through the loaded slots", MODAPPLY_STOCK)
 
+    # v0.65 (docs/banks.md): after the LFOs, each sample voice's SAMP keeps its bank (its low byte)
+    _need(content, LFO_APPLY_SITE - 2, bytes.fromhex("2f0a"), "the driver pushes the mirror (move.l %a2,-(sp))")
+    _need(content, LFO_APPLY_SITE + 6, bytes.fromhex("4fef001c"), "... and pops the seven arguments (lea 28(sp),sp)")
+    edit(LFO_APPLY_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_lfo_hook"]),
+         "the per-frame LFOs: stock's 0x40137726, then each sample voice's SAMP keeps its bank (v0.65)",
+         LFO_APPLY_STOCK)
+
     # v0.22: the LFOs' destination list leaves out the WaveTone records our machines do not use
     _need(content, LFO_MASK_LEA, bytes.fromhex("45f9400dc30e"), "the destination list: lea 0x400dc30e,%a2")
     _need(content, LFO_MASK_LEA + 0x30, bytes.fromhex("4e92"), "... called once a slot (jsr %a2@)")
@@ -857,6 +866,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     layout["c_load"] = pages.C_LOAD
     layout["c_text_end"] = csyms["__text_end"]
     for name in ("smp_hi", "smp_walk", "smp_booted", "smp_cmds", "smp_tdm_sent", "smp_tdm_heard",
+                 "smp_lfo_hook", "smp_lfo_fix", "smp_bank_live", "smp_bank_count", "smp_bank_blocked", "smp_lp_bank",   # v0.65
+                 "smp_row_step", "smp_word_row", "smp_row_word", "smp_name", "smp_discard", "smp_set_samp_word", "smp_samp_word",
                  "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_save_mark", "smp_load", "smp_lstate",
                  "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot",
                  "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen", "slc_seen_draw", "slc_letgo", "slc_open_track",

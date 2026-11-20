@@ -3270,6 +3270,22 @@ static void snap_slots(void)
     }
 }
 
+/* v0.65 (hooks.S smp_lfo_hook, after the LFOs): a sample voice's SAMP keeps its bank -- the LFOs
+ * add a raw offset to the whole word, low byte too, which would move a slot of bank A's into B */
+void smp_lfo_fix(void)
+{
+    for (u32 b = 0; b < 16; b++) {
+        u8 *snd = VOICE_SOUND(b);
+        if (!snd || snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
+            continue;
+        volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
+        u16 t = *TARGET_CELL(b, SAMP_SLOT);
+        if ((t >> 8) > 127u)
+            continue;                           /* a FLEX buffer: smp_mod_apply's own */
+        *cell = (u16)((*cell & 0xFF00u) | (t & 0xFFu));
+    }
+}
+
 void smp_mod_apply(void *mirror)
 {
     snap_slots();

@@ -20,6 +20,9 @@ Negative controls:
 7. the header's word for B wrong: bank B comes up empty (nothing of it plays), A unchanged;
 8. one of bank A's recordings lying where the pages go (an older firmware's): banks B..D off,
    no write and no DSP word in their area, the rows skip them (A127 + 1 is the first FLEX row).
+9. after the LFOs (the hook at 0x400272d4, smp_lfo_fix): a sample voice's SAMP keeps its target's
+   bank whatever offset an LFO left in the low byte (B001 + 0x53 is B001's bank; A004 + 0x57 is
+   A's); a FLEX buffer's code is left alone; the hook is the one installed at the site.
 """
 import struct
 
@@ -230,5 +233,28 @@ def run(ctx):
         long("smp_bank_blocked") == 1 and ret("smp_bank_live", 1) == 0 and not wrote and not dsp_words
         and sret("smp_row_step", 127, 1) == 509 and SL.slot_plays(word, base, 0))
     notes["8"] = {"wrote": [hex(s) for s in wrote[:4]], "dsp_words": len(dsp_words)}
+
+    # 9. after the LFOs ---------------------------------------------------------------------------------
+    site = machine.read(0x400272D4, 6)
+    hooked = site == bytes.fromhex("4eb9") + struct.pack(">I", syms["smp_lfo_hook"])
+    kit = struct.unpack(">I", machine.read(0x800052A0, 4))[0]
+    vs = 0x800052A8                                        # voice 0's sound pointer
+    old_vs = machine.read(vs, 4)
+    snd0 = kit + 52
+    old_ty = machine.read(snd0 + 0xDE, 1)
+    machine.write(snd0 + 0xDE, bytes([8]))                 # a ONESHOT
+    machine.write(vs, struct.pack(">I", snd0))
+    mc, tc = 0x800068E4 + 34 + 2 * 43, 0x80003AF0 + 34 + 2 * 43
+    got = []
+    for target, heard in ((0x0140, 0x0193), (0x0300, 0x0457), (0x8100, 0x8155)):
+        machine.write(tc, struct.pack(">H", target))
+        machine.write(mc, struct.pack(">H", heard))
+        call("smp_lfo_fix")
+        got.append(struct.unpack(">H", machine.read(mc, 2))[0])
+    machine.write(vs, old_vs)
+    machine.write(snd0 + 0xDE, old_ty)
+    facts["9 after the LFOs: SAMP keeps its target's bank (B001 + 0x53 -> 0x0140, A004 + 0x57 -> 0x0400), FLEX untouched"] = (
+        hooked and got == [0x0140, 0x0400, 0x8155])
+    notes["9"] = {"hooked": hooked, "got": [hex(x) for x in got]}
     disk.clear()
     return {"facts": facts, "notes": notes, "ok": all(facts.values())}

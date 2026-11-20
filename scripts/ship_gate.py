@@ -826,7 +826,7 @@ def main() -> int:
                     if rc == 0 and res.exists():
                         r = json.loads(res.read_text())
                         facts = r.get("facts", {})
-                        good = bool(r.get("ok")) and len(facts) == 8 and all(facts.values())
+                        good = bool(r.get("ok")) and len(facts) == 9 and all(facts.values())
                         why = json.dumps({k: v for k, v in facts.items() if not v})[:800] or out[-800:]
                     return good, ("banks B..D: B005 plays from B's page, A005 does not, C and D empty; rows "
                                   "A127 > B001; an edit and a LOAD TO PROJECT into bank B on the +Drive, the DSP "
