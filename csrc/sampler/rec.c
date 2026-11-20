@@ -508,9 +508,10 @@ static void rec_arm_turn(int delta)
 
 /* v0.44 BOUNCE, FUNC + YES on its RECORDER: the buffer's playing take into the next empty
  * pool slot. The slot takes the take's frames where they lie (no copy: the buffer goes on
- * playing them, its next take goes elsewhere), and the take is saved to the +Drive,
- * normalised and named as a manual recording is (SAVING, NORMALIZING, TRIM, FILE NAME,
- * ASSIGN). Nothing to save, or a take still recording or waiting: the line says so */
+ * playing them, its next take goes elsewhere), and the take is saved to the +Drive and
+ * named as a manual recording is (SAVING, TRIM, FILE NAME, ASSIGN). v0.63 (the owner): never
+ * normalised -- the playing buffer shares those frames, and normalising them made it jump to
+ * full scale; a FLEX take is recorded at its source's level, so it is kept as it is. Nothing to save, or a take still recording or waiting: the line says so */
 u32 bn_nothing_at __attribute__((section(".data"))) = 0;
 void bn_save(void)
 {
@@ -528,6 +529,8 @@ void bn_save(void)
         return;
     }
     u32 frames = bytes / 2u;
+    extern u32 smp_save_keep;
+    smp_save_keep = 1;                               /* v0.63: kept as it lies, never normalised */
     smp_save_recording(slot, place, frames);
     smp_push_slot(slot);
     rec_saved_slot = slot;
