@@ -216,6 +216,13 @@ TRK_UNITY = 0.1696 / 0.0725                # 2.339 (+7.4 dB): x the 1 / TRK_GAIN
 # of a track matched its source at GAIN -12; the owner: his +24 was read on another firmware):
 # 12 dB, not 24. GAIN 0 is now v0.62's +12
 TRK_HW_DB = 12
+# v0.66 (owner, 2026-11-20; Error Kit): a FLEX take of MAIN or IN played far too quiet, and
+# GAIN raised to make up for it clipped (the gain is applied before the recorder's int16
+# clamp). Now such a take is recorded as it is, marked (bit 15 of its buffer entry's steps
+# word), and a voice playing a marked take adds MAIN_PLAY_DB. One constant: raise it if MAIN
+# is still short on the unit (the owner heard close to +24). TRK takes are unchanged.
+MAIN_PLAY_DB = 12
+MAIN_MARK = 0x8000
 GAIN_ZERO = 25                             # the index of 0 dB: 1..63 is -24..+38 dB
 CMD_OFFSET = 0xF00                         # the command block in the pool's directory page:
 CMD_WORDS = 6                              #   seq, cmd, src, chan, thres (0..32767), dest << 24 | frames

@@ -419,10 +419,13 @@ def start(p: Prog, L: Layout) -> None:
                 p.ldi(5, 0, 1)
                 p.ldi(6, 1, 1)
                 p.ldi(13, 2, 1)
+                p.iconst(12, SM.MAIN_MARK)
+                p.iop(11, 13, "AND", 12)     # v0.66: a MAIN / IN take's mark, kept apart
                 p.iconst(12, 0x7FFF)
                 p.iop(13, 13, "AND", 12)
                 p.iconst(12, 1)
                 p.iop(13, 13, "MAX", 12)     # 1..32767 steps (0 would divide by it)
+                p.iop(13, 13, "OR", 11)      # the mark back (tempo() masks the steps to 0x7FFF)
                 p.fconst(7, 1.0)
                 p.iconst(8, SM.FMT_I16)
             p.if_(4, "GE", 12, buf_entry, pool_entry, kind="i")
@@ -1180,6 +1183,18 @@ def dec_at(p: Prog, L: Layout) -> None:
     p.seti(5, 5)
 
 
+def main_makeup(p: Prog, L: Layout, f: int) -> None:
+    """v0.66: Ff x 10^(MAIN_PLAY_DB / 20) when the voice plays a FLEX take of MAIN or IN ('sla'
+    negative, a take; MAIN_MARK set by the recorder). Clobbers R9, R12, F12."""
+    v(p, 9, "sla")
+
+    def take():
+        p.iconst(12, SM.MAIN_MARK)
+        p.iop(9, 9, "AND", 12)
+        p.ifz(9, "NE", lambda: (p.fconst(12, 10.0 ** (SM.MAIN_PLAY_DB / 20.0)), p.fop(f, f, "*", 12)))
+    p.ifz(9, "LT", take)
+
+
 def render(p: Prog, L: Layout) -> None:
     """ONESHOT, REPITCH and GRID (v0.18): the DT2's reader. Each output sample is two
     96 kHz samples of the six-tap interpolator (`tick`), stepping half the block's rate,
@@ -1202,6 +1217,7 @@ def render(p: Prog, L: Layout) -> None:
     p.ldi(1, 0, 0)
     p.ld(0, C["lev"])
     p.fop(0, 0, "*", 1)
+    main_makeup(p, L, 0)                      # v0.66: a MAIN / IN take's +MAIN_PLAY_DB
     p.st(C["tmp"], 0)                         # LEV with the make-up (C['lev'] stays: a retrigger renders twice)
     dec_at(p, L)
 
@@ -1546,6 +1562,9 @@ def render_stretch(p: Prog, L: Layout) -> None:
     its own start (the DT2's STRETCH has no LOOP)."""
     C = L.C
     buffer(p, L)
+    p.ld(0, C["lev"])                         # v0.66: LEV, a MAIN / IN take's made up (C['lev'] stays)
+    main_makeup(p, L, 0)
+    p.st(C["tmp"], 0)
     # the jump this block: (T - rate) 2048, by the play direction
     p.ld(0, C["sr"])
     p.fconst(12, T_MIN)
@@ -1688,7 +1707,7 @@ def render_stretch(p: Prog, L: Layout) -> None:
             p.fconst(12, 0.0)
             p.fop(0, 0, "MAX", 12)
             vs(p, "gp1", 0)
-            p.ld(3, C["lev"])
+            p.ld(3, C["tmp"])                 # v0.66: LEV with a take's make-up
             p.fop(4, 4, "*", 3)
             faded(p, L, 4)
             out(p, L, 4)
@@ -1990,6 +2009,13 @@ def recorder(p: Prog, L: Layout) -> None:
                     p.lsh(7, 7, -16)
                     p.iconst(12, 0x7FFF)
                     p.iop(7, 7, "AND", 12)
+
+                    def main_take():          # v0.66: a FLEX take (GAIN set) of IN or MAIN: marked,
+                        p.ld(8, SM.REC_GAIN)  # made up on playback (main_makeup), never before the clamp
+                        p.ifz(8, "NE", lambda: (p.iconst(12, SM.MAIN_MARK), p.iop(7, 7, "OR", 12)))
+                    p.ld(8, C["rsrc"])        # 0 IN, 1 MAIN, 2 + t a track
+                    p.iconst(12, 2)
+                    p.if_(8, "LT", 12, main_take, kind="i")
                     p.sti(2, 1, 7)
                 p.if_(5, "GE", 12, buf_dest, pool_dest, kind="i")
                 p.iconst(7, 0)
