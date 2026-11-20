@@ -38,8 +38,10 @@ and VFAD, are now **SLD** (encoder **E**) and **SLEN** (encoder **F**).
   (v0.40; "Copy and paste" below).
 
 **SLEN** (steps of the track, its own scale followed, at the current tempo):
-`1/8 1/4 1/2 3/4 1 1.5 2 3 4 6 8 12 16 32 64`; a SLIDE trig with no SLEN lock uses **1**.
-At 120 BPM and 1x, 1 step is 125 ms (187.5 audio frames).
+`NXT 1/8 1/4 1/2 3/4 1 1.5 2 3 4 6 8 12 16 32 64`. **NXT** (v0.66, the default: a SLIDE trig
+with no SLEN lock) lasts until the track's next trig, as on the Analog Four ("the slide is
+completed when the next trig is reached"); v0.41..v0.65 used **1** step there. At 120 BPM and
+1x, 1 step is 125 ms (187.5 audio frames).
 
 ## What slides
 
@@ -258,3 +260,29 @@ stock's lock jump), since sliding it would be silent or step through choices.
 
 Checked: `scripts/emu_slides.py` (ONESHOT: TUNE glides, SAMP and PLAY land; PERC on TRX-XT:
 PTCH and AMD glide, DTYP lands; PERC on TRX-CP: PTCH lands).
+
+## v0.66: NXT, until the next trig (the Analog Four's rule)
+
+The owner, 2026-11-20, after a Discord thread quoting the Analog Keys manual: "The speed of the
+slide is relative to the current tempo and the slide is completed when the next trig is
+reached." Until v0.65 a slide with no SLEN lock lasted one step.
+
+- **NXT** is SLEN's first choice and the value with no lock: the slide lasts from its trig to the
+  track's next trig, a note trig or a lock (trigless) trig alike (both set step flag bit 0: DNX, a
+  note `0x0381`, a lock trig `0x7801`), counted round the track's length (per pattern: the
+  pattern's, per track: the track's). No other trig on the track: the whole length (the trig
+  itself, next time round). Steps, at the track's scale and the tempo, as SLEN's lengths; micro
+  timing and conditions are not counted (a trig that will not play still ends the slide).
+- **Chained trigless trigs** (InductiveOne's "neuro bass" automation): each slides to the next.
+- **The explicit lengths stay** (1/8 .. 64; their stored values 0..14 unchanged), so a project's
+  SLEN locks play as they did. A project whose slides had no SLEN lock now slides to the next
+  trig instead of one step.
+- Stored: NXT locked explicitly is value 15; older firmware plays it as 1 step.
+- Code: `steps_to_next` in `slide.c`, read from the playing pattern (`0x42C5A9A0`): each track
+  1701 bytes from +0, its step flags a big-endian u16 at +2 step; the gate checks that stock's own
+  track objects hand exactly these pointers for all 16 tracks (vtable +40, what stock's step test
+  `0x4004e95a` reads) and that stock's test sees the trigs the slide counts.
+- Gate (`slides`, `emu_slides.py` 5b): trigs on 4 and 7 (3 steps), round the length (4 -> 0, 12 of
+  16), no other trig (16), the next step (1), a 64-step pattern (36), an explicit SLEN (1/2 step)
+  still wins, an explicit NXT lock, per-track length (8); each exact per frame against the model.
+  The knob: NXT first (from no lock, the first choice right is 1/8).

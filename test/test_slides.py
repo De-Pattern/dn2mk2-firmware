@@ -38,8 +38,11 @@ def test_continuous_slots(stock):
 
 
 def test_lengths():
-    assert len(SL.SLEN_UNITS) == len(SL.SLEN_TEXT)
-    assert SL.SLEN_UNITS[SL.SLEN_DEFAULT] == 24       # the default: one step
+    assert len(SL.SLEN_UNITS) + 1 == len(SL.SLEN_TEXT)   # v0.66: the lengths, then NXT
+    assert SL.SLEN_NXT == len(SL.SLEN_UNITS) and SL.SLEN_TEXT[SL.SLEN_NXT] == "NXT"
+    assert SL.SLEN_DEFAULT == SL.SLEN_NXT             # v0.66: no SLEN lock: to the next trig
+    assert SL.SLEN_UNITS[4] == 24 and SL.SLEN_TEXT[4] == "1"   # index 4 is still one step
+    assert SL.NXT_MAX_STEPS * 24 * 65536 < 2 ** 31   # an NXT slide's elapsed fits too
     assert list(SL.SLEN_UNITS) == sorted(SL.SLEN_UNITS)
     assert SL.SLEN_UNITS[-1] * 65536 < 2 ** 31       # elapsed, units << 16, fits
 

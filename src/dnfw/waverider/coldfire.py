@@ -857,7 +857,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         edit(va, bytes.fromhex("4eb9") + _long(csyms[label]) + bytes.fromhex("4e71") * ((n - 6) // 2),
              f"slides: copy/paste carries SLD/SLEN ({label})", bytes.fromhex(stock_hex))
     for name in ("sl_ui_table", "sl_page_up", "sl_page_seen", "sl_knob", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
-                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks", "sl_pasted", "sl_tclip", "sl_paste",
+                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_nxt_last", "sl_ticks", "sl_pasted", "sl_tclip", "sl_paste",
                  "sl_draw_sld", "sl_draw_slen"):
         layout[name] = csyms[name]
     layout.update(playout)
