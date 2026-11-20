@@ -335,20 +335,30 @@ def test_v023_keyboard_notes_ask_slc_keynotes_which_asks_stock():
 
 
 def test_v039_the_startup_animation_chunk_is_his_frames():
-    """dnfw.bootanim: the ANIZ chunk decodes (as the stamp walks it) to s!Rwa²'s 38 frames
-    bit for bit (v0.39: his own 44 PBM frames, 37..43 one picture kept once); its table maps
-    the 175 intro frames onto them in order, every frame shown, the last held; the timing is
-    the owner's (160 ms, then 80 ms each, the last held); it is small (the 2 MiB USB limit)"""
+    """dnfw.bootanim: s!Rwa²'s 38 frames read bit for bit (v0.39: his own 44 PBM frames, 37..43
+    one picture kept once) at his timing (160 ms, then 80 ms each, the last held). v0.64 (the
+    image was full; room for the keyboard HOLD): every other one of his 37 moving frames ships
+    (0, 2, .. 36) at 160 ms each, then his last, held: each shipped frame is his, bit for bit,
+    and the last starts when his did (the same length). The ANIZ chunk decodes (as the stamp
+    walks it) to the shipped frames; its table maps the 175 intro frames onto them in order,
+    every one shown, the last held; it is small (the 2 MiB USB limit)"""
     import json
     from dnfw import bootanim as A
+    from dnfw.mods import bootscreen as B
+    his = A.frames_pixels()
+    assert len(his) == 38
+    assert A.SOURCE_DURATIONS_MS == (160,) + (80,) * 36 + (560,) and sum(A.SOURCE_DURATIONS_MS) == 3600
+    assert A.SHIPPED == tuple(range(0, 37, 2)) + (37,)
+    n = len(A.SHIPPED)
+    assert n == 20 and A.DURATIONS_MS == (160,) * (n - 1) + (560,)
+    assert sum(A.DURATIONS_MS[:-1]) == sum(A.SOURCE_DURATIONS_MS[:-1])     # his last frame on time
     c = A.chunk()
     ims = A.images()
-    assert len(ims) == 38
-    assert A.DURATIONS_MS == (160,) + (80,) * 36 + (560,) and sum(A.DURATIONS_MS) == 3600
+    assert ims == [B.image_from_pixels({(x, A.H - 1 - y) for x, y in his[k]}) for k in A.SHIPPED]
     assert A.decode(c) == ims
     t = A.table()
     assert len(t) == A.INTRO_FRAMES
-    assert list(t) == sorted(t) and set(t) == set(range(38)) and t[-1] == 37
+    assert list(t) == sorted(t) and set(t) == set(range(n)) and t[-1] == n - 1
     assert len(c) < 8192
     doc = json.loads(A.SOURCE.read_text())
     assert doc["by"] == "s!Rwa²" and doc["frames"] == 38
@@ -360,7 +370,8 @@ def test_v037_the_build_hooks_the_intro_once_with_the_stamp():
     import struct
     from dnfw.mods import bootscreen as B, waverider as W
     spec, aniz = W._boot()
-    assert spec is B.SPEC and aniz.startswith(struct.pack(">I", 38))
+    from dnfw import bootanim as A
+    assert spec is B.SPEC and aniz.startswith(struct.pack(">I", len(A.SHIPPED)))
     assert spec["aniz_chunk"] == "ANIZ"
     ext = [e for e in W.extents() if "intro hook" in e.what]
     assert len(ext) == 1 and ext[0].length == 8
