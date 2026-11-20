@@ -75,6 +75,8 @@ SET = 0x6FF000
 HI, HI_END = 0x6FF800, 0x6FF805                 # v0.43: the library's folders 64..127 (lib.c)
 LIB0, LIB_DATA = 0x700000, 0x700105
 XA, XA_END = 0x6F0000, 0x6F0701                 # v0.45: the library's entries 2,048..16,383 (lib.c LIB_X_AT)
+BLA, BLA_END = 0x6E0600, 0x6E0600 + 2 * 64 * 464   # v0.65: the bank lists, projects 0..63 (pools.c)
+BLB, BLB_END = 0x6F0800, 0x6F0800 + 2 * 64 * 464   # .. and 64..127
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 RESULT = SENTINEL + 0x800               # what a stubbed driver entry returns (the hook sets it)
 PRSSTAT = 0xFC0CC024                    # the eSDHC's present state: bit 24 DAT0 (v0.41)
@@ -91,7 +93,20 @@ def check(name, ok, detail=""):
 
 
 def regions(dev):
-    return [(POOL0, POOL_END), (PL0, PL_END), (XA, XA_END), (SET, SET + 1), (HI, HI_END), (LIB0, dev)]
+    return [(POOL0, POOL_END), (PL0, PL_END), (BLA, BLA_END), (XA, XA_END), (BLB, BLB_END), (SET, SET + 1),
+            (HI, HI_END), (LIB0, dev)]
+
+
+def merged_regions(dev):
+    """the regions as the TRIMs that cover them merge (v0.65: the bank lists' second range ends where
+    the settings sector starts)"""
+    out = []
+    for a, b in regions(dev):
+        if out and out[-1][1] == a:
+            out[-1][1] = b
+        else:
+            out.append([a, b])
+    return out
 
 
 def in_regions(s, n, dev):
@@ -461,14 +476,15 @@ def run_ui(a, lay, SMx):
             merged.append(["OVERLAP", s])
         else:
             merged.append([s, s + n])
-    want = [[POOL0, POOL_END], [PL0, PL_END], [XA, XA_END], [SET, SET + 1], [HI, HI_END], [LIB0, DEVICE]]
-    check("the TRIMs cover exactly the six regions (v0.43: folders 64..127's; v0.45: the library's extension), each sector once",
+    want = merged_regions(DEVICE)
+    check("the TRIMs cover exactly the eight regions (v0.43: folders 64..127's; v0.45: the library's extension; v0.65: the bank lists), each sector once",
           merged == want, f"{[[hex(x) if isinstance(x, int) else x for x in m] for m in merged]}")
     order = [s for s, _ in trims[:36]]
     check("headers first: the pool's, the lists' region, the settings, the library's headers, then the frames",
           order[0] == POOL0 and order[1] == PL0 and SET in order[:36] and LIB0 in order[:36]
           and trims[35] == (LIB0, LIB_DATA - LIB0) and trims[36] == (HI, HI_END - HI)
-          and trims[37] == (XA, XA_END - XA) and trims[38][0] == POOL0 + 1,
+          and trims[37] == (XA, XA_END - XA) and trims[38] == (BLA, 2048) and trims[67] == (BLB, 2048)
+          and trims[96][0] == POOL0 + 1,
           str([hex(x) for x in order[:3]]))
     check("not one write from the first TRIM on", first_t is not None and not [x for x in log[first_t:] if x[0] == "W"],
           f"{len(writes)} write(s) in all")
@@ -544,7 +560,7 @@ def covered(trims, dev):
             return False
         else:
             merged.append([s, s + n])
-    return merged == [[a, b] for a, b in regions(dev)]
+    return merged == merged_regions(dev)
 
 
 def run_link(a, lay, SMx):
