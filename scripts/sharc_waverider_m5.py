@@ -511,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,flexlevel,mainmark,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -662,6 +662,12 @@ def main(argv=None):
             results["3f_flexlevel"] = step_flexlevel(init, sound, machines)
             gc.collect()
             show(results["3f_flexlevel"])
+
+        if "mainmark" in steps:
+            print("\nstep 3g: FLEX takes of MAIN and IN marked and made up on playback (v0.66)")
+            results["3g_mainmark"] = step_mainmark(init, sound, machines)
+            gc.collect()
+            show(results["3g_mainmark"])
 
         if "mainrec" in steps:
             print("\nstep 3m: MAIN recorded, previewed and played, in the instrument's order (v0.38)")
@@ -2609,6 +2615,138 @@ def step_flexlevel(init, sound, machines) -> dict:
             r.pop("take", None)
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {"unity": unity, "recorder": recorder, "zero": zero}}
+
+
+def step_mainmark(init, sound, machines) -> dict:
+    """v0.66 (owner and Error Kit, 2026-11-20: a FLEX take of MAIN or IN far too quiet, and GAIN
+    raised to make up for it clipped). Such a take is recorded as it is and marked (bit 15 of its
+    buffer entry's steps word, MAIN_MARK); a voice playing a marked take adds MAIN_PLAY_DB. Each
+    run: RECORD NOW into buffer 0's half 0 (dest BUF_SLOT0), 16 steps, from a known 0.5 sine poked
+    where the recorder reads its source at every block's dispatch (MAIN_TAP for MAIN, IN_BUF for IN:
+    the runner never runs the master mix); STOP; then track 0 plays SAMP BUF_SAMP0 twice, the take
+    as recorded and the same take with the mark cleared, on ONESHOT (render) and STRETCH
+    (render_stretch). Checks: MAIN and IN FLEX takes are marked and their frames are the source's
+    (peak 0.5, not boosted: nothing reaches the int16 clamp); a marked take renders x 10^(12/20)
+    of its unmarked self within 0.1 % (RMS) on both readers; the steps still read 16 (the mark never
+    reaches the step maths). Negative controls: a TRK take (FLEX) and a plain recording of MAIN
+    (GAIN index 0, the RECORDER's) are not marked and render as their unmarked selves."""
+    import math as _m
+    ONE, STR = SM.TYPE_OF["ONESHOT"], SM.TYPE_OF["STRETCH"]
+    cmd_at = dsp.SMP_POOL_DDR + SM.CMD_OFFSET
+    bent = dsp.SMP_POOL_DDR + SM.BUF_DIR
+    n, play, steps, amp = 16, 10, 16, 0.5
+    sig = [amp * _m.sin(2 * _m.pi * 440 * k / 48000) for k in range(32 * (n + 2))]
+    want = 10.0 ** (SM.MAIN_PLAY_DB / 20.0)
+
+    def bits(x):
+        return struct.unpack("<I", struct.pack("<f", x))[0]
+
+    def command(r, seq, cmd, src=0, chan=0, dest=0, frames=SM.REC_FRAMES, place=0, thres=0):
+        for k, w in enumerate((seq, cmd, src, chan | place << 8, thres, (SM.REC_FIRST + dest) << 24 | frames)):
+            m2.poke(r.state, cmd_at + 4 * k, w)
+
+    def rms(x):
+        return _m.sqrt(sum(v * v for v in x) / max(1, len(x)))
+
+    def record(src, gidx):
+        cur = {"b": 0}
+
+        def at_dispatch(r):
+            b = cur["b"]
+            if b == 0:
+                command(r, 31, SM.CMD_NOW, src=src, chan=gidx << 24, dest=SM.BUF_SLOT0 - SM.REC_FIRST,
+                        place=0x5000, thres=steps << 16)
+            if b == n:
+                command(r, 32, SM.CMD_STOP)
+            for k in range(32):
+                x = bits(sig[32 * b + k] if b < n else 0.0)
+                for at in (SM.IN_BUF, SM.MAIN_TAP):
+                    m2.poke(r.state, at + 4 * k, x)
+                    m2.poke(r.state, at + 0x80 + 4 * k, x)
+            cur["b"] += 1
+
+        def fb(b):
+            f = base_frame(sound, machines, t0=ONE, trigger=False, overrides=smp_words({SM.SAMP_REC: 1}))
+            for t in range(16):
+                f.put(0xA5A + 2 * t, t)
+            return f.to_bytes()
+        r = run_blocks(init, fb, n + 2, extra_hooks={m3.DISPATCH: at_dispatch})
+        if not r["ok"]:
+            return None, None
+        st = r["state"]
+        ent = [m2.word(st.state, bent + 4 * k) or 0 for k in range(3)]
+        take = []
+        for k in range(ent[1] // 2):
+            w = m2.word(st.state, ent[0] + 4 * k) or 0
+            take += [((h ^ 0x8000) - 0x8000) / 32768.0 for h in (w & 0xFFFF, w >> 16)]
+        return st, {"entry": ent, "take_peak": max((abs(v) for v in take), default=0.0), "frames": ent[1]}
+
+    def playback(state, ty, clear):
+        if clear:
+            w = m2.word(state.state, bent + 8) or 0
+            m2.poke(state.state, bent + 8, w & 0x7FFF)
+
+        def fb(b):
+            f = base_frame(sound, machines, t0=ty, trigger=(b == 0), overrides=smp_words({SM.SAMP_REC: SM.BUF_SAMP0}))
+            f.put(SP.TEMPO_OFFSET, 120 * 120)
+            return f.to_bytes()
+        r = run_blocks(state, fb, play)
+        if not r["ok"]:
+            return None
+        return smp_series(r, 0)[2 * BLOCK: (play - 1) * BLOCK]
+
+    out, nums = {}, {}
+    for name, src, gidx in (("MAIN", 1, SM.GAIN_ZERO), ("IN", 0, SM.GAIN_ZERO), ("TRK", 2, SM.GAIN_ZERO),
+                            ("MAIN plain", 1, 0)):
+        st, info = record(src, gidx)
+        res = {"info": info}
+        if st is not None:
+            for ty, tn in ((ONE, "ONESHOT"), (STR, "STRETCH")):
+                import copy as _c
+                a_ = playback(_c.deepcopy(st), ty, False)
+                b_ = playback(_c.deepcopy(st), ty, True)
+                res[tn] = (rms(a_) / rms(b_)) if a_ and b_ and rms(b_) > 0 else None
+                res[tn + "_peak"] = max((abs(x) for x in a_ or []), default=0.0)
+        out[name] = res
+        nums[name] = {k: (round(v, 5) if isinstance(v, float) else v) for k, v in res.items() if k != "info"}
+        nums[name]["entry_steps_word"] = hex(info["entry"][2]) if info else None
+        nums[name]["take_peak"] = round(info["take_peak"], 4) if info else None
+
+    def marked(nm):
+        i = out[nm]["info"]
+        return bool(i) and bool(i["entry"][2] & SM.MAIN_MARK) and (i["entry"][2] & 0x7FFF) == steps
+
+    def unmarked(nm):
+        i = out[nm]["info"]
+        return bool(i) and not (i["entry"][2] & SM.MAIN_MARK) and (i["entry"][2] & 0x7FFF) == steps
+
+    def ratio(nm, k):
+        r = out[nm].get(k)
+        return r is not None and abs(r - want) <= 0.001 * want
+
+    def same(nm, k):
+        r = out[nm].get(k)
+        return r is not None and abs(r - 1.0) <= 0.001
+
+    def as_source(nm):
+        i = out[nm]["info"]
+        return bool(i) and abs(i["take_peak"] - amp) <= 0.01 * amp
+    checks = {
+        "v0.66: a FLEX take of MAIN is marked (MAIN_MARK) and its steps still read 16": marked("MAIN"),
+        "v0.66: .. its frames are the source's (peak 0.5 within 1 %: recorded as it is, never boosted before the clamp)":
+            as_source("MAIN"),
+        f"v0.66: .. and it plays {SM.MAIN_PLAY_DB} dB over the same take unmarked, within 0.1 %, on ONESHOT (render)":
+            ratio("MAIN", "ONESHOT"),
+        f"v0.66: .. and on STRETCH (render_stretch)": ratio("MAIN", "STRETCH"),
+        "v0.66: .. and its playback is not silence": out["MAIN"].get("ONESHOT_peak", 0) > 0.01,
+        "v0.66: a FLEX take of IN is marked, as it is, and plays the same make-up":
+            marked("IN") and as_source("IN") and ratio("IN", "ONESHOT") and ratio("IN", "STRETCH"),
+        "v0.66 negative control: a FLEX take of a track is not marked and plays as itself":
+            unmarked("TRK") and same("TRK", "ONESHOT") and same("TRK", "STRETCH"),
+        "v0.66 negative control: a plain recording of MAIN (GAIN index 0, the RECORDER's) is not marked":
+            unmarked("MAIN plain") and same("MAIN plain", "ONESHOT"),
+    }
+    return {"ok": all(checks.values()), "checks": checks, "numbers": nums}
 
 
 # -- step 3e: the fast link (v0.16, docs/sampler.md) -------------------------------------------------
