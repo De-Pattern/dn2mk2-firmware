@@ -65,6 +65,8 @@ def extents(firmware=None, area_length: int = 0) -> list[Extent]:
     out = [Extent(MAIN_OS, e["va"] - BASE, len(e["new"]) // 2, e["what"]) for e in SPEC["edits"]]
     from . import bootscreen as B
     out.append(Extent(MAIN_OS, B.SPEC["intro_va"] - BASE, 8, "v0.37: the intro hook (the start-up animation)"))
+    from . import midiarp as MA                 # v0.67: the arp on MIDI tracks
+    out += [Extent(MAIN_OS, x.start, x.length, "v0.67 midiarp: " + x.what) for x in MA.extents()]
     out += platform.extents(area_length)
     size = None
     if firmware is not None:
@@ -176,6 +178,11 @@ def apply(firmware) -> Result:
         raise ModError(f"0x{bspec['intro_va']:08x} (the intro routine) is not stock; this mod is "
                        "for unmodified Digitone II 1.11")
     base_os[at:at + 8] = b"\x4e\xf9" + struct.pack(">I", bspec["stamp"]) + b"\x4e\x71"
+    # v0.67 (owner, 2026-11-20: "just arp on midi tracks"): the midiarp mod (on the instrument
+    # 2026-09-17 as arp-midi-play4), its sites checked stock in this image first
+    from . import midiarp as MA
+    MA.check(bytes(base_os))
+    MA.write(base_os, main_os)
     codes += [(platform.area.CODE, platform.area.CodeChunk(bspec["load"], bytes.fromhex(bspec["code"])).pack()),
               (bspec["aniz_chunk"].encode(), aniz), _label()]
     content = platform.join(bytes(base_os), others + codes)

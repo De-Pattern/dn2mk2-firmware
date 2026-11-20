@@ -58,6 +58,28 @@ def nlen_lut(content: bytes) -> bytes:
                  for want in table(SPEC["arp_lengths_va"]))
 
 
+def check(content: bytes) -> None:
+    """every guard and every edit's stock bytes, in CONTENT (MAIN OS) -> ModError when not"""
+    for g in SPEC["guards"]:
+        want = bytes.fromhex(g["bytes"])
+        if content[g["va"] - BASE:g["va"] - BASE + len(want)] != want:
+            raise ModError(f"0x{g['va']:08x} is not stock (midiarp's guard)")
+    for e in SPEC["edits"]:
+        want = bytes.fromhex(e["stock"])
+        if content[e["va"] - BASE:e["va"] - BASE + len(want)] != want:
+            raise ModError(f"0x{e['va']:08x} is not stock (midiarp's edit)")
+
+
+def write(content: bytearray, original: bytes) -> None:
+    """the edits into CONTENT, and the cave's N.LEN lookup from ORIGINAL's own tables (v0.67: the
+    DN2 mk2 mod applies it inside waverider.apply, on top of its own section-3 edits)"""
+    for e in SPEC["edits"]:
+        new = bytes.fromhex(e["new"])
+        content[e["va"] - BASE:e["va"] - BASE + len(new)] = new
+    lut = SPEC["lut_va"] - BASE
+    content[lut:lut + LUT_BYTES] = nlen_lut(original)
+
+
 def apply(firmware) -> Result:
     section = firmware.container.find(SECTION)
     if section is None:
@@ -81,11 +103,7 @@ def apply(firmware) -> Result:
                            "Digitone II 1.11, or another mod already wrote there")
 
     content = bytearray(original)
-    for e in SPEC["edits"]:
-        new = bytes.fromhex(e["new"])
-        content[e["va"] - BASE:e["va"] - BASE + len(new)] = new
-    lut = SPEC["lut_va"] - BASE
-    content[lut:lut + LUT_BYTES] = nlen_lut(original)
+    write(content, original)
 
     return Result(payloads={SECTION: bytes(content)}, extents=extents(),
                   notes=["ARPEGGIATOR menu opens on MIDI tracks",

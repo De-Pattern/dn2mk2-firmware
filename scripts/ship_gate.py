@@ -222,6 +222,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("rectext", "RECORDER text inside its places, every state and R.LEN value (ColdFire)"),
        ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
        ("kbhold", "KEYBOARD HOLD: PTN + KEYBOARD, held notes, chords, release (ColdFire)"),
+       ("midiarp", "the arp on MIDI tracks (ColdFire)"),
        ("tune", "microtuning: KB SETUP's TUNE, the TUNING page, the frame's retune (ColdFire)"),
        ("tunerec", "microtuning: each project's tuning record (ColdFire)"),
        ("slicefine", "SLICE editor: live edits, zero-crossing snap, deep zoom, a played slice picked (ColdFire)"),
@@ -2585,6 +2586,71 @@ def main() -> int:
             later("kbhold", "KEYBOARD HOLD: PTN + KEYBOARD, held notes, chords, release (ColdFire)",
                   "KEYBOARD HOLD: PTN + KEYBOARD, held notes, chords, release (ColdFire)",
                   [kh_cmd, sorted(EMU_ENV.items())], kh_body)
+
+        # v0.67: the arpeggiator on MIDI tracks (the midiarp mod, on the instrument 2026-09-17 as
+        # arp-midi-play4; docs/midiarp.md). Three runs, KEYBOARD on, [TRIG 1] held then let go, a frame
+        # after each: track 1 MIDI (the kit's synth/MIDI mask, kit + 0x5cda, bit 0) with the arp on (its
+        # sound's MODE, + 0x15f, UP): the key goes the synth road (the voice starter 0x40137d3c, never the
+        # MIDI sender 0x4012b8b0), through the key gate; the ISR's voice trigger reaches the hook that
+        # turns the note into a MIDI record (0x402d06dc), and the frame starts no voice (trig mask 0).
+        # Negative controls: the same MIDI track, arp off: the MIDI sender, as stock, never the starter;
+        # a synth track (arp off): the starter and a voice in the frame, as stock
+        if "kh_on" in lay:
+            from dnfw.mods import midiarp as MAg      # noqa: PLC0415
+            kit_ = 0x4210C08C
+            ma_mask, ma_mode = kit_ + 0x5CDA, kit_ + 52 + 0x15F
+            ma_cnt = {"starter": 0x40137D3C, "sender": 0x4012B8B0, "keygate": 0x402D0694,
+                      "seqgate": 0x402D0664, "trighook": 0x402D06DC}
+            ma_runs = {}
+            for nm, mask, mode in (("midi_arp", "0001", "01"), ("midi_off", "0001", "00"), ("synth_arp", "0000", "00")):
+                js_ = work / f"midiarp_{nm}.json"
+                st_ = ["wait:6", f"mem:{ma_mask:#x}:2", f"poke:{ma_mask:#x}:{mask}", f"poke:{ma_mode:#x}:{mode}", "sync",
+                       "tap:18", "wait:6", "press:25", "wait:4", "frame:p", "wait:2", "frame:p2",
+                       "release:25", "wait:4", "frame:r", f"mem:{ma_mask:#x}:2", f"mem:{ma_mode:#x}:1"]
+                cmd_ = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                        "--snapshot", snap, "--steps", ",".join(st_), "--json", js_]
+                for va in ma_cnt.values():
+                    cmd_ += ["--count", hex(va)]
+                ma_runs[nm] = (cmd_, js_)
+
+            def ma_body(tdir):
+                res = {}
+                for nm, (cmd_, js_) in ma_runs.items():
+                    rc, out = run(f"midiarp {nm}", cmd_, logs, env=EMU_ENV, trace=tdir)
+                    if rc != 0 or not js_.exists():
+                        return False, f"{nm}: " + out[-700:]
+                    r = json.loads(js_.read_text())
+                    c = {k: r["counts"].get(f"{va:#010x}", 0) for k, va in ma_cnt.items()}
+                    fr = {}
+                    for f in ("p", "p2", "r"):
+                        b = pathlib.Path(r["frames"][f]["file"]).read_bytes()
+                        fr[f] = struct.unpack(">2H", b[0x22:0x26])
+                    mem = [bytes.fromhex(x) for x in r["memory"].values()]
+                    res[nm] = {"counts": c, "frames": fr, "mem": [m.hex() for m in mem]}
+                A, B, C = res["midi_arp"], res["midi_off"], res["synth_arp"]
+                trig = lambda x: x["frames"]["p"][0] | x["frames"]["p2"][0]     # noqa: E731
+                facts = {
+                    "the build carries midiarp's edits (its cave's N.LEN lookup included)": bool(MAg.SPEC["edits"]),
+                    "the pokes took: track 1 MIDI (mask bit 0) and its arp MODE as set, every run":
+                        all(int(x["mem"][1], 16) & 1 == (nm != "synth_arp") for nm, x in res.items())
+                        and A["mem"][2] == "01" and B["mem"][2] == "00",
+                    "MIDI track, arp on: the key down and up go the synth road (the voice starter), through the "
+                    "key gate, never the MIDI sender":
+                        A["counts"]["starter"] >= 2 and A["counts"]["sender"] == 0 and A["counts"]["keygate"] >= 2,
+                    "MIDI track, arp on: the ISR's voice trigger reaches the MIDI-record hook, and no voice starts":
+                        A["counts"]["trighook"] >= 1 and trig(A) == 0,
+                    "negative control, MIDI track with the arp off: the MIDI sender, as stock, never the starter":
+                        B["counts"]["sender"] >= 2 and B["counts"]["starter"] == 0,
+                    "negative control, a synth track (arp off): the voice starter and a voice, as stock":
+                        C["counts"]["starter"] >= 2 and C["counts"]["sender"] == 0 and trig(C) != 0,
+                }
+                good = all(facts.values())
+                return good, ("the arp on a MIDI track: menu-free routing checked on the key forks (synth road with "
+                              "the arp on, MIDI sender with it off), the ISR's voice trigger turned into a MIDI record "
+                              "with no voice; a synth track as stock" if good else
+                              json.dumps({k: x for k, x in facts.items() if not x}) + " " + json.dumps(res)[:1500])
+            later("midiarp", "the arp on MIDI tracks (ColdFire)", "the arp on MIDI tracks (ColdFire)",
+                  [cmd_ for cmd_, _ in ma_runs.values()] + [sorted(EMU_ENV.items())], ma_body)
 
         # v0.61: microtuning (csrc/sampler/tune.c, docs/microtuning.md). The frame: tn_retune on 16
         # voices (voice 15 of no track), POOLE ROD12 at ROOT D with every track tuned but track 4:
