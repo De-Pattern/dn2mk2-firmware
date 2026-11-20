@@ -18,10 +18,17 @@ What it does (from the mod's own notes):
 
 Gate: `midiarp` (ColdFire emulator, three runs, KEYBOARD on, [TRIG 1] down and up with a frame
 after each): MIDI track with the arp on goes through the key gate to the voice starter, never the
-MIDI sender, reaches the MIDI-record hook at the voice trigger, and starts no voice; negative
+MIDI sender, reaches the MIDI-record hook at the voice trigger, and the engine's voice trigger (0x400db524) is
+never called for it; negative
 controls: the same track with the arp off goes to the MIDI sender as stock; a synth track starts a
 voice as stock.
 
 Not checked in the emulator: the menu opening on a MIDI track (hardware, 2026-09-17), and the MIDI
 task's sending (the emulator does not run it). With HOLD (v0.64): sustain on a MIDI track's arp
 road is the synth road's, untested on the unit.
+
+Measured under the emulator (v0.67): after the hook, the ISR's stock code still sets the voice
+slot's note-on bit in the frame for the MIDI track's note. On the unit a MIDI track's slot makes no
+sound: `arp-midi-diag` (2026-09-17) passed every record to the stock trigger as well, and no internal
+audio came from the MIDI track. Worth a listen on v0.67: a MIDI track with the arp on should stay
+silent on the main outs.

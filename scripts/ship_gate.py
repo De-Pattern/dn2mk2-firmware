@@ -2592,7 +2592,10 @@ def main() -> int:
         # after each: track 1 MIDI (the kit's synth/MIDI mask, kit + 0x5cda, bit 0) with the arp on (its
         # sound's MODE, + 0x15f, UP): the key goes the synth road (the voice starter 0x40137d3c, never the
         # MIDI sender 0x4012b8b0), through the key gate; the ISR's voice trigger reaches the hook that
-        # turns the note into a MIDI record (0x402d06dc), and the frame starts no voice (trig mask 0).
+        # turns the note into a MIDI record (0x402d06dc), and the engine's voice trigger (0x400db524) is
+        # never called for it. (The ISR still sets the voice slot's note-on bit after the hook, stock code
+        # past it, measured here: on the unit a MIDI track's slot makes no sound, heard 2026-09-17 with
+        # arp-midi-diag, which also called the stock trigger; docs/midiarp.md.)
         # Negative controls: the same MIDI track, arp off: the MIDI sender, as stock, never the starter;
         # a synth track (arp off): the starter and a voice in the frame, as stock
         if "kh_on" in lay:
@@ -2600,7 +2603,7 @@ def main() -> int:
             kit_ = 0x4210C08C
             ma_mask, ma_mode = kit_ + 0x5CDA, kit_ + 52 + 0x15F
             ma_cnt = {"starter": 0x40137D3C, "sender": 0x4012B8B0, "keygate": 0x402D0694,
-                      "seqgate": 0x402D0664, "trighook": 0x402D06DC}
+                      "seqgate": 0x402D0664, "trighook": 0x402D06DC, "vtrig": 0x400DB524}
             ma_runs = {}
             for nm, mask, mode in (("midi_arp", "0001", "01"), ("midi_off", "0001", "00"), ("synth_arp", "0000", "00")):
                 js_ = work / f"midiarp_{nm}.json"
@@ -2637,12 +2640,14 @@ def main() -> int:
                     "MIDI track, arp on: the key down and up go the synth road (the voice starter), through the "
                     "key gate, never the MIDI sender":
                         A["counts"]["starter"] >= 2 and A["counts"]["sender"] == 0 and A["counts"]["keygate"] >= 2,
-                    "MIDI track, arp on: the ISR's voice trigger reaches the MIDI-record hook, and no voice starts":
-                        A["counts"]["trighook"] >= 1 and trig(A) == 0,
+                    "MIDI track, arp on: the ISR's voice trigger reaches the MIDI-record hook, and the engine's "
+                    "voice trigger is never called for it":
+                        A["counts"]["trighook"] >= 1 and A["counts"]["vtrig"] == 0,
                     "negative control, MIDI track with the arp off: the MIDI sender, as stock, never the starter":
                         B["counts"]["sender"] >= 2 and B["counts"]["starter"] == 0,
                     "negative control, a synth track (arp off): the voice starter and a voice, as stock":
-                        C["counts"]["starter"] >= 2 and C["counts"]["sender"] == 0 and trig(C) != 0,
+                        C["counts"]["starter"] >= 2 and C["counts"]["sender"] == 0 and trig(C) != 0
+                        and C["counts"]["vtrig"] >= 1 and C["counts"]["trighook"] >= 1,
                 }
                 good = all(facts.values())
                 return good, ("the arp on a MIDI track: menu-free routing checked on the key forks (synth road with "
