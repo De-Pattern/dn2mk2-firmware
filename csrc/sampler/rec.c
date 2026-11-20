@@ -1754,7 +1754,9 @@ static int ram_ok(u32 a)
 {
     return a >= 0x40000000u && a < 0x48000000u && !(a & 3);
 }
-int smp_question_up(void)
+/* v0.64: the first view on the screen of class CLS, or with CLS 0 of any question's class;
+ * 0 none (jump.c finds the PTN view with it) */
+u32 smp_view_of(u32 want)
 {
     extern void *wr_screen_obj;
     u32 s = (u32)wr_screen_obj;
@@ -1765,13 +1767,18 @@ int smp_question_up(void)
         u32 v = *(volatile u32 *)(node + 8);
         if (ram_ok(v)) {
             u32 cls = *(volatile u32 *)v;
-            if (cls == QUESTION_VTABLE || cls == PROGRESS_VTABLE || cls == MESSAGE_VTABLE
-                || cls == SN_VIEW_VT)           /* v0.54: the stock NAME screen */
-                return 1;
+            if (want ? cls == want
+                : (cls == QUESTION_VTABLE || cls == PROGRESS_VTABLE || cls == MESSAGE_VTABLE
+                   || cls == SN_VIEW_VT))       /* v0.54: the stock NAME screen */
+                return v;
         }
         node = *(volatile u32 *)node;
     }
     return 0;
+}
+int smp_question_up(void)
+{
+    return smp_view_of(0) != 0;
 }
 
 /* v0.30: the keys held now (codes 0..63), every key item seen here: TRIG + YES (stock's
@@ -1907,6 +1914,16 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         *h = down ? *h | bit : *h & ~bit;
         if (down && code >= 25 && code <= 40)   /* v0.33: when each [TRIG] went down */
             smp_trig_at[code - 25] = *(volatile u32 *)0x4058E8D4u;
+    }
+    /* v0.64 KEYBOARD HOLD: PTN held, a fresh KEYBOARD without FUNC turns it on or off (stock:
+     * KEYBOARD's own toggle; the item is dropped) */
+    if (it[0] == IT_KEY && code == 18 && down && !(flags & F_REPEAT)
+        && (smp_held_lo >> 23 & 1u) && !(smp_held_lo >> 17 & 1u)) {
+        extern void jmp_hold_say(u32 on);
+        kh_set(!kh_on);
+        jmp_hold_say(kh_on);
+        it[0] = IT_DROP;
+        return (u32)it;
     }
     /* v0.64 KEYBOARD HOLD (above kh_flush) */
     if (it[0] == IT_KEY && !kh_serving && ((code >= 25 && code <= 40) || code == 18)) {

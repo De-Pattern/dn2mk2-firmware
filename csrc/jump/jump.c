@@ -47,7 +47,6 @@ typedef signed char s8;
 #define K_NO 12u
 #define K_FUNC 17u
 #define K_PTN 23u
-#define K_KEYBOARD 18u                                         /* digikit's key table */
 
 #define SEQ_PLAYING (*(volatile u32 *)0x42C5A918u)             /* 1 while it plays */
 #define SEQ_PATTERN (*(volatile u32 *)0x42C5A9A0u)             /* the playing pattern */
@@ -146,6 +145,18 @@ static void say(void *view, const char *text)
     STR_FREE(s);
 }
 
+/* v0.64 KEYBOARD HOLD (rec.c smp_ui_pop catches PTN + KEYBOARD: stock takes KEYBOARD before
+ * any view): its message on the PTN view's line, that view found in the screen's list by its
+ * class (0x402008c4, measured: put at the list's end when PTN goes down; rec.c smp_view_of) */
+#define PTN_VIEW_VT 0x402008C4u
+void jmp_hold_say(u32 on)
+{
+    extern u32 smp_view_of(u32 want);
+    u32 v = smp_view_of(PTN_VIEW_VT);
+    if (v)
+        say((void *)v, on ? "KB HOLD ON" : "KB HOLD OFF");
+}
+
 /* the PTN view's key handler (its vtable slot 0x402008cc points here): PTN held, a fresh
  * YES or NO without FUNC sets DIRECT JUMP on or off (stock: either closes the PTN view);
  * everything else is stock's */
@@ -157,15 +168,6 @@ int jmp_key(void *view, void *ev)
         jmp_on = code == K_YES;
         jmp_dirty = 1;
         say(view, jmp_on ? "DIRECT JUMP ON" : "DIRECT JUMP OFF");
-        return 1;
-    }
-    /* v0.63 KEYBOARD HOLD (docs/kbhold.md): PTN held, a fresh KEYBOARD without FUNC turns it
-     * on or off (stock: KEYBOARD does nothing in the PTN view) */
-    if (code == K_KEYBOARD && EV_PRESSED(ev) && !EV_FUNC(ev) && KEY_HELD(K_PTN) && !KEY_HELD(K_FUNC)) {
-        extern u32 kh_on;
-        extern void kh_set(u32 on);
-        kh_set(!kh_on);
-        say(view, kh_on ? "KB HOLD ON" : "KB HOLD OFF");
         return 1;
     }
     return PTN_VIEW_KEY(view, ev);
