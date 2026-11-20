@@ -248,7 +248,8 @@ def main() -> int:
         # SMP_MIRROR + 0x22C000) while this check runs the UI. Mapped here as the unit has it
         from unicorn import UC_PROT_ALL, UcError
         from dnfw.sampler import machines as SMx              # noqa: PLC0415
-        for page in range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000):
+        for page in [*range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000),   # (v0.65: and the banks' RAM)
+            *range(SMx.BANK_RAM, SMx.BANK_RAM + SMx.BANK_RAM_BYTES + 0xFFFFF & ~0xFFFFF, 0x100000)]:
             try:
                 uc.mem_map(page, 0x100000, UC_PROT_ALL)
             except UcError:

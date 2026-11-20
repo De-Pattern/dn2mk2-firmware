@@ -72,7 +72,8 @@ def main() -> int:
     m.apply(differences(stock, sec3))
     for va, blob in platform.runtime(sec3):
         m.write(va, blob)
-    for pg in range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000):
+    for pg in [*range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000),   # (v0.65: and the banks' RAM)
+            *range(SMx.BANK_RAM, SMx.BANK_RAM + SMx.BANK_RAM_BYTES + 0xFFFFF & ~0xFFFFF, 0x100000)]:
         try:
             m.uc.mem_map(pg, 0x100000, UC_PROT_ALL)
         except UcError:
