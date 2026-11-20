@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.63 | 2026-11-19 | **FLEX level**: a FLEX take of a track plays at the level heard (+24 dB built in; GAIN 0 = old +24); a FLEX save never normalises | `builds/v0.63-FLEXLEVEL/` | yes |
 | v0.62 | 2026-11-19 | **slice editor**: edits play live, playing a slice selects it, zoom to 128 frames, FUNC + START/END snaps to zero crossings; CREATE SLICE GRID FUNC + E jumps 2..64 | `builds/v0.62-SLICE/` | yes |
 | v0.61 | 2026-11-19 | **microtuning**: KB SETUP's H is TUNE; a tuning per project (11 factory, 8 USER), switched per track; TUNING and EDIT pages | `builds/v0.61-MICROTUNING/` | yes |
 | v0.60 | 2026-11-18 | fixes: **FM+** pages (knobs on the right parameters, the frequency bars drawn); **GRID** ALLOCATE SLICE RANDOM keeps its locks on NO | `builds/v0.60-FIXES/` | yes |
@@ -100,6 +101,50 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.63 — FLEXLEVEL (FLEX takes at the level you hear; a FLEX save never normalises)
+
+`DN2mod_v0.63_FLEXLEVEL_OS1.11.syx`
+sha256 `b73f2179c137afbe67f0c0ce90b7f27141f19fa6b3c5575b4fc43851e3a7c83e`
+Gate: CLEARED TO FLASH, 2026-11-19 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, and its flexlevel step). Source: commit `1fd9d24` (branch `flexlevel`). Docs: `docs/sampler.md`.
+
+Everything in v0.62, plus:
+
+**FLEX takes of a track as loud as you heard them.** A FLEX recording of a single track (SRC
+TRK) now plays back at about the level the track had in the mix, with REC LEVEL / GAIN left at
+0. The number is the owner's, measured on his unit: GAIN +24 on v0.62 made a take match its
+source by ear, so +24 dB is now built in. GAIN 0 is what +24 was; GAIN −24 is the old unity.
+- **Existing tracks whose GAIN you had boosted will now be 24 dB hotter.** Turn GAIN back
+  down (to 0 for "as heard").
+- MAIN and IN are unchanged in this build (no measured number for them yet).
+
+**A FLEX save never normalises.** Saving a FLEX buffer to a sample slot used to normalise the
+take in place: the same frames the FLEX track was still playing jumped to full scale. A FLEX
+save now keeps the take exactly as recorded, on the +Drive and in the buffer. Other recordings
+(SAMPLING, RECORD NOW of a sample track) are normalised as before.
+
+**Gate:**
+- `sharc:flexlevel` (rewritten): on the SHARC runner, a TRK take at GAIN −24 renders within
+  0.5 dB of the runner's unity; GAIN 0 is the same take × 15.85 (24 dB) frame by frame wherever
+  it does not clip, and renders more than 12 dB over its source; negative control: a 0 dB
+  ratio is refused.
+- `link16` (norm scenario): a fifth take saved as `bn_save` saves one keeps its peak (4000)
+  with no normalising pass, the flag is cleared after, and an ordinary save still normalises.
+
+**Tests**
+1. FLEX, SRC a single synth track, GAIN 0: record a few bars, play the FLEX track: about as loud
+   as the track was.
+2. A track you had at GAIN +24 on v0.62: now much louder (expected); GAIN 0 brings it back.
+3. Save the FLEX buffer to a slot while it plays: the playing take does not jump in level; load
+   the saved sample on another track: same level as the FLEX take.
+4. SAMPLING a sample and saving it: still normalised as before.
+5. MAIN and IN takes: same level as on v0.62.
+6. The regression check (top of this file).
+
+**Known issues**
+- MAIN and IN takes are still quieter than heard (no measured number yet).
+- The keyboard HOLD is not in this build: it does not fit the 2 MiB image yet.
+- Everything listed for v0.62.
 
 ## v0.62 — SLICE (the slice editor, impbox's requests)
 
