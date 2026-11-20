@@ -299,10 +299,13 @@ def fill(disk, rng):
         return bytes(rng.randrange(1, 255) for _ in range(512))
     mod = [POOL0, POOL0 + 1, POOL0 + 2, POOL0 + 777, 0x6C8000, PL0, PL0 + 1, PL0 + 2, 0x6D00FF, 0x6D0100, 0x6D0101,
            0x6D0100 + 256 * 7, 0x6D0100 + 256 * 257, 0x6E02FF, XA, XA + 1, XA + 1792, SET, HI, HI + 4, LIB0, LIB0 + 1, LIB0 + 256, 0x700104, LIB_DATA,
-           LIB_DATA + 1, disk.dev - 2049, disk.dev - 1] + [s for s in (0x800000, 0x1000000) if s < disk.dev]
+           LIB_DATA + 1, disk.dev - 2049, disk.dev - 1,
+           BLA, BLA + 1, BLA + 464, BLA_END - 1, BLB, BLB + 465, BLB_END - 1]   \
+        + [s for s in (0x800000, 0x1000000) if s < disk.dev]   # (v0.65: the bank lists)
     mod += [rng.randrange(POOL0, POOL_END) for _ in range(60)] + [rng.randrange(LIB0, disk.dev) for _ in range(60)]
     other = [0x0, 0x800, 0x1000, 0x2000, 0x58000, 0x457FFF, 0x458000, 0x500000, 0x5D7FFF, 0x5D8000, 0x5FFFFF,
-             0x6C8001, 0x6CFFFF, 0x6E0300, 0x6EFFFF, 0x6F0701, 0x6FEFFF, 0x6FF001, 0x6FF7FF, 0x6FF805, 0x6FFFFF]
+             0x6C8001, 0x6CFFFF, 0x6E0300, 0x6E05FF, 0x6EEE00, 0x6EFFFF, 0x6F0701, 0x6F07FF, 0x6FF001,
+             0x6FF7FF, 0x6FF805, 0x6FFFFF]   # (v0.65: 0x6FEFFF is the bank lists' now; their gaps instead)
     other += [rng.randrange(0, 0x600000) for _ in range(60)]
     for s in mod + other:
         disk.put(s, junk())
