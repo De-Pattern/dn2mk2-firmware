@@ -604,8 +604,8 @@ static int header_write(u32 bytes)              /* 0 marks the image empty */
         hdr[4] = ~hdr[0] ^ hdr[2] ^ hdr[3];
         if (!smp_bank_blocked) {                /* v0.65: banks B..D's directory pages (older */
             hdr[5] = BANKS_MAGIC;               /* firmware reads none of this) */
-            for (u32 b = 1; b < BANK_N; b++)
-                hdr[5 + b] = smp_bank_live((int)b) ? checksum(BPAGE(b), DIR_BYTES) : 0u;
+            for (u32 b = 1; b < BANK_N; b++)    /* (a bank with nothing in it: 0, not written) */
+                hdr[5 + b] = smp_bank_live((int)b) && le32(BPAGE(b) + 4) ? checksum(BPAGE(b), DIR_BYTES) : 0u;
             hdr[9] = hdr[5] ^ hdr[6] ^ hdr[7] ^ hdr[8] ^ 0x5A5A5A5Au;
         }
     }
@@ -626,6 +626,8 @@ static void bank_blank(u32 b)
 }
 
 static int is_recording(u32 k);
+static u32 bimg_sum[BANK_N] __attribute__((section(".data")));   /* each page's sum as the image holds it (0: not known) */
+#define PAGE_USED (BANK_SLICES + SLAREA_BYTES)
 /* v0.65: the pages as the image's header names them (after DIR checked out): each whole page read
  * from the image, its directory part checked against the header; an older image's, or one that
  * does not check out, empty. Banks B..D stay off while one of bank A's recordings (an older
@@ -650,6 +652,7 @@ static void banks_read(void)
             ok = ok && le32(BPAGE(b)) == BANK_MAGIC && checksum(BPAGE(b), DIR_BYTES) == hdr[5 + b]
                  && le32(BPAGE(b) + 4) <= POOL_SLOTS;
         }
+        bimg_sum[b] = ok ? checksum(BPAGE(b), PAGE_USED) : 0u;
         if (!ok)
             bank_blank(b);
         u8 *m = BPAGE(b) + BANK_META;           /* every string ends inside its field */
@@ -2200,6 +2203,7 @@ static void edits_poll(void)
         int ok = !(dir_due & 1) || image_write(0, DIR_BYTES, DIR) == 0;
         for (u32 b = 1; b < BANK_N && ok; b++)
             if (dir_due & (1 << b) && smp_bank_live((int)b)) {
+                bimg_sum[b] = 0;                        /* (the image's copy: not the whole known) */
                 ok = image_write(BPAGE_OFF(b), DIR_BYTES, BPAGE(b)) == 0;
                 if (bytes < TABLE_AREA)
                     bytes = TABLE_AREA;                 /* the image runs past the pages */
@@ -2221,8 +2225,10 @@ static void edits_poll(void)
     if (meta_due) {                                 /* v0.65: a bank's, in its page */
         u32 b = low_bit((u32)meta_due);
         meta_due &= ~(1 << b);
-        if (smp_bank_live((int)b))
+        if (smp_bank_live((int)b)) {
+            bimg_sum[b] = 0;
             image_write(BPAGE_OFF(b) + BANK_META, BANK_SLICES - BANK_META, BPAGE(b) + BANK_META);
+        }
         return;
     }
     if (area_slot_due >= 0) {                       /* v0.23: the slot's table's sectors */
@@ -2230,6 +2236,8 @@ static void edits_poll(void)
         u32 a0 = so & ~511u;
         u32 a1 = (so + SLICE_TB + 511u) & ~511u;
         u8 *ram = ram_of(a0);
+        if (G_BANK(area_slot_due))
+            bimg_sum[G_BANK(area_slot_due)] = 0;
         if (ram)
             image_write(a0, a1 - a0, ram);
         u32 top = G_BANK(area_slot_due) ? TABLE_AREA : SLICE_AREA + SLAREA_BYTES;
@@ -2775,12 +2783,21 @@ int smp_pl_banks_write(void)
 {
     if (smp_bank_blocked)
         return 0;
-    for (u32 b = 1; b < BANK_N; b++)
-        for (u32 o = 0; o < BANK_SLICES + SLAREA_BYTES; o += CHUNK) {
-            u32 n = BANK_SLICES + SLAREA_BYTES - o < CHUNK ? BANK_SLICES + SLAREA_BYTES - o : CHUNK;
-            if (image_write(BPAGE_OFF(b) + o, n, BPAGE(b) + o) != 0)
+    for (u32 b = 1; b < BANK_N; b++) {
+        if (!le32(BPAGE(b) + 4))
+            continue;                           /* nothing in it: the header says so (word 0) */
+        u32 s = checksum(BPAGE(b), PAGE_USED);
+        if (s == bimg_sum[b])
+            continue;                           /* the image holds it already */
+        for (u32 o = 0; o < PAGE_USED; o += CHUNK) {
+            u32 n = PAGE_USED - o < CHUNK ? PAGE_USED - o : CHUNK;
+            if (image_write(BPAGE_OFF(b) + o, n, BPAGE(b) + o) != 0) {
+                bimg_sum[b] = 0;
                 return -1;
+            }
         }
+        bimg_sum[b] = s;
+    }
     return 0;
 }
 
