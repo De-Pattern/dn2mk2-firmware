@@ -375,6 +375,7 @@ def start(p: Prog, L: Layout) -> None:
     p.iconst(12, SM.POOL_MAGIC)
 
     def found():
+        bank_page(p, L)                      # v0.65: C['tmp'], SAMP's bank's page
         p.ld(0, L.pool + 4)                  # count
         p.ld(4, C["samp"])
         p.iconst(12, -1)
@@ -384,6 +385,8 @@ def start(p: Prog, L: Layout) -> None:
         # BOUNCE's buffer halves (slots BUF_SLOT0..: the buffer directory, SM.BUF_DIR)
         p.iconst(12, SM.REC_FIRST)
         p.if_(4, "GE", 12, lambda: p.iconst(0, SM.BUF_SLOT0 + SM.BUF_HALVES), kind="i")
+        bank_count(p, L)                     # v0.65: banks B..D: their page's count
+        p.ld(4, C["samp"])
         p.e("COMP(R4, R0);")
 
         def have():
@@ -394,6 +397,8 @@ def start(p: Prog, L: Layout) -> None:
             def pool_entry():
                 p.lsh(4, 4, 4)               # 16 bytes an entry
                 p.iconst(12, L.pool + 8)
+                p.iop(4, 12, "+", 4)
+                p.ld(12, C["tmp"])           # v0.65: in its bank's page (0: bank A's)
                 p.iop(4, 12, "+", 4)
                 p.seti(1, 4)
                 p.ldi(5, 0, 1)
@@ -446,6 +451,9 @@ def start(p: Prog, L: Layout) -> None:
                 p.iop(4, 12, "+", 4)          # slot x 768
                 p.iconst(12, L.pool + SM.SLICE_AREA)
                 p.iop(9, 12, "+", 4)
+                p.ld(4, C["tmp"])             # v0.65: banks B..D: their page's own slice area
+                p.ifz(4, "NE", lambda: (p.iconst(12, SM.BANK_SLICES - SM.SLICE_AREA), p.iop(4, 12, "+", 4),
+                                        p.iop(9, 9, "+", 4)))
             p.ifz(9, "NE", area)
             # v0.44: a BOUNCE take (steps in C['x']) has no slices; its steps go in 'sla',
             # tagged negative (an address never is), for tempo(): STRETCH fits the take to
@@ -463,6 +471,48 @@ def start(p: Prog, L: Layout) -> None:
         p._branch(lambda: s32(p.r[4]) < s32(p.r[0]), "LT", inrange, None)
     p.e("COMP(R0, R12);")
     p._branch(lambda: p.r[0] == p.r[12], "EQ", found, None)
+
+
+def bank_page(p: Prog, L: Layout) -> None:
+    """v0.65 PROJECT RAM banks (docs/banks.md): C['tmp'] = the offset into the pool of the
+    directory page of SAMP's bank: 0 for bank A, SM.BANK_AREA + (b - 1) x SM.BANK_PAGE for
+    B..D. The bank is the word's low byte, (low + 0x20) >> 6 at most 3 (SM.bank_of). R10 the
+    track's frame base, as start() set it. Clobbers R0, R1, R4, R12, I1."""
+    slot, lo, top = SM.RECORDS[SM.SAMP_REC]
+    PP.half(p, 4, PM.frame_offset(slot), 10)
+    p.iconst(12, 0xFF)
+    p.iop(4, 4, "AND", 12)
+    p.iconst(12, 0x20)
+    p.iop(4, 12, "+", 4)
+    p.lsh(4, 4, -6)
+    p.iconst(12, 3)
+    p.iop(4, 4, "MIN", 12)
+    p.iconst(12, 0)
+    p.st(L.C["tmp"], 12)
+
+    def other():
+        p.iconst(12, -1)
+        p.iop(4, 12, "+", 4)
+        p.lsh(4, 4, 17)                         # x 128 KB (SM.BANK_PAGE)
+        p.iconst(12, SM.BANK_AREA)
+        p.iop(4, 12, "+", 4)
+        p.st(L.C["tmp"], 4)
+    p.ifz(4, "NE", other)
+
+
+def bank_count(p: Prog, L: Layout) -> None:
+    """v0.65: for banks B..D (C['tmp'] not 0) R0 = their page's count, or -1 (nothing plays)
+    when the page has not its magic; bank A's R0 is left as it is. Clobbers R4, R12, I1."""
+    def page():
+        p.iconst(12, L.pool)
+        p.iop(4, 12, "+", 4)
+        p.seti(1, 4)
+        p.ldi(0, 0, 1)
+        p.iconst(12, SM.BANK_MAGIC)
+        p.e("COMP(R0, R12);")
+        p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: p.ldi(0, 1, 1), lambda: p.iconst(0, -1))
+    p.ld(4, L.C["tmp"])
+    p.ifz(4, "NE", page)
 
 
 def entry_check(p: Prog, L: Layout) -> None:

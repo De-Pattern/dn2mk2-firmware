@@ -147,7 +147,25 @@ TABLE_AREA = SLICE_AREA - TABLE_ROOM
 TABLE_READY = SLICE_AREA - 512
 TABLE_MAGIC = 0x4D4E5442                   # "BTNM" in memory
 TABLE_LOAD = 0x47000000                    # their bytes in the ColdFire's RAM (a CODE chunk): magic, length, data
-REC_BYTES = TABLE_AREA - REC_OFFSET        # v0.23: the recordings' area ends at the slice area (v0.26: the tables)
+# v0.65 PROJECT RAM banks (docs/banks.md): banks B..D's directory pages, each one of bank A's own
+# format (magic BANK_MAGIC, count, POOL_SLOTS entries, names, library ids) with its meta block at
+# + BANK_META and its slice area at + BANK_SLICES, in the recordings' area below the tables. SAMP's
+# value carries its bank in the low byte: BANK_TAGS[b], read back as (low + 0x20) >> 6 (at most 3)
+BANK_N = 4
+BANK_PAGE = 0x20000                         # 128 KB a bank
+BANK_AREA = TABLE_AREA - (BANK_N - 1) * BANK_PAGE
+BANK_MAGIC = 0x42504D53                     # 'SMPB'
+BANK_META = 0x1000
+BANK_SLICES = 0x3000
+BANK_TAGS = (0x00, 0x40, 0x80, 0xC0)
+BANK_SLOTS = 127                            # SAMP 1..127 in each bank (bank A's 124..127 the recorder's)
+assert BANK_SLICES + POOL_SLOTS * SLICE_TABLE_BYTES <= BANK_PAGE and BANK_META + 0x2000 <= BANK_SLICES
+REC_BYTES = BANK_AREA - REC_OFFSET         # v0.23: the recordings' area ends at the slice area (v0.26: the tables; v0.65: the banks)
+
+
+def bank_of(word: int) -> int:
+    """the bank (0 A .. 3 D) of a SAMP value's whole word, as the DSP reads it"""
+    return min(3, ((word & 0xFF) + 0x20) >> 6)
 USER_HOLE = (REC_OFFSET, REC_END)           # yours: 0..96 MB, then 128..400 MB (dn2samples.py skips the hole)
 HOLE_BYTES = REC_END - REC_OFFSET              # what a send skips: the recordings and the slice area
 USER_BYTES = POOL_BYTES - HOLE_BYTES - DATA_OFFSET

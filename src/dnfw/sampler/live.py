@@ -117,7 +117,7 @@ def test_rates() -> list[float]:
     return [TEST_STEP] * 3 + [TEST_STEP / 2]
 
 
-def slot_plays(word, base: int, slot: int) -> bool:
+def slot_plays(word, base: int, slot: int, bank: int = 0) -> bool:
     """v0.38: does the DSP play pool slot SLOT (SAMP SLOT + 1)? WORD(addr) -> the 32-bit word
     the DSP's memory holds at ADDR; BASE the pool's address. The rule of
     dnfw.sampler.program.start and entry_check, as plain Python, for the ColdFire gates whose
@@ -130,9 +130,13 @@ def slot_plays(word, base: int, slot: int) -> bool:
     if word(base) != SM.POOL_MAGIC or not 0 <= slot < SM.POOL_SLOTS:
         return False
     count = SM.POOL_SLOTS if slot >= SM.REC_FIRST else word(base + 4)
-    if not slot < count or (count >= 1 << 31):
+    page = 0
+    if bank:                                    # v0.65: banks B..D, their own page (docs/banks.md)
+        page = SM.BANK_AREA + (bank - 1) * SM.BANK_PAGE
+        count = word(base + page + 4) if word(base + page) == SM.BANK_MAGIC else -1
+    if not slot < count or (count >= 1 << 31) or count < 0:
         return False
-    e = base + 8 + 16 * slot
+    e = base + page + 8 + 16 * slot
     addr, frames, fmt = word(e), word(e + 4), word(e + 12) & 0xFF
     off = addr - base
     if off < SM.DATA_OFFSET or off >= SM.POOL_BYTES:
@@ -166,6 +170,14 @@ class Harness:
         w = self.mem.get(a & ~3)
         word = (min(top, max(0, value)) + lo) << 8
         w = (w & 0xFFFF) | (word << 16) if a & 2 else (w & 0xFFFF0000) | word
+        self.mem.put(a & ~3, w)
+
+    def set_word(self, rec: int, word: int) -> None:
+        """v0.65: record REC's whole 16-bit word (SAMP's bank is its low byte)"""
+        slot, lo, top = SM.RECORDS[rec]
+        a = PM.FRAME + PM.frame_offset(slot) + 146 * self.t
+        w = self.mem.get(a & ~3)
+        w = (w & 0xFFFF) | ((word & 0xFFFF) << 16) if a & 2 else (w & 0xFFFF0000) | (word & 0xFFFF)
         self.mem.put(a & ~3, w)
 
     def tempo(self, bpm: int) -> None:
