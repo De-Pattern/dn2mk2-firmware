@@ -1936,10 +1936,10 @@ def main() -> int:
     counts: dict[str, int] = {}
     frames_at_reset = [0]
     for va in a.count:
-        def counted(uc_, address, size, user):
+        def count_hit(uc_, address, size, user):   # (v0.67: not `counted`, guest_call's tally, which it hid)
             key = f"{address:#010x}"
             counts[key] = counts.get(key, 0) + 1
-        uc.hook_add(UC_HOOK_CODE, counted, begin=int(va, 0), end=int(va, 0))
+        uc.hook_add(UC_HOOK_CODE, count_hit, begin=int(va, 0), end=int(va, 0))
 
     pixels: dict[str, int] = {}
     if a.pixel_callers:
