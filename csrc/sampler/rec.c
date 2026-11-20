@@ -1830,11 +1830,11 @@ void kh_set(u32 on)                             /* PTN + KEYBOARD */
 
 u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock receive returns it */
 {
-    u8 *it = kh_pend ? kh_press : 0;            /* v0.64: the held-back item before stock's */
+    u8 *it = kh_press;                          /* v0.64: the held-back item before stock's */
+    if (!kh_pend)
+        it = (u8 *)UI_POP(queue);
     u32 kh_serving = kh_pend;
     kh_pend = 0;
-    if (!it)
-        it = (u8 *)UI_POP(queue);
     if (!it)
         return (u32)it;
     u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
