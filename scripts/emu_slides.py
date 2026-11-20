@@ -541,93 +541,6 @@ def main() -> int:
         check("trigless lock with SLIDE: FREQ 0x6000 -> 0x3000 over 1/2 step", got == want,
               f"{got[:4]}...{got[-2:]}")
 
-        # ---- 5b. v0.66: NXT (no SLEN lock): the slide ends at the track's next trig -----------
-        # (the owner, 2026-11-20, the Analog Four's manual: "the slide is completed when the
-        # next trig is reached"). First the layout the code reads: for every track, stock's own
-        # track object (the UI's pattern, 0x4003b2ea) hands its step flags (vtable +40, what
-        # stock's step test 0x4004e95a reads) at pattern + 1701 x track, the pattern the
-        # sequencer plays (0x42C5A9A0)
-        sys.path.insert(0, str(HERE.parent / "src"))
-        from dnfw import slides as DSL                          # noqa: PLC0415
-        check("v0.66: the harness's SLEN table is dnfw.slides' (NXT 15)",
-              DSL.SLEN_NXT == NXT and tuple(DSL.SLEN_UNITS) == UNITS and DSL.SLEN_DEFAULT == NXT)
-        P = machine.long(0x42C5A9A0)
-        owner = call(0x4018A97A)["D0"]
-        upat = call(0x4003EFA8, owner)["D0"] if owner else 0
-        ptrs = []
-        for tt in range(16):
-            tr = call(0x4003B2EA, upat, tt)["D0"] if upat else 0
-            fn = machine.long(machine.long(tr) + 40) if tr else 0
-            ptrs.append(call(fn, tr)["D0"] if fn else 0)
-        check("v0.66: each track's step flags are at the playing pattern + 1701 x track (stock's own "
-              "track objects, all 16)", P != 0 and upat != 0 and ptrs == [P + 1701 * k for k in range(16)],
-              f"pattern {P:#x}, the UI's {upat:#x}, flags {[hex(x) for x in ptrs[:3]]}...")
-        # stock's step test on a flag we set: bit 0 is what it calls a trig (both kinds)
-        keep_flags = machine.read(P, 2 * 128)
-        keep_mode, keep_len = machine.read(P + 122201, 1), machine.read(P + 122196, 2)
-        machine.write(P + 122201, b"\x00")                    # per pattern, 16 steps
-        put16(P + 122196, 16)
-
-        def flags_on(steps):
-            for k in range(128):
-                put16(P + 2 * k, 0x0381 if k in steps else 0)
-
-        flags_on({4, 7})
-        tr0 = call(0x4003B2EA, upat, 0)["D0"]
-        seen = [call(0x4004E95A, tr0, k, 1)["D0"] & 0xFF for k in (3, 4, 7)]
-        check("v0.66: stock's step test sees the trigs the slide counts", [bool(x) for x in seen] == [False, True, True],
-              f"{seen}")
-
-        def nxt_case(name, steps, at, want_steps, slen=None, want_units=None):
-            flags_on(steps)
-            call(sl_set, table, T, at, 1, 0xFFFF if slen is None else slen)
-            call(SYNC, snd, V)
-            for s in range(101):
-                put32(STATE + 4 * idx(V, s), u16(SRC + 2 * idx(V, s)) << 16)
-            call(BITMAP_CLEAR, V)
-            trig(0, f0 + 1550)
-            run(10, f"nxt {name} 0")
-            put32(lay["sl_nxt_last"], 0)
-            trig(at, f0 + 1560)
-            units_now = struct.unpack(">H", machine.read(lay["sl_v"] + 2, 2))[0]
-            u = want_units if want_units is not None else 24 * want_steps
-            rows = run(40, f"nxt {name}")
-            prog, want = 0, []
-            for _ in range(40):
-                prog += (inc * mul) >> 8
-                frac = min(prog // (2 * u), 32768)
-                want.append(0x1000 + (((0x6000 - 0x1000) * frac) >> 15))
-            got = [r["state"][FREQ] >> 16 for r in rows]
-            found = machine.long(lay["sl_nxt_last"])
-            check(f"v0.66: {name}", units_now == u and got == want
-                  and (slen is not None or found == want_steps),
-                  f"units {units_now} (want {u}), next trig {found} steps, FREQ {got[:3]}..{got[-2:]}")
-
-        call(sl_set, table, T, 4, 0, 1)                         # step 4: SLIDE on, FREQ 0x6000
-        nxt_case("NXT: trigs on 4 and 7, a slide on 4 lasts 3 steps", {0, 4, 7}, 4, 3)
-        nxt_case("NXT: the only other trig before it, round the length (4 -> 0: 12 of 16)", {0, 4}, 4, 12)
-        nxt_case("NXT: no other trig: the whole length (16 steps)", {4}, 4, 16)
-        nxt_case("NXT: the next step's trig: one step", {4, 5}, 4, 1)
-        put16(P + 122196, 64)
-        nxt_case("NXT: steps past 16 count (64 steps, next trig on 40: 36)", {4, 40}, 4, 36)
-        put16(P + 122196, 16)
-        nxt_case("an explicit SLEN still wins (1/2 step, trigs on 4 and 7)", {4, 7}, 4, 0, slen=2,
-                 want_units=UNITS[2])
-        nxt_case("an explicit NXT lock (15) is NXT", {4, 9}, 4, 5, slen=NXT)
-        # per track: the track's own length and flags
-        machine.write(P + 122201, b"\x01")
-        tl = P + 1164
-        keep_tl, keep_ts = machine.read(tl, 2), machine.read(P + 1167, 1)
-        put16(tl, 8)
-        machine.write(P + 1167, machine.read(P + 122202, 1))   # the track's scale: the pattern's (1x)
-        nxt_case("NXT per track: the track's own length (8; 4 -> 0 round it: 4)", {0, 4}, 4, 4)
-        machine.write(tl, keep_tl)
-        machine.write(P + 1167, keep_ts)
-        call(sl_set, table, T, 4, 1, 4)                         # step 4 back to SLEN 1 step
-        machine.write(P, keep_flags)
-        machine.write(P + 122201, keep_mode)
-        machine.write(P + 122196, keep_len)
-
         # ---- 6. SLIDE on a trig with no p-lock: nothing slides ----------------------------
         start = machine.long(lay["sl_started"])
         set_slide(12, 1, 4)
@@ -791,6 +704,95 @@ def main() -> int:
         check("v0.41: PERC on TRX-CP (its controls taken at the trig): PTCH lands at once", all(r3.values()), r3)
         machine.write(snd + 222, bytes([0]))
         call(SYNC, snd, V)
+
+        # ---- 10. v0.66: NXT (no SLEN lock): the slide ends at the track's next trig -----------
+        # (the owner, 2026-11-20, the Analog Four's manual: "the slide is completed when the
+        # next trig is reached"). Last of the slide checks, so the ones before run frame for frame as
+        # on v0.65 (their LFO phases included). First the layout the code reads: for every track, stock's own
+        # track object (the UI's pattern, 0x4003b2ea) hands its step flags (vtable +40, what
+        # stock's step test 0x4004e95a reads) at pattern + 1701 x track, the pattern the
+        # sequencer plays (0x42C5A9A0)
+        sys.path.insert(0, str(HERE.parent / "src"))
+        from dnfw import slides as DSL                          # noqa: PLC0415
+        check("v0.66: the harness's SLEN table is dnfw.slides' (NXT 15)",
+              DSL.SLEN_NXT == NXT and tuple(DSL.SLEN_UNITS) == UNITS and DSL.SLEN_DEFAULT == NXT)
+        P = machine.long(0x42C5A9A0)
+        owner = call(0x4018A97A)["D0"]
+        upat = call(0x4003EFA8, owner)["D0"] if owner else 0
+        ptrs = []
+        for tt in range(16):
+            tr = call(0x4003B2EA, upat, tt)["D0"] if upat else 0
+            fn = machine.long(machine.long(tr) + 40) if tr else 0
+            ptrs.append(call(fn, tr)["D0"] if fn else 0)
+        check("v0.66: each track's step flags are at the playing pattern + 1701 x track (stock's own "
+              "track objects, all 16)", P != 0 and upat != 0 and ptrs == [P + 1701 * k for k in range(16)],
+              f"pattern {P:#x}, the UI's {upat:#x}, flags {[hex(x) for x in ptrs[:3]]}...")
+        # stock's step test on a flag we set: bit 0 is what it calls a trig (both kinds)
+        keep_flags = machine.read(P, 2 * 128)
+        keep_mode, keep_len = machine.read(P + 122201, 1), machine.read(P + 122196, 2)
+        machine.write(P + 122201, b"\x00")                    # per pattern, 16 steps
+        put16(P + 122196, 16)
+
+        def flags_on(steps):
+            for k in range(128):
+                put16(P + 2 * k, 0x0381 if k in steps else 0)
+
+        flags_on({4, 7})
+        tr0 = call(0x4003B2EA, upat, 0)["D0"]
+        seen = [call(0x4004E95A, tr0, k, 1)["D0"] & 0xFF for k in (3, 4, 7)]
+        check("v0.66: stock's step test sees the trigs the slide counts", [bool(x) for x in seen] == [False, True, True],
+              f"{seen}")
+
+        def nxt_case(name, steps, at, want_steps, slen=None, want_units=None):
+            flags_on(steps)
+            call(sl_set, table, T, at, 1, 0xFFFF if slen is None else slen)
+            call(SYNC, snd, V)
+            for s in range(101):
+                put32(STATE + 4 * idx(V, s), u16(SRC + 2 * idx(V, s)) << 16)
+            call(BITMAP_CLEAR, V)
+            trig(0, f0 + 1550)
+            run(10, f"nxt {name} 0")
+            put32(lay["sl_nxt_last"], 0)
+            trig(at, f0 + 1560)
+            units_now = struct.unpack(">H", machine.read(lay["sl_v"] + 2, 2))[0]
+            u = want_units if want_units is not None else 24 * want_steps
+            rows = run(40, f"nxt {name}")
+            prog, want = 0, []
+            for _ in range(40):
+                prog += (inc * mul) >> 8
+                frac = min(prog // (2 * u), 32768)
+                want.append(0x1000 + (((0x6000 - 0x1000) * frac) >> 15))
+            got = [r["state"][FREQ] >> 16 for r in rows]
+            found = machine.long(lay["sl_nxt_last"])
+            check(f"v0.66: {name}", units_now == u and got == want
+                  and (slen is not None or found == want_steps),
+                  f"units {units_now} (want {u}), next trig {found} steps, FREQ {got[:3]}..{got[-2:]}")
+
+        call(sl_set, table, T, 4, 0, 1)                         # step 4: SLIDE on, FREQ 0x6000
+        nxt_case("NXT: trigs on 4 and 7, a slide on 4 lasts 3 steps", {0, 4, 7}, 4, 3)
+        nxt_case("NXT: the only other trig before it, round the length (4 -> 0: 12 of 16)", {0, 4}, 4, 12)
+        nxt_case("NXT: no other trig: the whole length (16 steps)", {4}, 4, 16)
+        nxt_case("NXT: the next step's trig: one step", {4, 5}, 4, 1)
+        put16(P + 122196, 64)
+        nxt_case("NXT: steps past 16 count (64 steps, next trig on 40: 36)", {4, 40}, 4, 36)
+        put16(P + 122196, 16)
+        nxt_case("an explicit SLEN still wins (1/2 step, trigs on 4 and 7)", {4, 7}, 4, 0, slen=2,
+                 want_units=UNITS[2])
+        nxt_case("an explicit NXT lock (15) is NXT", {4, 9}, 4, 5, slen=NXT)
+        # per track: the track's own length and flags
+        machine.write(P + 122201, b"\x01")
+        tl = P + 1164
+        keep_tl, keep_ts = machine.read(tl, 2), machine.read(P + 1167, 1)
+        put16(tl, 8)
+        machine.write(P + 1167, machine.read(P + 122202, 1))   # the track's scale: the pattern's (1x)
+        nxt_case("NXT per track: the track's own length (8; 4 -> 0 round it: 4)", {0, 4}, 4, 4)
+        machine.write(tl, keep_tl)
+        machine.write(P + 1167, keep_ts)
+        call(sl_set, table, T, 4, 1, 4)                         # step 4 back to SLEN 1 step
+        machine.write(P, keep_flags)
+        machine.write(P + 122201, keep_mode)
+        machine.write(P + 122196, keep_len)
+
 
     # ---- v0.40: TRIG page 2's frame on stock 1.11 (the control: our two places aside, the
     # build's page must be stock's pixel for pixel) ----------------------------------------

@@ -282,7 +282,7 @@ reached." Until v0.65 a slide with no SLEN lock lasted one step.
   1701 bytes from +0, its step flags a big-endian u16 at +2 step; the gate checks that stock's own
   track objects hand exactly these pointers for all 16 tracks (vtable +40, what stock's step test
   `0x4004e95a` reads) and that stock's test sees the trigs the slide counts.
-- Gate (`slides`, `emu_slides.py` 5b): trigs on 4 and 7 (3 steps), round the length (4 -> 0, 12 of
+- Gate (`slides`, `emu_slides.py` part 10, after the v0.41 cases so they run as before): trigs on 4 and 7 (3 steps), round the length (4 -> 0, 12 of
   16), no other trig (16), the next step (1), a 64-step pattern (36), an explicit SLEN (1/2 step)
   still wins, an explicit NXT lock, per-track length (8); each exact per frame against the model.
   The knob: NXT first (from no lock, the first choice right is 1/8).
