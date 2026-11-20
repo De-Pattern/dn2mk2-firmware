@@ -1135,7 +1135,5 @@ u32 slc_keynotes(u32 kbd, u32 *vec, u32 k)
      * keyboard's C one slice off a C trig's, and on the last slice). The DSP turns the note
      * into its slice. Kept as the site's target (coldfire.py KEYNOTES_SITE): stock's call */
     slc_kb_c = k;
-    extern void kh_keynotes(void);
-    kh_keynotes();                              /* v0.63: this key is a keyboard note (rec.c's HOLD) */
     return KEYNOTES(kbd, vec, k);
 }
