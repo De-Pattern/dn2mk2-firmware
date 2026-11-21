@@ -196,8 +196,13 @@ void wr_screen(void *screen, void *canvas)
     extern int tn_visible(void);                /* v0.61: TUNING (csrc/sampler/tune.c) */
     extern void tn_draw(void *canvas);
     extern void tn_kb_draw(void *canvas);
-    sl_screen(1, rec_visible() || slc_visible() || smp_fb_visible() || smp_list_visible() || tn_visible());
-    if (tn_visible())
+    extern int pf_visible(void);                /* v0.69: PERFORM (csrc/sampler/perf.c) */
+    extern void pf_draw(void *canvas);
+    sl_screen(1, rec_visible() || slc_visible() || smp_fb_visible() || smp_list_visible() || tn_visible()
+              || pf_visible());
+    if (pf_visible())
+        pf_draw(canvas);
+    else if (tn_visible())
         tn_draw(canvas);
     else if (rec_visible())
         rec_screen_draw(canvas);

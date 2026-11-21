@@ -633,6 +633,8 @@ void rec_poll(void)
 {
     extern void tn_poll(void);                  /* v0.61: the project's tuning (tune.c) */
     tn_poll();
+    extern void pf_poll(void);                  /* v0.69: the project's PERFORM macros (perf.c) */
+    pf_poll();
     /* v0.48: a turned control's value shows for a second (smp_page.c shows()); then its
      * label again, drawn once more when the second is up */
     static int val_shown __attribute__((section(".data"))) = 0;
@@ -1324,6 +1326,16 @@ static void name_cancel(void)
 
 /* v0.54: the stock NAME screen's answer, once a UI pass: YES gave a name (the view's callback),
  * or the view closed without one (NO). Finished here, outside stock's key handling. */
+/* v0.69: the NAME screen for another of ours (PERFORM's macro names, perf.c): DONE gets the name */
+static void (*sn_client)(const char *) __attribute__((section(".data"))) = 0;
+int smp_name_screen(const char *title, const char *text, int max, void (*done)(const char *))
+{
+    if (rec_overlay || !sn_open(title, text, max))
+        return 0;
+    sn_client = done;
+    return 1;
+}
+
 static void sn_poll(void)
 {
     extern int smp_overlay_dirty;
@@ -1334,6 +1346,13 @@ static void sn_poll(void)
         sn_seen = 1;
     if (sn_state == 2) {
         sn_state = 0;
+        if (sn_client) {                        /* v0.69: someone else's name */
+            void (*f)(const char *) = sn_client;
+            sn_client = 0;
+            f(sn_name);
+            smp_overlay_dirty = 1;
+            return;
+        }
         if (rec_phase != PH_SNAME)
             return;
         int j = 0;
@@ -1348,6 +1367,7 @@ static void sn_poll(void)
     }
     if (!up && (sn_seen || *(volatile u32 *)0x4058E8D4u - sn_at > 3000u)) {
         sn_state = 0;
+        sn_client = 0;
         if (rec_phase == PH_SNAME) {
             rec_phase = PH_NAME;
             name_cancel();
@@ -2024,6 +2044,13 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     if (!rec_overlay && it[0] == IT_KNOB) {     /* parameter slides: E and F on TRIG page 2 */
         extern int sl_knob(u32 index, int delta);
         if (sl_knob(code, (signed char)it[8])) {
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+    }
+    if (!rec_overlay && !smp_lst_open && !smp_fb_open) {   /* v0.69: PERFORM, [MOD] + [FX] (perf.c) */
+        extern int pf_pop(u8 *it);
+        if (pf_pop(it)) {
             it[0] = IT_DROP;
             return (u32)it;
         }

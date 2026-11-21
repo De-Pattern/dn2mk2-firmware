@@ -1445,6 +1445,20 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                             "guest_call": guest_call, "scratch": SENTINEL + 0x2000})
         disk.clear()
         out.update(res)
+    elif scenario == "perform":
+        # v0.69: PERFORM's macros, their offsets and their record per project (csrc/sampler/perf.c):
+        # scripts/emu_perform.py
+        sys.path.insert(0, str(HERE))
+        import emu_perform                      # noqa: PLC0415
+        for _ in range(200):                    # the snapshot's own boot first (the RAM check)
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        res = emu_perform.run({"machine": machine, "call": call, "disk": disk, "io": io, "syms": syms,
+                               "guest_call": guest_call, "scratch": SENTINEL + 0x2000})
+        disk.clear()
+        out.update(res)
     elif scenario == "live":
         # v0.38 (the testers: "after 10-20 added samples, new ones are silent until a restart";
         # v0.37: "nothing I record plays, though I see its waveform"): a pool of three samples

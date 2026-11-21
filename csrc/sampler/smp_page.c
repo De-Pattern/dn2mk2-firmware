@@ -375,6 +375,9 @@ static void w_knob_at(void *c, int x, int y, int v, int top, int dotted)
     }
 }
 
+/* v0.69: the knob for PERFORM's screens (perf.c) */
+void smp_knob(void *c, int x, int y, int v, int top, int dotted) { w_knob_at(c, x, y, v, top, dotted); }
+
 static void w_fader(void *c, int x, int y, int v, int top)
 {
     /* the DT2's level fader: a 9 x 17 outline, filled from the bottom; two marks at its top */

@@ -225,6 +225,8 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("midiarp", "the arp on MIDI tracks (ColdFire)"),
        ("tune", "microtuning: KB SETUP's TUNE, the TUNING page, the frame's retune (ColdFire)"),
        ("tunerec", "microtuning: each project's tuning record (ColdFire)"),
+       ("perform", "PERFORM: [MOD] + [FX], the macros, MODULATION SETUP, PERF MUTE (ColdFire)"),
+       ("performrec", "PERFORM: the offsets and each project's macros record (ColdFire)"),
        ("slicefine", "SLICE editor: live edits, zero-crossing snap, deep zoom, a played slice picked (ColdFire)"),
        ("thres", "THRES on both processors (coupled)"),
        ("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)"),
@@ -2782,6 +2784,95 @@ def main() -> int:
                               json.dumps({k: v for k, v in facts.items() if not v})[:800] + f" writes={r.get('writes')}")
             later("tunerec", "microtuning: each project's tuning record (ColdFire)",
                   "microtuning: each project's tuning record (ColdFire)", [tr_cmd, sorted(EMU_ENV.items())], tr_body)
+
+        # v0.69: PERFORM (csrc/sampler/perf.c, docs/perform.md). The UI: [FX] alone is stock's (the FX
+        # page; nothing of ours opens); [MOD] held + [FX]: PERFORM; A pushed: MODULATION SETUP for
+        # macro A; F takes target 1 to track 1 (its first LFO destination), G to the next, A sets its
+        # depth (+30); NO back to PERFORM, where A turned moves macro A; FUNC + YES twice: PERF MUTE on
+        # and off; FUNC + A pushed: macro A back to 0; [MOD] + [FX] again: closed. Every screen drawn,
+        # each its own
+        if "pf_poll" in lay:
+            L = {n: lay[n] for n in ("pf", "pf_ui", "pf_sel", "pf_mute", "pf_opens")}
+            M = lambda n, k=4: f"mem:{L[n]:#x}:{k}"                       # noqa: E731
+            ps = ["wait:6", "tap:5", "wait:20", M("pf_ui"), "png:fx_alone",
+                  "press:6", "wait:10", "tap:5", "wait:20", "release:6", "wait:10", M("pf_ui"), "png:perform",
+                  "tap:41", "wait:20", M("pf_ui"), M("pf_sel"), "png:setup0",
+                  "spin:5:2", "wait:10", M("pf", 26), "spin:6:2", "wait:10", M("pf", 26),
+                  "spin:0:30", "wait:10", M("pf", 26), "png:setup1",
+                  "tap:12", "wait:10", M("pf_ui"), "spin:0:20", "wait:10", M("pf", 26), "png:turned",
+                  "press:17", "tap:10", "release:17", "wait:10", M("pf_mute"), "png:muted",
+                  "press:17", "tap:10", "release:17", "wait:10", M("pf_mute"),
+                  "press:17", "tap:41", "release:17", "wait:10", M("pf", 26),
+                  "press:6", "wait:10", "tap:5", "wait:20", "release:6", "wait:10", M("pf_ui"), "png:closed"]
+            pf_js = work / "perform.json"
+            pf_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", ",".join(ps), "--png-dir", work / "perform", "--json", pf_js]
+
+            def pf_body(tdir):
+                rc, out = run("PERFORM", pf_cmd, logs, env=EMU_ENV, trace=tdir)
+                if rc != 0 or not pf_js.exists():
+                    return False, out[-900:]
+                r = json.loads(pf_js.read_text())
+                mem = r["memory"]
+
+                def seq(addr):
+                    a_ = hex(addr)
+                    ks = sorted((k for k in mem if k == a_ or k.startswith(a_ + "@")),
+                                key=lambda k: int(k.split("@")[1]) if "@" in k else -1)
+                    return [bytes.fromhex(mem[k]) for k in ks]
+                ui = [struct.unpack(">i", b)[0] for b in seq(L["pf_ui"])]
+                sel = [struct.unpack(">i", b)[0] for b in seq(L["pf_sel"])]
+                mute = [struct.unpack(">i", b)[0] for b in seq(L["pf_mute"])]
+                A = [(b[11], b[12], struct.unpack(">b", b[13:14])[0], struct.unpack(">b", b[10:11])[0]) for b in seq(L["pf"])]
+                shots = {n: pathlib.Path(r["screens"][n]).read_bytes() if n in r["screens"] else b""
+                         for n in ("perform", "setup0", "setup1", "turned", "muted", "closed")}
+                facts = {
+                    "[FX] alone: stock's (nothing of ours opens)": ui[:1] == [0],
+                    "[MOD] held + [FX]: PERFORM": ui[1:2] == [1],
+                    "A pushed: MODULATION SETUP for macro A": ui[2:3] == [2] and sel[:1] == [0],
+                    "F: target 1 on track 1 (a destination); G: the next; A: its depth +30":
+                        len(A) >= 3 and A[0][0] == 0 and A[1][0] == 0 and A[1][1] != A[0][1] and A[2][2] == 30,
+                    "NO: PERFORM; A turned: macro A's value": ui[3:4] == [1] and len(A) >= 4 and A[3][3] > 0,
+                    "FUNC + YES: PERF MUTE on, again off": mute == [1, 0],
+                    "FUNC + A pushed: macro A back to 0": len(A) >= 5 and A[4][3] == 0 and A[4][:3] == A[3][:3],
+                    "[MOD] + [FX] again: closed": ui[-1:] == [0] and len(ui) == 5,
+                    "the screens drawn, each its own": all(shots.values()) and len(set(shots.values())) == len(shots),
+                }
+                good = all(facts.values())
+                return good, ("[MOD] + [FX] opens PERFORM and closes it, [FX] alone is stock's; MODULATION SETUP sets a "
+                              "target's track, destination and depth; the macros turn, PERF MUTE and FUNC + push work" if good
+                              else json.dumps({k: v for k, v in facts.items() if not v}) + f" ui={ui} sel={sel} mute={mute} A={A}")
+            later("perform", "PERFORM: [MOD] + [FX], the macros, MODULATION SETUP, PERF MUTE (ColdFire)",
+                  "PERFORM: [MOD] + [FX], the macros, MODULATION SETUP, PERF MUTE (ColdFire)",
+                  [pf_cmd, sorted(EMU_ENV.items())], pf_body)
+
+        # v0.69: PERFORM's offsets and each project's macros record (scripts/emu_perform.py: the offset
+        # on the mirror, no piling up, two macros adding, bipolar, PERF MUTE, clamped, the sound untouched;
+        # power-on, a change written after two seconds into its own sectors, LOAD / NEW / a power cycle,
+        # corrupted copies, another project's record refused, ERASE's lock, every write in its region)
+        if "pf_poll" in lay:
+            pr_syms = work / "perform_syms.json"
+            pr_syms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith(("smp_", "pf"))}))
+            pr_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", f"link16:{pr_syms}:perform", "--png-dir", work / "performrec"]
+
+            def pr_body(tdir):
+                rc, out = run("PERFORM record", pr_cmd, logs, env=EMU_ENV, trace=tdir)
+                res = work / "performrec" / "link16_perform.json"
+                if rc != 0 or not res.exists():
+                    return False, out[-900:]
+                r = json.loads(res.read_text())
+                facts = r.get("facts", {})
+                good = bool(r.get("ok")) and len(facts) >= 9 and all(facts.values())
+                return good, ("the macros' offsets land on the mirror exactly and come off again; each project's "
+                              "macros written after two seconds into their own sectors, read on LOAD and at power-on, "
+                              "reset by NEW, a corrupted copy falls back, nothing written under ERASE's lock, every "
+                              "write in its region" if good else
+                              json.dumps({k: v for k, v in facts.items() if not v})[:800]
+                              + f" offsets={r.get('offsets')} writes={r.get('writes')}")
+            later("performrec", "PERFORM: the offsets and each project's macros record (ColdFire)",
+                  "PERFORM: the offsets and each project's macros record (ColdFire)",
+                  [pr_cmd, sorted(EMU_ENV.items())], pr_body)
 
         # v0.62: the slice editor's requests (impbox; scripts/emu_slicefine.py, the +Drive and the
         # DSP played by Python): an edit goes to the DSP and the +Drive 0.2 s after the knobs rest

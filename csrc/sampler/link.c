@@ -3295,6 +3295,8 @@ void smp_mod_apply(void *mirror)
 {
     snap_slots();
     MOD_APPLY(mirror);
+    extern void pf_apply(void);
+    pf_apply();                                 /* v0.69: PERFORM's offsets on top (perf.c) */
     extern void rt_frame(void);
     rt_frame();                                 /* v0.41: QPLAY switches and QREC starts on their step */
     /* v0.49 FLEX: each FLEX voice hears its buffer (or OFF), with or without a pool directory.
