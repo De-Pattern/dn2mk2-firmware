@@ -507,6 +507,10 @@ MACHSEL_COLSW_SITE = 0x4005BABE         # v0.35: MACHINE SEL's redraw after LEFT
 MACHSEL_COLSW_STOCK = bytes.fromhex("4eb94011c7ba")
 MACHSEL_COMMIT_SITE = 0x4005BBA0        # v0.30: MACHINE SEL's jsr 0x40031880 (commit(model, track, type, 1, 1))
 MACHSEL_COMMIT_STOCK = bytes.fromhex("4eb940031880")
+MACHSEL_ICON_SITE = 0x4005B8AC          # v0.68: the SRC pane's jsr 0x401157fc (the wave bitmap)
+MACHSEL_ICON_STOCK = bytes.fromhex("4eb9401157fc")
+MACHSEL_LABEL_SITE = 0x4005B8C8         # v0.68: the SRC pane's pea 0x40210800 ("SYN")
+MACHSEL_LABEL_STOCK = bytes.fromhex("487940210800")
 MODAPPLY_SITE = 0x40027196              # v0.25: the per-frame driver's jsr 0x400db22c (apply modulation)
 MODAPPLY_STOCK = bytes.fromhex("4eb9400db22c")
 LFO_APPLY_SITE = 0x400272D4             # v0.65: the per-frame driver's jsr 0x40137726 (the LFOs)
@@ -717,6 +721,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          MACHSEL_COLSW_STOCK)
     edit(MACHSEL_COMMIT_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_machine_commit"]),
          "MACHINE SEL's commit: between two sample machines SAMP is kept (rec.c)", MACHSEL_COMMIT_STOCK)
+    # v0.68 (owner): MACHINE SEL's left pane shows the mod machine under the cursor, its icon
+    # and its label in place of the wave and "SYN" (csrc/sampler/msicon.c, dnfw.msicons)
+    edit(MACHSEL_ICON_SITE, bytes.fromhex("4eb9") + _long(csyms["ms_icon_hook"]),
+         "MACHINE SEL's SRC pane: the machine's icon (v0.68)", MACHSEL_ICON_STOCK)
+    edit(MACHSEL_LABEL_SITE, bytes.fromhex("4eb9") + _long(csyms["ms_label_hook"]),
+         "MACHINE SEL's SRC pane: the machine's label in place of SYN (v0.68)", MACHSEL_LABEL_STOCK)
 
     # v0.25: modulation on SAMP steps through the loaded samples (link.c, smp_mod_apply)
     _need(content, MODAPPLY_SITE - 4, bytes.fromhex("2f002440"), "the driver pushes the mirror (move.l %d0,-(sp); movea.l %d0,%a2)")
