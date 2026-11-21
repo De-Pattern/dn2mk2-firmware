@@ -220,6 +220,15 @@ def sweep(a, stock, order) -> dict:
     r.step = "settle"
     r.panel.settle(20_000_000)
     track = r.m.read(ACTIVE, 1)[0]
+    # v0.69: the boot put a mod machine on every track (the power-on check, above), a kit far past
+    # the voice/load guardrail's limit, so MACHINE SEL would refuse each heavier pick on the active
+    # track (that refusal is the guardrail step's to check). The other tracks go back to FM TONE
+    # (type 0, weight 0) for the sweep: every pick is then within the limit and must land
+    kit = r.m.long(KIT)
+    for t in range(16):
+        if t != track:
+            r.uc.mem_write(kit + 52 + 1163 * t + SOUND_TYPE, b"\x00")
+    r.panel.settle(2_000_000)
     picks, ok = [], True
     r.step = "MACHINE SEL"
     r.machine_sel()
