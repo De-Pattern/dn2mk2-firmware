@@ -1630,7 +1630,7 @@ def main() -> int:
                     ns += [f"poke:{cur:#x}:00000000", "wait:3", "turn:3:1", "wait:3"] + snap_                     # 22: pushed, two detents
                     ns += ["press:44", "wait:3", "release:44", "wait:4", mem(lay["smp_fb_open"]), mem(lay["smp_fb_store"]),
                            mem(lay["smp_fb_folder"]), "png:n1"]
-                    ns += ["right", "wait:4"] + clock(20000) + ["press:14", "wait:2"] + clock(20700) + clock(20850) + clock(21000) + [
+                    ns += ["right", "wait:4"] + clock(20000) + ["press:14", "wait:4"] + clock(20700) + clock(20850) + clock(21000) + [
                            "release:14", "wait:3", mem(mcur), mem(lay["smp_fb_menu"]),
                            "png:n2", "no", "wait:4", "no", "wait:4", mem(lay["smp_fb_folder"]), mem(lay["smp_fb_open"])]
                     # v0.41: in INCOMING with the cursor on its first row, encoder A jittering (+1, -1,
