@@ -34,6 +34,9 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.66 | 2026-11-20 | **slides to the next trig**: SLEN NXT (the default) lasts until the track's next trig; FM+ DYN FUNC + turn jumps 1FRQ/2FRQ to whole ratios; FLEX takes of MAIN and IN recorded as they are, +12 dB on playback | `builds/v0.66-NXT/` | yes |
+| v0.65 | 2026-11-20 | **PROJECT RAM banks**: four banks A–D (508 slots), the DT2's bank box, FUNC + UP/DOWN jumps a bank; FLEX takes of a track at unity with GAIN 0 (12 dB, not 24); about 87 KB more room (optimal packer) | `builds/v0.65-BANKS/` | yes |
+| v0.64 | 2026-11-20 | **keyboard HOLD**: PTN + KEYBOARD sustains every track (held notes latch, MIDI in, arp); start-up animation at half rate | `builds/v0.64-HOLD/` | yes |
 | v0.63 | 2026-11-19 | **FLEX level**: a FLEX take of a track plays at the level heard (+24 dB built in; GAIN 0 = old +24); a FLEX save never normalises | `builds/v0.63-FLEXLEVEL/` | yes |
 | v0.62 | 2026-11-19 | **slice editor**: edits play live, playing a slice selects it, zoom to 128 frames, FUNC + START/END snaps to zero crossings; CREATE SLICE GRID FUNC + E jumps 2..64 | `builds/v0.62-SLICE/` | yes |
 | v0.61 | 2026-11-19 | **microtuning**: KB SETUP's H is TUNE; a tuning per project (11 factory, 8 USER), switched per track; TUNING and EDIT pages | `builds/v0.61-MICROTUNING/` | yes |
@@ -101,6 +104,178 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.66 — NXT (slides to the next trig, FM+ DYN jumps, FLEX MAIN and IN levels)
+
+`DN2mod_v0.66_NXT_OS1.11.syx`
+sha256 `a22a87943318f1cfbe2f3e2fa0eb10f799e2edbfb6304fe6a891c9fbec61f7e1`
+Gate: CLEARED TO FLASH, 2026-11-20 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, incl. the new mainmark part). Source: commit `7471bd9` (branch `slidesnext`). Docs: `docs/slides.md` (v0.66 section), `docs/mnm.md`, `docs/flex-design.md`.
+
+Everything in v0.65, plus:
+
+**Slides last until the next trig** (the owner, after a Discord thread quoting the Analog Keys
+manual: "the slide is completed when the next trig is reached").
+- SLEN's first choice is **NXT**, and it is the value with no SLEN lock: the slide lasts from its
+  trig to the track's next trig, a note trig or a lock (trigless) trig alike, counted round the
+  track's length. No other trig on the track: the whole length.
+- The fixed lengths (1/8 .. 64) are still there after NXT; a SLEN you set before plays as it did.
+- **Changed:** a slide trig with no SLEN lock used to last 1 step; it now lasts until the next trig.
+- Chained trigless trigs each slide to the next one.
+- Micro timing and trig conditions are not counted (a trig that will not play still ends the slide).
+- A project with an explicit NXT lock, opened on older firmware, plays it as 1 step.
+
+**FM+ DYN: FUNC + turn jumps 1FRQ and 2FRQ to whole ratios** (the owner). A plain turn stays
+continuous, as on the Monomachine. 1FRQ: 0, 1, 2. 2FRQ: 0, 1, 2, 3, 4 (2 shows as 2.02, the nearest
+the knob's 128 steps reach; 3 lands on 3.00).
+
+**FLEX takes of MAIN and IN at a usable level** (the owner and Error Kit). A FLEX take of MAIN or
+IN played far too quiet, and raising GAIN to make up for it clipped the take, because GAIN is
+applied before the recorder's 16-bit limit.
+- Such a take is now recorded as it comes in, marked, and any voice playing it adds **12 dB**
+  (FLEX, and any sample machine on SAMP B1..B8, STRETCH included). Nothing clips.
+- Takes of a single track are unchanged (v0.65's level).
+- 12 dB is one constant (`MAIN_PLAY_DB`); if MAIN is still short on the unit it can be raised.
+
+**Gate:**
+- `slides` (`emu_slides.py` part 10, run last so the checks before it run as on v0.65): NXT with
+  trigs on 4 and 7 (3 steps), round the length (4 -> 0: 12 of 16), no other trig (16), the next
+  step (1), a 64-step pattern (36), an explicit SLEN still wins, an explicit NXT lock, a per-track
+  length (8), each exact per frame against the model; stock's own track objects hand the step
+  flags at pattern + 1701 x track for all 16 tracks; the knob's NXT first.
+- `functurn`: seven FM+ DYN FUNC cases (both ways, the end of the knob) and a plain turn.
+- SHARC runner part `mainmark` (new): MAIN and IN FLEX takes marked, their frames the source's,
+  each playing x 3.981 (+12 dB) its unmarked self within 0.1 % on ONESHOT and STRETCH; negative
+  controls: a track take and a plain RECORDER take of MAIN unmarked and unchanged.
+
+**Tests**
+1. A trig with SLIDE and a p-lock, no SLEN set, the next trig 4 steps on: the slide lasts 4 steps.
+2. Move the next trig: the slide's length follows it.
+3. A slide on the last trig of a track: it slides round to the first trig.
+4. SLEN set to 1 step on a slide trig: 1 step, as before.
+5. Hold a trig on TRIG page 2 and turn F from no lock: NXT, then 1/8, 1/4 ...
+6. FM+ DYN: FUNC + turn 1FRQ and 2FRQ: whole ratios; a plain turn: continuous.
+7. FLEX REC from MAIN, GAIN 0: the take plays at about the main mix's level, without clipping.
+8. The same from IN.
+9. FLEX REC from a track: as on v0.65.
+10. The regression check (top of this file).
+
+**Known issues**
+- A MAIN or IN FLEX take saved as a sample plays 12 dB quieter than it did live (the mark is not
+  saved with it).
+- MAIN may still be short of the source on the unit (the owner heard close to +24); to be checked.
+- Existing patterns whose slide trigs had no SLEN lock now slide to the next trig instead of 1 step.
+- Everything listed for v0.65 except the FLEX MAIN and IN level.
+
+## v0.65 — BANKS (four PROJECT RAM banks, A–D)
+
+`DN2mod_v0.65_BANKS_OS1.11.syx`
+sha256 `bec1e2f995d9d34fd159073ed5626320e5803e7f1ef22cc18e3113badf992dd3`
+Gate: CLEARED TO FLASH, 2026-11-20 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, the new `depack` and `banks` steps, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `3f33d64` (branch `banks`). Docs: `docs/banks.md`, `docs/packer.md`.
+
+Everything in v0.64, plus:
+
+**Four banks of project RAM.** The sample list now runs A001–A127, B001–B127, C001–C127,
+D001–D127 (508 slots), then the FLEX buffers, as the DT2's list runs through its banks.
+- Turn SAMP (or UP / DOWN in the list) past A127 and it goes on to B001. **FUNC + UP / DOWN**
+  in the list jumps a whole bank.
+- SAMP's box on the SRC page and the list's header show the bank letter.
+- **LOAD TO PROJECT** fills the first empty slot of the bank your track's SAMP is in, then the
+  banks after it.
+- The +Drive browser's PROJECT RAM shows every bank's samples (marked >B004 etc.).
+- p-locks, sounds, kits and presets keep the bank (it is stored in SAMP's value itself).
+- Each project keeps its own banks, as it keeps bank A.
+- Banks are slots, not more memory: the pool is still 400 MB, shared by all four banks.
+- Every existing project, sound and p-lock is bank A and plays exactly as before.
+
+**FLEX takes of a single track at unity.** v0.63 lifted a FLEX take of one track by 24 dB, which
+was 12 dB too much (thanks NiKo for measuring it: on v0.63 a take matched its source at GAIN -12).
+It is now 12 dB, so GAIN 0 plays a take at the level of its source. If you set FLEX tracks to
+GAIN -12 on v0.63/v0.64, set them back to 0.
+
+**More room in the firmware.** The build now packs the firmware optimally (the same format,
+the same limits as Elektron's own files): about 87 KB smaller, so new features fit again
+(v0.64 had 291 bytes left; this build, with banks in, has about 82 KB).
+
+**Gate:**
+- `depack` (new): the instrument's own decompressor (the bootstrap's, run in the emulator)
+  unpacks every repacked section to exactly the bytes we packed; a stream with one byte
+  flipped does not.
+- `banks` (new, ColdFire emulator): bank B's page loads with the pool and plays by the DSP's
+  own rule while A's slot of the same number does not; the list's rows run A127 > B001; an
+  edit and a LOAD TO PROJECT into bank B reach the +Drive, the DSP and the image's header; a
+  power cycle keeps them; after the LFOs SAMP keeps its bank. Controls: a wrong header word
+  (bank B comes up empty), an old recording where the banks' pages go (banks off, nothing
+  written there).
+- SHARC runner and the DSP model: a bank slot plays its own entry and slice table; bank A
+  unchanged; a page without its magic is silent (`test_banks.py`).
+
+**Tests**
+1. Turn SAMP up past 127: the list goes on to B001, the header shows B.
+2. FUNC + DOWN in the list: one bank on; FUNC + UP: one back.
+3. With a track on a B slot, +DRIVE > LOAD TO PROJECT: the sample lands in bank B.
+4. Hold a trig, turn SAMP to a C slot: the p-locked trig plays the C sample; the others the track's.
+5. Save the project, load another, load it back: its banks B..D are as they were.
+6. FLEX a single track at GAIN 0: the take plays at the source's level.
+7. An LFO on SAMP: it moves through slots, never into another bank.
+8. An old project: everything in bank A, as before.
+9. The regression check (top of this file).
+
+**Known issues**
+- The recorder records into bank A only (as before).
+- A MIDI CC on SAMP picks a slot in the bank SAMP is already in (127 slots per bank).
+- The host tool (dn2samples / the web import tool) sends into bank A only; banks B..D are
+  filled from the +Drive on the instrument.
+- If you kept more than about 31 MB of recordings on v0.64, banks B..D stay off until the
+  recording at the end of that area is deleted (it lies where the banks' pages go).
+- Everything listed for v0.64, except the FLEX level (fixed here).
+
+## v0.64 — HOLD (PTN + KEYBOARD holds the keyboard's notes)
+
+`DN2mod_v0.64_HOLD_OS1.11.syx`
+sha256 `b155e97db50a6e35a6871849beac3b67085a61073b9adead91bf42733acf52bf`
+Gate: CLEARED TO FLASH, 2026-11-20 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the new kbhold and the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `1541dab` (branch `holdv64`). Docs: `docs/kbhold.md`.
+
+Everything in v0.63, plus:
+
+**KEYBOARD HOLD.** Hold **PTN** and press **KEYBOARD** to turn HOLD on; again to turn it off.
+The screen says KB HOLD ON / KB HOLD OFF while PTN is held.
+- HOLD works like a sustain pedal held down on every track: notes keep sounding after you let
+  go of the key, or after a MIDI note-off arrives.
+- Notes you are **already holding** when HOLD comes on are latched as you let go of them.
+- Notes played while HOLD is on are added to the held ones.
+- Works with [TRIG] keys in KEYBOARD mode, MIDI in, chords, microtuning and the arpeggiator
+  (the arp keeps running on the latched keys).
+- HOLD off releases every held note. HOLD starts off after a power cycle.
+- PTN alone, KEYBOARD alone, PTN + [TRIG], PTN + YES / NO and DIRECT JUMP work as before.
+
+**Start-up animation at half the frame rate.** Every other frame of s!Rwa²'s animation, each
+shown twice as long: the same length and the same last frame. This made room for HOLD (the
+firmware image was full).
+
+**Gate:** `kbhold` (new, ColdFire emulator): PTN + KEYBOARD turns sustain on for all 16 tracks
+and off again, with the message on the PTN screen and the PTN view closed at PTN's release; a
+key held before HOLD and a key played during HOLD are not released when let go; a MIDI
+note-off is kept; HOLD off releases both voices and empties every list. Negative controls:
+with HOLD off the same MIDI note-off and key release go through at once. KEYBOARD mode and
+DIRECT JUMP's setting are unchanged.
+
+**Tests**
+1. KEYBOARD on, hold a chord on the [TRIG] keys, PTN + KEYBOARD (KB HOLD ON), let go: the chord keeps sounding.
+2. While held, play more notes: they join the held chord.
+3. PTN + KEYBOARD again (KB HOLD OFF): everything releases.
+4. From a MIDI keyboard: hold notes, HOLD on, let go: they keep sounding; HOLD off releases them.
+5. Arp on, hold a chord, HOLD on, let go: the arp keeps running; HOLD off stops it.
+6. PTN alone, KEYBOARD alone, PTN + [TRIG] (pattern change), DIRECT JUMP: as before.
+7. Power cycle: HOLD is off.
+8. The start-up animation plays, slightly less smooth, ending on the same frame.
+9. The regression check (top of this file).
+
+**Known issues**
+- The arpeggiator with HOLD is untested on hardware (the emulator cannot run the arp).
+- New notes are added to the held ones rather than replacing them (sustain pedal behaviour).
+- PTN + KEYBOARD no longer toggles KEYBOARD mode (it did on stock while PTN was held).
+- **FLEX takes of a track are about 12 dB too loud at GAIN 0** (v0.63's built-in +24 should have been +12; measured by a tester on v0.63): set GAIN to -12 on FLEX tracks. Fixed in the next build.
+- Everything listed for v0.63.
 
 ## v0.63 — FLEXLEVEL (FLEX takes at the level you hear; a FLEX save never normalises)
 
