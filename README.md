@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.67 | 2026-11-21 | **the arpeggiator on MIDI tracks**: the ARPEGGIATOR menu on a MIDI track, its notes sent over MIDI one per arp step with N.LEN (upstream's midiarp, Angel Linares) | `builds/v0.67-MIDIARP/` | yes |
 | v0.66 | 2026-11-20 | **slides to the next trig**: SLEN NXT (the default) lasts until the track's next trig; FM+ DYN FUNC + turn jumps 1FRQ/2FRQ to whole ratios; FLEX takes of MAIN and IN recorded as they are, +12 dB on playback | `builds/v0.66-NXT/` | yes |
 | v0.65 | 2026-11-20 | **PROJECT RAM banks**: four banks A–D (508 slots), the DT2's bank box, FUNC + UP/DOWN jumps a bank; FLEX takes of a track at unity with GAIN 0 (12 dB, not 24); about 87 KB more room (optimal packer) | `builds/v0.65-BANKS/` | yes |
 | v0.64 | 2026-11-20 | **keyboard HOLD**: PTN + KEYBOARD sustains every track (held notes latch, MIDI in, arp); start-up animation at half rate | `builds/v0.64-HOLD/` | yes |
@@ -104,6 +105,45 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.67 — MIDIARP (the arpeggiator on MIDI tracks)
+
+`DN2mod_v0.67_MIDIARP_OS1.11.syx`
+sha256 `0ab36b2afebebc113bd512f5e671beeecf06de8e929512889d1526f680323ab6`
+Gate: CLEARED TO FLASH, 2026-11-21 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute and the new `midiarp`, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `6302a70` (branch `midiarp`). Docs: `docs/midiarp.md`.
+
+Everything in v0.66, plus:
+
+**The arpeggiator on MIDI tracks** (the owner: "just arp on midi tracks"). This is the `midiarp`
+mod from the upstream project this firmware is built on, Angel Linares's dn2_firmware_explore: his
+work, tested on his unit on 2026-09-17 (DNX captures: offsets, velocity, SPD, RNG, N.LEN within a
+millisecond, no stuck notes). It is now part of the DN2 mk2 build.
+- The ARPEGGIATOR menu opens on a MIDI track.
+- With the arp on, a MIDI track's notes (sequencer trigs and keys) go through the arp, and each arp
+  step is sent as a MIDI note on the track's channel, its length N.LEN (INF is sent as the longest
+  finite length).
+- Arp off on a MIDI track, and every synth track: stock.
+
+**Gate:** `midiarp` (new; ColdFire emulator, three runs with KEYBOARD on, a key down and up): a MIDI
+track with the arp on takes the key gate to the voice starter, never the MIDI sender, reaches the
+MIDI-record hook, and the engine's voice trigger is never called for it; negative controls: the arp
+off sends through the MIDI sender as stock, and a synth track starts a voice as stock.
+
+**Tests**
+1. A MIDI track to an external synth, arp on, hold a key: the synth plays the arp.
+2. The same from sequencer trigs.
+3. SPD, RNG, the offsets and N.LEN: the notes follow.
+4. Stop mid-arp, and turn the arp off mid-note: no stuck notes.
+5. Arp off: the MIDI track sends as before.
+6. The MIDI track with the arp on is silent on the DN2's own outs.
+7. HOLD (v0.64) on a MIDI track with the arp on.
+8. The regression check (top of this file).
+
+**Known issues**
+- Not yet tested on our own unit; upstream's tests were on his. The MIDI task's sending is not run by
+  the emulator.
+- HOLD with the arp on a MIDI track is untested.
+- Everything listed for v0.66.
 
 ## v0.66 — NXT (slides to the next trig, FM+ DYN jumps, FLEX MAIN and IN levels)
 
