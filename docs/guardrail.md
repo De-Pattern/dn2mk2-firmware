@@ -21,30 +21,36 @@ made lighter.
 
 ## The numbers
 
-`src/dnfw/sampler/guardrail.py` generates `csrc/sampler/guard_tab.h`. A machine's weight is its
-per-voice cost (instructions + 4 x L2 + 10 x DDR a block) times the voices a track of it holds:
-a Monomachine/FM+ track 2 (v0.36), every other track 1.
+`src/dnfw/sampler/guardrail.py` generates `csrc/sampler/guard_tab.h`. A machine's weight is the
+cycles a voice of it costs as the frame guard sees them (the SHARC runner's memory clock,
+controls moving at random: the slope from 2 to 6 voices), times the voices a track of it holds:
+a Monomachine/FM+ track 2 (v0.36), every other track 1. PERC's TYPE can be p-locked, so it
+weighs its heaviest family's voice (P-I).
 
 | Machine | Per voice | Voices | Weight |
 |---|---:|---:|---:|
-| VO-6 | 26,251 | 2 | 52,502 |
-| DPRO DDRW | 15,320 | 2 | 30,640 |
-| FM+ PAR | 14,081 | 2 | 28,162 |
-| DPRO WAVE | 13,892 | 2 | 27,784 |
-| FM+ DYN | 9,525 | 2 | 19,050 |
-| FM+ STAT | 9,454 | 2 | 18,908 |
-| DPRO DENS | 8,517 | 2 | 17,034 |
-| SID 6581 | 8,408 | 2 | 16,816 |
-| PERC (Machinedrum) | 21,000 | 1 | 21,000 |
-| ONESHOT, FLEX and the sample machines | ~17,500 | 1 | ~17,500 |
+| DPRO DENS | 58,339 | 2 | 116,678 |
+| VO-6 | 46,210 | 2 | 92,420 |
+| DPRO DDRW | 31,685 | 2 | 63,370 |
+| FM+ PAR | 29,731 | 2 | 59,462 |
+| DPRO WAVE | 27,337 | 2 | 54,674 |
+| FM+ STAT | 22,010 | 2 | 44,020 |
+| FM+ DYN | 21,976 | 2 | 43,952 |
+| SID 6581 | 18,915 | 2 | 37,830 |
+| PERC (any Machinedrum machine) | 45,035 | 1 | 45,035 |
+| ONESHOT, WERP, REPITCH, GRID, SLICE, FLEX | 28,800–29,400 | 1 | the same |
+| STRETCH | 11,278 | 1 | 11,278 |
 
-LIMIT is 225,000: 0.9 of what is free, leaving room for what the runner does not model (the
-unit's memory stalls vary). So four VO-6 tracks (210,008) are allowed and a fifth is refused.
+**LIMIT is 320,000.** The frame guard lets our voices run until 0.6 of the frame (401,040 on the
+runner) and, before each voice, wants its expected cost (its last cost x 1.5, at least 60,000)
+to fit; our dispatch's own work is about 30,000 a block. So a kit's voices all fit while their
+total is at most 401,040 - 30,000 - max(60,000, 1.5 c) + c for the last voice's cost c: about
+322,000 at the least (STRETCH last). In tracks: three VO-6 tracks (277,260) are allowed and a
+fourth refused; two DENS; seven PERC; eleven sample tracks (or more STRETCH).
 
-The Monomachine/FM+ costs were measured on v0.69's DSP program on the SHARC runner
-(`DNFW_COST_ONLY=mnm --steps cost`, 2026-11-21); PERC's and the sample machines' are from
-docs/dsp-cost.md (v0.39; the Machinedrum machines have been lighter since v0.51, so theirs is
-on the safe side).
+The first weights (v0.69's first try: the cost step's instructions + 4 x L2 + 10 x DDR, with a
+limit of 225,000) were too light: four VO-6 tracks, inside that limit, still lost voices on the
+runner (7 in 128 voice-blocks), so they were measured again as the guard sees them.
 
 ## Where it lives
 
@@ -54,17 +60,18 @@ on the safe side).
 
 ## How it is checked
 
-- Gate step `guardrail` (ColdFire emulator): four VO-6 tracks poked in, a fifth refused with the
+- Gate step `guardrail` (ColdFire emulator): three VO-6 tracks poked in, a fourth refused with the
   box drawn, the commit refused with the track's machine unchanged, a stock machine allowed, and
   VO-6 allowed again once the others are back to stock.
-- SHARC runner, `stress` part: scenario H (8 VO-6 voices, 210,008) and H2 (6 P-I tracks + 5
-  ONESHOTs, 213,655) play with no voice left out on the memory clock; scenario I (16 VO-6
-  voices, past the limit) does leave voices out, so the margin is real.
+- SHARC runner, `stress` part, on the memory clock: H (three VO-6 tracks, 277,260), H2 (seven
+  P-I tracks, 315,245) and H3 (eleven ONESHOTs, 318,043) play every block with no voice left out;
+  I (sixteen VO-6 voices, past the limit) does leave voices out.
 - `test/test_guardrail.py`: the header is current, every mod machine weighs and stock does not.
 
 ## Limits
 
-- The weight is a typical track's, not its worst case: a Machinedrum TYPE p-locked to a heavy
-  machine can cost more than 21,000. The frame guard still catches it.
+- It counts every track as sounding. A kit whose tracks rarely play together could fit more, and
+  the frame guard stays as the backstop for what a weight can't see (p-locks of other parameters,
+  the unit's real memory stalls, not yet measured on hardware).
 - It checks MACHINE SEL only. A project or kit loaded from before v0.69 that is already past the
   limit loads as it is (the frame guard handles it as before).

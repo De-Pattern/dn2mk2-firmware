@@ -1,11 +1,10 @@
 """v0.69: the voice/load guardrail (tester _aLinG_'s suggestion; the owner, 2026-11-19/21).
 
-The DSP's frame is 666,667 cycles; the stock engines and the silent frame take about 416,000
-(docs/sharc-load.md), so about 250,000 are left for the mod's voices. Past that the frame guard
-(v0.27/v0.36) leaves the oldest voices out: notes drop. The guardrail keeps a kit from asking for
+Past what the DSP's frame has room for, the frame guard (v0.27/v0.36) leaves voices out: notes
+drop. The guardrail keeps a kit from asking for
 that in the first place: each machine type has a WEIGHT, the cycles a track of it takes at the
 voices it typically holds (a Monomachine track two voices, v0.36; a Machinedrum track and a sample
-track one; FLEX one), measured on the SHARC runner (`--steps cost`, docs/dsp-cost.md); MACHINE SEL
+track one; FLEX one), measured on the SHARC runner as the frame guard sees them; MACHINE SEL
 refuses a machine that would take the kit's total past LIMIT, and says so.
 
 Stock machines (FM TONE, FM DRUM, WAVETONE, SWARMER, MIDI) weigh nothing here: they are the stock
@@ -16,30 +15,42 @@ from __future__ import annotations
 import pathlib
 
 FRAME = 666_667
-STOCK_SILENT = 416_000
-FREE = FRAME - STOCK_SILENT                     # 250,667
-# the frame guard keeps our voices inside 0.8 of the frame; the guardrail leaves a further margin
-# for what the runner does not model (the unit's memory stalls vary)
-LIMIT = 225_000                                 # 0.9 of what is free
+# The frame guard (docs/sharc-load.md) lets our voices run until LIMIT_GUARD (0.6 of the frame,
+# measured as 401,040 on the SHARC runner), and before each voice asks for its expected cost
+# (its last cost x 1.5, at least 60,000) to fit. Our dispatch's own work takes about 30,000 a
+# block. So a kit's voices fit with none left out while their total is at most
+#   LIMIT_GUARD - OVERHEAD - max(60,000, 1.5 c) + c   for the last voice's cost c,
+# which is least (about 322,000) for the lightest voice, STRETCH's. LIMIT is that, rounded down;
+# the frame guard stays as the backstop for what a kit's weight cannot see (p-locks, tails).
+LIMIT_GUARD = 401_040
+OVERHEAD = 30_000
+LIMIT = 320_000
 
-# per-voice estimates (instructions + 4 x L2 + 10 x DDR a block): the Monomachine and FM+ machines
-# measured on v0.69's DSP program (2026-11-21, `DNFW_COST_ONLY=mnm --steps cost`), the
-# Machinedrum's and the sample machines' from docs/dsp-cost.md (v0.39; the Machinedrum machines
-# have been lighter since v0.51, so theirs is on the safe side)
+# Per-voice cost on the SHARC runner's memory clock (instructions + 0.9 x (4 x L2 + 10 x DDR)),
+# the cycles the frame guard sees: the slope from 2 to 6 voices of each machine, controls moving
+# at random (scratchpad calibration of `--steps stress`, 2026-11-21, v0.69's DSP program).
+# PERC is p-lockable (TYPE): it weighs its heaviest family's voice, P-I's.
 PER_VOICE = {
-    5: 21_000,          # PERC: the Machinedrum machines' mean (TYPE is p-lockable: 0.1 .. 5.0 % of the frame)
-    6: 8_408,           # SID 6581
-    7: 13_892,          # DPRO WAVE
-    14: 15_320,         # DPRO DDRW
-    15: 8_517,          # DPRO DENS
-    16: 26_251,         # VO-6
-    18: 9_454,          # FM+ STAT
-    19: 14_081,         # FM+ PAR
-    20: 9_525,          # FM+ DYN
-    8: 17_531, 9: 17_850, 10: 1_650, 11: 17_741, 12: 17_443, 13: 17_488,   # ONESHOT .. SLICE
-    17: 17_531,         # FLEX (ONESHOT's reader)
+    5: 45_035,          # PERC (P-I, the heaviest)
+    6: 18_915,          # SID 6581
+    7: 27_337,          # DPRO WAVE
+    14: 31_685,         # DPRO DDRW
+    15: 58_339,         # DPRO DENS
+    16: 46_210,         # VO-6
+    18: 22_010,         # FM+ STAT
+    19: 29_731,         # FM+ PAR
+    20: 21_976,         # FM+ DYN
+    8: 28_913,          # ONESHOT
+    9: 29_376,          # WERP
+    10: 11_278,         # STRETCH
+    11: 29_286,         # REPITCH
+    12: 28_797,         # GRID
+    13: 28_838,         # SLICE
+    17: 28_931,         # FLEX
 }
 VOICES = {t: 2 for t in (6, 7, 14, 15, 16, 18, 19, 20)}   # a Monomachine track: two voices (v0.36)
+SMALLEST = min(PER_VOICE.values())
+assert LIMIT <= LIMIT_GUARD - OVERHEAD - max(60_000, 3 * SMALLEST // 2) + SMALLEST
 
 HEADER = pathlib.Path(__file__).resolve().parents[3] / "csrc" / "sampler" / "guard_tab.h"
 

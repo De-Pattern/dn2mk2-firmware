@@ -14,4 +14,4 @@ def test_every_mod_machine_weighs_and_stock_does_not():
 
 
 def test_limit_inside_what_is_free():
-    assert 0 < GR.LIMIT <= GR.FREE
+    assert 0 < GR.LIMIT < GR.LIMIT_GUARD

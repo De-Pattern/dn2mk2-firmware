@@ -1336,11 +1336,11 @@ def step_stress(init, sound, machines) -> dict:
         return f.to_bytes()
     rg, sg, eg, lg = scenario("G", 16, g_frame, memory_clock=True)
     rg0, _, _, _ = scenario("G0", 16, lambda b: g_frame(b, alone=True), memory_clock=True)
-    # v0.69, the guardrail (dnfw.sampler.guardrail): a kit at its LIMIT must play without a voice
-    # left out, and one at twice it must not (so the weights mean something). H: four VO-6 tracks
-    # at two voices each (8 voices, 210,008 of 225,000), every voice sounding, all controls moving;
-    # H2: six PERC tracks (P-I, the heaviest family) and five ONESHOTs (213,655); I: sixteen VO-6
-    # voices (420,016). All on the memory clock (F's)
+    # v0.69, the guardrail (dnfw.sampler.guardrail): kits just within its LIMIT must play without
+    # a voice left out, and one well past it must not (so the weights mean something). H: three
+    # VO-6 tracks at two voices each (6 voices, 277,260 of 320,000), every voice sounding, all
+    # controls moving; H2: seven PERC tracks (P-I, the heaviest family, 315,245); H3: eleven
+    # ONESHOTs (318,043); I: sixteen VO-6 voices (739,360). All on the memory clock (F's)
     from dnfw.sampler import guardrail as GR
     vo6 = MMx.NAMES.index("VO-6")
 
@@ -1356,15 +1356,22 @@ def step_stress(init, sound, machines) -> dict:
                     f.trigger(t)
             return f.to_bytes()
         return fr
-    rh, sh, eh, _ = scenario("H", 16, vo_frame(8), memory_clock=True)
+    rh, sh, eh, _ = scenario("H", 16, vo_frame(6), memory_clock=True)
 
     def h2_frame(b):
         f = base_frame(sound, machines, overrides=perc_words(pi[0]), trigger=False,
-                       others={**{t: 5 for t in range(1, 6)}, **{t: one for t in range(6, 11)}})
-        for t in range(6):
+                       others={t: 5 for t in range(1, 7)})
+        for t in range(7):
             for slot, w in perc_words(pi[t % len(pi)]).items():
                 f.param(t, slot, w)
-        for t in range(6, 11):
+        if b == 1:
+            for t in range(7):
+                f.trigger(t)
+        return f.to_bytes()
+
+    def h3_frame(b):
+        f = base_frame(sound, machines, t0=one, trigger=False, others={t: one for t in range(1, 11)})
+        for t in range(11):
             for slot, w in smp_words({SM.SAMP_REC: 4}).items():
                 f.param(t, slot, w)
         if b == 1:
@@ -1372,9 +1379,11 @@ def step_stress(init, sound, machines) -> dict:
                 f.trigger(t)
         return f.to_bytes()
     rh2, sh2, eh2, _ = scenario("H2", 16, h2_frame, memory_clock=True)
+    rh3, sh3, eh3, _ = scenario("H3", 16, h3_frame, memory_clock=True)
     ri, si, ei, _ = scenario("I", 16, vo_frame(16), memory_clock=True)
-    gr_h = 4 * GR.weight(MMx.TYPES[vo6])
-    gr_h2 = 6 * GR.weight(5) + 5 * GR.weight(one)
+    gr_h = 3 * GR.weight(MMx.TYPES[vo6])
+    gr_h2 = 7 * GR.weight(5)
+    gr_h3 = 11 * GR.weight(one)
     undo_counts()
 
     def smp_out(rr, t):
@@ -1410,6 +1419,7 @@ def step_stress(init, sound, machines) -> dict:
                     "oneshot_blocks_heard": g_heard}})
     n.update({"guardrail": {"limit": GR.LIMIT, "H": {"weight": gr_h, "skips": sh, "our_end_over_P": eh and round(eh / P, 3)},
                             "H2": {"weight": gr_h2, "skips": sh2, "our_end_over_P": eh2 and round(eh2 / P, 3)},
+                            "H3": {"weight": gr_h3, "skips": sh3, "our_end_over_P": eh3 and round(eh3 / P, 3)},
                             "I": {"skips": si, "our_end_over_P": ei and round(ei / P, 3)}}})
     fin_f = rf["ok"] and all(math.isfinite(x) for blk in rf["buffers"] for t in range(16) for x in blk[t])
     checks = {
@@ -1429,10 +1439,11 @@ def step_stress(init, sound, machines) -> dict:
         "v0.49: G (12 P-I voices and a SID beside an ONESHOT on track 15, the memory clock): every block "
         "returns, voices are left out (PERC's), and the ONESHOT's output is, block for block, its output alone "
         "(G0): never left out": rg["ok"] and rg0["ok"] and bool(sg) and g_same and g_heard >= 10,
-        "v0.69, the guardrail: H (four VO-6 tracks, two voices each) and H2 (six P-I tracks, five ONESHOTs), kits "
-        "within its LIMIT, play every block with no voice left out; I (sixteen VO-6 voices, twice it) does not":
-            rh["ok"] and rh2["ok"] and ri["ok"] and gr_h <= GR.LIMIT and gr_h2 <= GR.LIMIT
-            and sh == 0 and sh2 == 0 and bool(si),
+        "v0.69, the guardrail: H (three VO-6 tracks, two voices each), H2 (seven P-I tracks) and H3 (eleven "
+        "ONESHOTs), kits within its LIMIT, play every block with no voice left out; I (sixteen VO-6 voices, past "
+        "it) does not":
+            rh["ok"] and rh2["ok"] and rh3["ok"] and ri["ok"] and max(gr_h, gr_h2, gr_h3) <= GR.LIMIT
+            and sh == 0 and sh2 == 0 and sh3 == 0 and bool(si),
         "with time short, voices are left out and counted (A)": bool(sa),
         "A: the newest note is heard in most blocks (newest first)": n["newest_heard_A"] >= 0.8,
         "nothing non-finite": fin,
