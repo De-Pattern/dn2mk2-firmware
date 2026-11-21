@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.68 | 2026-11-21 | **machine icons**: MACHINE SEL's left pane shows the mod machine under the cursor, its icon and name (the owner's sheet); **FLEX takes 12 dB louder** (a track's and MAIN/IN's, +24 dB) | `builds/v0.68-ICONS/` | yes |
 | v0.67 | 2026-11-21 | **the arpeggiator on MIDI tracks**: the ARPEGGIATOR menu on a MIDI track, its notes sent over MIDI one per arp step with N.LEN (upstream's midiarp, Angel Linares) | `builds/v0.67-MIDIARP/` | yes |
 | v0.66 | 2026-11-20 | **slides to the next trig**: SLEN NXT (the default) lasts until the track's next trig; FM+ DYN FUNC + turn jumps 1FRQ/2FRQ to whole ratios; FLEX takes of MAIN and IN recorded as they are, +12 dB on playback | `builds/v0.66-NXT/` | yes |
 | v0.65 | 2026-11-20 | **PROJECT RAM banks**: four banks A–D (508 slots), the DT2's bank box, FUNC + UP/DOWN jumps a bank; FLEX takes of a track at unity with GAIN 0 (12 dB, not 24); about 87 KB more room (optimal packer) | `builds/v0.65-BANKS/` | yes |
@@ -105,6 +106,42 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.68 — ICONS (machine icons in MACHINE SEL, FLEX takes louder)
+
+`DN2mod_v0.68_ICONS_OS1.11.syx`
+sha256 `b77f88fe778dc467250bcabc8681f10c73af8be6b2d4987fe2e40d2bae6eb29a`
+Gate: CLEARED TO FLASH, 2026-11-21 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, the machines step's new MACHINE SEL pane checks, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, incl. flexlevel and mainmark at the new levels). Source: commit `ae48c14` (branch `icons`). Art: `src/dnfw/msicons.py`.
+
+Everything in v0.67, plus:
+
+**MACHINE SEL icons** (the owner, with his own icon sheets). In MACHINE SEL's SRC column the left
+pane shows the machine under the cursor: its icon in place of stock's wave and its name in place of
+SYN. PERC, WAVE (DPRO WAVE), DDRW, DENS, VO-6, STAT, PAR, DYN (the FM+ machines), SID, DT2 (the six
+sample machines) and FLEX. The stock machines and MIDI keep the wave and SYN; the FLTR column is
+stock's. Two stock instructions changed (the pane's bitmap call and its "SYN"), nothing else.
+
+**FLEX takes 12 dB louder** (the owner, on v0.67 at pattern volume 100, compressor off: both needed
++12 more). A take of a track is made 24 dB over v0.50's unity (`TRK_HW_DB` 24, as v0.63), and a take
+of MAIN or IN plays 24 dB up (`MAIN_PLAY_DB` 24). GAIN still -24..+38 dB.
+
+**Gate:** the `machines` step checks MACHINE SEL's pane on every row: a stock machine keeps stock's
+wave and SYN; a mod machine's icon exactly as `dnfw.msicons` draws it; each label its own, none of
+them SYN. `drivenav`: the action menu's held DOWN gets four frames to land before the test's clock
+moves on (the same facts, a harness margin). `flexlevel` and `mainmark` follow the two constants.
+
+**Tests**
+1. FUNC + SRC, scroll the whole list: each mod machine shows its icon and name, the stock ones the wave and SYN.
+2. LEFT / RIGHT to the FLTR column and back: as before.
+3. FLEX a single track at GAIN 0: the take at about its source's level.
+4. FLEX REC from MAIN, then from IN: the same.
+5. A loud source track at GAIN 0: does its take clip? (a track's take gets its gain when recorded)
+6. The regression check (top of this file).
+
+**Known issues**
+- The four-letter names sit close to the < > arrows.
+- A MAIN or IN take saved as a sample plays 24 dB quieter than it did live.
+- Everything listed for v0.67.
 
 ## v0.67 — MIDIARP (the arpeggiator on MIDI tracks)
 
