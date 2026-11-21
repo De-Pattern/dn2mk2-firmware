@@ -35,7 +35,7 @@ projects, presets and kits.
 **Contents:** [What's in it](#whats-in-it) · [Install](#install) ·
 [Going back, and recovery](#going-back-and-recovery) · [Compatibility](#compatibility) ·
 [Known limitations](#known-limitations) · [How it's made and tested](#how-its-made-and-tested) ·
-[Versions](#versions) · [Credits](#credits) · [Licence](#licence)
+[Versions](#versions) · [Contributing](#contributing) · [Credits](#credits) · [Licence](#licence)
 
 ---
 <p align="center">
@@ -188,6 +188,11 @@ Building it yourself: Python 3.11+, `pip install -e .`, then
 Every version, newest first, with its sha256, what it adds and what to test:
 [`FIRMWARE.md`](FIRMWARE.md). The files themselves are on the `builds` branch, and the
 patcher builds any of them from your OS files.
+
+## Contributing
+
+For setup, checks and the fork-to-pull-request workflow, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 
