@@ -996,6 +996,9 @@ int smp_set_samp(int track, int value)
  * sound to the new machine's defaults, SAMP to OFF). Anything else is stock's. */
 u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
 {
+    extern int gr_allowed(u32 track, u32 type);
+    if (!gr_allowed(track, type))               /* v0.69: the guardrail (guard.c): refused, said so */
+        return 0;
     u32 keep = 0;                               /* v0.65: the whole word (its bank) */
     if (track < 16 && KIT) {
         int old = SOUND_TYPE(track);

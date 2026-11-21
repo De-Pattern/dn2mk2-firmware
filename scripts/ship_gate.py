@@ -227,6 +227,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("tunerec", "microtuning: each project's tuning record (ColdFire)"),
        ("perform", "PERFORM: [MOD] + [FX], the macros, MODULATION SETUP, PERF MUTE (ColdFire)"),
        ("performrec", "PERFORM: the offsets and each project's macros record (ColdFire)"),
+       ("guardrail", "the voice/load guardrail: MACHINE SEL refuses a kit past its DSP limit (ColdFire)"),
        ("slicefine", "SLICE editor: live edits, zero-crossing snap, deep zoom, a played slice picked (ColdFire)"),
        ("thres", "THRES on both processors (coupled)"),
        ("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)"),
@@ -2873,6 +2874,57 @@ def main() -> int:
             later("performrec", "PERFORM: the offsets and each project's macros record (ColdFire)",
                   "PERFORM: the offsets and each project's macros record (ColdFire)",
                   [pr_cmd, sorted(EMU_ENV.items())], pr_body)
+
+        # v0.69: the voice/load guardrail (csrc/sampler/guard.c, dnfw.sampler.guardrail). Tracks 2..5 made
+        # VO-6 (4 x 52,502 of 225,000): VO-6 on track 1 refused (its message drawn), the commit refused
+        # through smp_machine_commit with track 1's machine unchanged; a stock machine (weight 0) allowed;
+        # tracks 2..5 back to stock: VO-6 on track 1 allowed. (The SHARC runner's stress part H/H2/I says
+        # the limit itself is safe: a kit within it plays with no voice left out)
+        if "gr_allowed" in lay:
+            from dnfw.sampler import guardrail as GRg      # noqa: PLC0415
+            kit = 0x4210C08C
+            ty = lambda t: kit + 52 + 1163 * t + 0xDE      # noqa: E731
+            L = {n: lay[n] for n in ("gr_allowed", "gr_refused", "gr_total", "smp_machine_commit")}
+            M = lambda n, k=4: f"mem:{L[n]:#x}:{k}"        # noqa: E731
+            gs = ["wait:3"] + [f"poke:{ty(t):#x}:10" for t in range(1, 5)] + ["wait:2",
+                  f"call:{L['gr_allowed']:#x}:0:16", "wait:6", M("gr_refused"), M("gr_total"), "png:refused",
+                  f"call:{L['smp_machine_commit']:#x}:0:0:16:1:1", M("gr_refused"), f"mem:{ty(0):#x}:1",
+                  f"call:{L['gr_allowed']:#x}:0:1", M("gr_refused")] + [f"poke:{ty(t):#x}:00" for t in range(1, 5)] + [
+                  f"call:{L['gr_allowed']:#x}:0:16", M("gr_refused"), M("gr_total")]
+            gr_js = work / "guardrail.json"
+            gr_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", ",".join(gs), "--png-dir", work / "guardrail", "--json", gr_js]
+
+            def gr_body(tdir):
+                rc, out = run("guardrail", gr_cmd, logs, env=EMU_ENV, trace=tdir)
+                if rc != 0 or not gr_js.exists():
+                    return False, out[-900:]
+                r = json.loads(gr_js.read_text())
+                mem = r["memory"]
+
+                def seq(addr):
+                    a_ = hex(addr)
+                    ks = sorted((k for k in mem if k == a_ or k.startswith(a_ + "@")),
+                                key=lambda k: int(k.split("@")[1]) if "@" in k else -1)
+                    return [bytes.fromhex(mem[k]) for k in ks]
+                ref = [struct.unpack(">I", b)[0] for b in seq(L["gr_refused"])]
+                tot = [struct.unpack(">I", b)[0] for b in seq(L["gr_total"])]
+                t0 = [b[0] for b in seq(ty(0))]
+                vo = GRg.weight(16)
+                facts = {
+                    "four VO-6 tracks: a fifth refused (its total past the limit), its message drawn":
+                        ref[:1] == [1] and tot[:1] == [5 * vo] and 5 * vo > GRg.LIMIT and "refused" in r["screens"],
+                    "MACHINE SEL's commit refused: track 1's machine unchanged": ref[1:2] == [2] and t0[:1] and t0[0] != 16,
+                    "a stock machine (weight 0) always allowed": ref[2:3] == [2],
+                    "the heavy tracks back to stock: VO-6 allowed": ref[3:4] == [2] and tot[-1:] == [vo],
+                }
+                good = all(facts.values())
+                return good, ("MACHINE SEL refuses a machine that takes the kit past the DSP limit and says so; lighter "
+                              "and stock machines always allowed" if good else
+                              json.dumps({k: v for k, v in facts.items() if not v}) + f" refused={ref} total={tot} t0={t0}")
+            later("guardrail", "the voice/load guardrail: MACHINE SEL refuses a kit past its DSP limit (ColdFire)",
+                  "the voice/load guardrail: MACHINE SEL refuses a kit past its DSP limit (ColdFire)",
+                  [gr_cmd, sorted(EMU_ENV.items())], gr_body)
 
         # v0.62: the slice editor's requests (impbox; scripts/emu_slicefine.py, the +Drive and the
         # DSP played by Python): an edit goes to the DSP and the +Drive 0.2 s after the knobs rest

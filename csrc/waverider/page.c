@@ -214,6 +214,10 @@ void wr_screen(void *screen, void *canvas)
         smp_list_draw(canvas);
     else
         tn_kb_draw(canvas);                     /* KB SETUP's H slot, when KB SETUP is on top */
+    extern int gr_visible(void);                /* v0.69: the guardrail's message, over everything */
+    extern void gr_draw(void *canvas);
+    if (gr_visible())
+        gr_draw(canvas);
 }
 
 /* the UI loop's redraw test, as stock (and the names kept current, once a loop; and
@@ -246,6 +250,8 @@ int wr_poll(void *screen)
     extern int smp_overlay_dirty;               /* v0.25: the sample list and the browser */
     extern int slc_state;                       /* v0.25: a SLICE/GRID menu opening or moving */
     static int slc_last __attribute__((section(".data"))) = 0;   /* on is drawn at once, not */
+    extern int gr_visible(void);
+    (void)gr_visible();                         /* v0.69: the guardrail's message ends (a redraw) */
     if (smp_overlay_dirty || slc_state != slc_last) {            /* at the next redraw tick */
         smp_overlay_dirty = 0;
         slc_last = slc_state;
