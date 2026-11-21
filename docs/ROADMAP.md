@@ -4,6 +4,19 @@ What the owner has asked for and is not built yet, in the words he asked for it,
 enough of a plan that it can be picked up cold. Upstream's own parked ideas are in
 `docs/ideas-backlog.md`.
 
+## The order from 2026-11-21 (owner)
+
+1. **v0.68 ICONS**: MACHINE SEL icons (the owner's second sheet) and FLEX takes +24 dB (track and MAIN/IN).
+2. **v0.69**: PERFORM, the A4 MKII's performance macros (docs/perform.md; offset, per project, [MOD] + [FX],
+   no recording yet), and the voice/load guardrail.
+3. Arp scale lock and in-key transpose.
+4. The MD/MM engine rewrite.
+5. **Then: a keyframe stretch of our own** (heavylight's keyframer, `keyframe-suite-0.9-src`, AGPL-3.0, his
+   permission 2026-11-21): our own engine in the sample DSP generator after his `kf.c` and the DAFx26
+   extrema-sampling paper, checked frame for frame against his host renderer `kfrender`, its cost measured
+   beside MD/MM. Most likely a **toggle on STRETCH** (stock's algorithm or the keyframe one). Credited in
+   THIRD-PARTY.md, the sources, FIRMWARE.md, the manual and the release post.
+
 ## After v0.51 (owner, 2026-11-12)
 
 - **v0.51 LIGHTER, released:** the lighter Monomachine and Machinedrum machines (`docs/mnm-trim.md`),
