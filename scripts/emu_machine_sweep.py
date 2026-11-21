@@ -168,6 +168,53 @@ def tracks(a, stock, mod_types) -> dict:
             "faults": r.faults}
 
 
+def lit(buf) -> set:
+    """the frame's lit pixels, y 0 at the top (digikit emu/panel.py's page order)"""
+    return {(x, y) for x in range(128) for y in range(64)
+            if (buf[(7 - (y // 8)) + 8 * x] >> (y % 8)) & 1}
+
+
+ICON_BOX, LABEL_BOX = (0, 10, 46, 41), (10, 42, 37, 53)     # MACHINE SEL's left pane, x0 y0 x1 y1
+
+
+def region(px: set, box) -> frozenset:
+    x0, y0, x1, y1 = box
+    return frozenset((x, y) for x, y in px if x0 <= x <= x1 and y0 <= y <= y1)
+
+
+def want_icon(t):
+    """v0.68: the pixels dnfw.msicons says type t's icon lights (msicon.c's placement), or None"""
+    sys.path.insert(0, str(HERE.parent / "src"))
+    from dnfw import msicons                     # noqa: PLC0415
+    n = msicons.TYPE_ICON.get(t)
+    if n is None:
+        return None
+    rows = msicons.icon(n)
+    x0, y0 = 25 - len(rows[0]) // 2, 27 - len(rows) // 2
+    return frozenset((x0 + x, y0 + y) for y, r in enumerate(rows) for x, c in enumerate(r) if c == "#"), n
+
+
+def pane_facts(picks) -> dict:
+    """v0.68 (owner): the left pane shows a mod machine's icon and label; stock's keep the wave and SYN"""
+    stock = [p for p in picks if p["icon"] is None]
+    ours = [p for p in picks if p["icon"] is not None]
+    if not stock or not ours:
+        return {"MACHINE SEL's pane: stock and mod rows both seen": False}
+    s0 = stock[0]
+    labels = {}
+    for p in ours:
+        labels.setdefault(p["icon"][1], set()).add(p["label_px"])
+    return {
+        "MACHINE SEL's pane: a stock machine keeps stock's wave and SYN":
+            all(p["icon_px"] == s0["icon_px"] and p["label_px"] == s0["label_px"] for p in stock) and bool(s0["icon_px"]),
+        "MACHINE SEL's pane: a mod machine's icon, exactly as dnfw.msicons draws it":
+            all(p["icon_px"] == p["icon"][0] for p in ours),
+        "MACHINE SEL's pane: a mod machine's label, one per icon, none of them SYN":
+            all(len(v) == 1 and next(iter(v)) and next(iter(v)) != s0["label_px"] for v in labels.values())
+            and len({next(iter(v)) for v in labels.values()}) == len(labels),
+    }
+
+
 def sweep(a, stock, order) -> dict:
     r = Run(a.snapshot, stock, a.png_dir)
     r.step = "settle"
@@ -194,16 +241,24 @@ def sweep(a, stock, order) -> dict:
         fltr = r.frame()
         r.tap(SRC)
         syn = r.frame()
+        px = lit(menu) if menu else set()
+        icon_px, label_px = region(px, ICON_BOX), region(px, LABEL_BOX)
+        row_icon = want_icon(t)
+        pane = {"icon": row_icon, "icon_px": icon_px, "label_px": label_px}
         row = {"i": i, "want": t, "got": got, "menu_closed": closed != menu,
                "fltr_drawn": fltr != closed, "syn_drawn": syn != fltr, "screen": shot}
         row["ok"] = got == t and row["menu_closed"] and row["fltr_drawn"] and row["syn_drawn"]
         ok = ok and row["ok"]
-        picks.append(row)
+        picks.append({**row, **pane})
         print(f"  {'ok  ' if row['ok'] else 'FAIL'}  pick {i:2d}: type {t:2d} -> track {track + 1} has {got}"
               f"{'' if row['menu_closed'] else '; the menu did not close'}"
               f"{'' if row['fltr_drawn'] and row['syn_drawn'] else '; a page did not draw'}", flush=True)
     facts = {"every row picked, in the list's order": ok and len(picks) == len(order),
-             "no read below 0x40000000 by our code": not r.low, "no EXCEPTION": not r.faults}
+             "no read below 0x40000000 by our code": not r.low, "no EXCEPTION": not r.faults,
+             **pane_facts(picks)}
+    for p in picks:
+        p.pop("icon_px"), p.pop("label_px")
+        p["icon"] = p["icon"][1] if p["icon"] else None
     return {"ok": all(facts.values()), "facts": facts, "track": track, "picks": picks,
             "low": r.low, "low_steps": r.low_steps, "faults": r.faults}
 
