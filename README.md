@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.66 | 2026-11-20 | **slides to the next trig**: SLEN NXT (the default) lasts until the track's next trig; FM+ DYN FUNC + turn jumps 1FRQ/2FRQ to whole ratios; FLEX takes of MAIN and IN recorded as they are, +12 dB on playback | `builds/v0.66-NXT/` | yes |
 | v0.65 | 2026-11-20 | **PROJECT RAM banks**: four banks A–D (508 slots), the DT2's bank box, FUNC + UP/DOWN jumps a bank; FLEX takes of a track at unity with GAIN 0 (12 dB, not 24); about 87 KB more room (optimal packer) | `builds/v0.65-BANKS/` | yes |
 | v0.64 | 2026-11-20 | **keyboard HOLD**: PTN + KEYBOARD sustains every track (held notes latch, MIDI in, arp); start-up animation at half rate | `builds/v0.64-HOLD/` | yes |
 | v0.63 | 2026-11-19 | **FLEX level**: a FLEX take of a track plays at the level heard (+24 dB built in; GAIN 0 = old +24); a FLEX save never normalises | `builds/v0.63-FLEXLEVEL/` | yes |
@@ -103,6 +104,67 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.66 — NXT (slides to the next trig, FM+ DYN jumps, FLEX MAIN and IN levels)
+
+`DN2mod_v0.66_NXT_OS1.11.syx`
+sha256 `a22a87943318f1cfbe2f3e2fa0eb10f799e2edbfb6304fe6a891c9fbec61f7e1`
+Gate: CLEARED TO FLASH, 2026-11-20 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, incl. the new mainmark part). Source: commit `7471bd9` (branch `slidesnext`). Docs: `docs/slides.md` (v0.66 section), `docs/mnm.md`, `docs/flex-design.md`.
+
+Everything in v0.65, plus:
+
+**Slides last until the next trig** (the owner, after a Discord thread quoting the Analog Keys
+manual: "the slide is completed when the next trig is reached").
+- SLEN's first choice is **NXT**, and it is the value with no SLEN lock: the slide lasts from its
+  trig to the track's next trig, a note trig or a lock (trigless) trig alike, counted round the
+  track's length. No other trig on the track: the whole length.
+- The fixed lengths (1/8 .. 64) are still there after NXT; a SLEN you set before plays as it did.
+- **Changed:** a slide trig with no SLEN lock used to last 1 step; it now lasts until the next trig.
+- Chained trigless trigs each slide to the next one.
+- Micro timing and trig conditions are not counted (a trig that will not play still ends the slide).
+- A project with an explicit NXT lock, opened on older firmware, plays it as 1 step.
+
+**FM+ DYN: FUNC + turn jumps 1FRQ and 2FRQ to whole ratios** (the owner). A plain turn stays
+continuous, as on the Monomachine. 1FRQ: 0, 1, 2. 2FRQ: 0, 1, 2, 3, 4 (2 shows as 2.02, the nearest
+the knob's 128 steps reach; 3 lands on 3.00).
+
+**FLEX takes of MAIN and IN at a usable level** (the owner and Error Kit). A FLEX take of MAIN or
+IN played far too quiet, and raising GAIN to make up for it clipped the take, because GAIN is
+applied before the recorder's 16-bit limit.
+- Such a take is now recorded as it comes in, marked, and any voice playing it adds **12 dB**
+  (FLEX, and any sample machine on SAMP B1..B8, STRETCH included). Nothing clips.
+- Takes of a single track are unchanged (v0.65's level).
+- 12 dB is one constant (`MAIN_PLAY_DB`); if MAIN is still short on the unit it can be raised.
+
+**Gate:**
+- `slides` (`emu_slides.py` part 10, run last so the checks before it run as on v0.65): NXT with
+  trigs on 4 and 7 (3 steps), round the length (4 -> 0: 12 of 16), no other trig (16), the next
+  step (1), a 64-step pattern (36), an explicit SLEN still wins, an explicit NXT lock, a per-track
+  length (8), each exact per frame against the model; stock's own track objects hand the step
+  flags at pattern + 1701 x track for all 16 tracks; the knob's NXT first.
+- `functurn`: seven FM+ DYN FUNC cases (both ways, the end of the knob) and a plain turn.
+- SHARC runner part `mainmark` (new): MAIN and IN FLEX takes marked, their frames the source's,
+  each playing x 3.981 (+12 dB) its unmarked self within 0.1 % on ONESHOT and STRETCH; negative
+  controls: a track take and a plain RECORDER take of MAIN unmarked and unchanged.
+
+**Tests**
+1. A trig with SLIDE and a p-lock, no SLEN set, the next trig 4 steps on: the slide lasts 4 steps.
+2. Move the next trig: the slide's length follows it.
+3. A slide on the last trig of a track: it slides round to the first trig.
+4. SLEN set to 1 step on a slide trig: 1 step, as before.
+5. Hold a trig on TRIG page 2 and turn F from no lock: NXT, then 1/8, 1/4 ...
+6. FM+ DYN: FUNC + turn 1FRQ and 2FRQ: whole ratios; a plain turn: continuous.
+7. FLEX REC from MAIN, GAIN 0: the take plays at about the main mix's level, without clipping.
+8. The same from IN.
+9. FLEX REC from a track: as on v0.65.
+10. The regression check (top of this file).
+
+**Known issues**
+- A MAIN or IN FLEX take saved as a sample plays 12 dB quieter than it did live (the mark is not
+  saved with it).
+- MAIN may still be short of the source on the unit (the owner heard close to +24); to be checked.
+- Existing patterns whose slide trigs had no SLEN lock now slide to the next trig instead of 1 step.
+- Everything listed for v0.65 except the FLEX MAIN and IN level.
 
 ## v0.65 — BANKS (four PROJECT RAM banks, A–D)
 
