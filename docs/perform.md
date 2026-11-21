@@ -32,3 +32,13 @@ Owner, 2026-11-21. The design and decisions: the Project doc `claude/perf-mode-d
 the BIPOLAR flag) from the getter the velocity menu passes. If a `ModConfig` of ours can be
 handed to stock's view, PERF SETUP is stock's screen. Then: is [MOD] + [FX] free; the mod
 mirror's room.
+
+**The velocity menu's config getter** (std::function invoker 0x400b7de6): the active track
+(0x4018a97a -> 0x4003e40e -> 0x40046bfe), then its sound (0x4004bb94 via 0x40030e66), and the
+**ModConfig is the sound's own, at sound + 44**. So stock's MODULATION SETUP edits a config that
+lives in a Sound, for that track's parameters. A macro of ours needs a ModConfig of the same
+layout in our own memory (its size and fields next: read sound + 44 .. in a snapshot, and the
+code that applies velocity mod), and the A4's per-target track (T1..T6 header) is not in stock's
+view: either one track per macro (stock's picker as is) or our own column header and picker.
+The value formatter (invoker 0x400b7488) prints value/2 + 60 clamped at 127 via 0x4014fde4
+(a note name?) -- one of the six is KEY TRACKING.
