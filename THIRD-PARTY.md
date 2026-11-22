@@ -126,3 +126,13 @@ shares no code with it. It is referenced, not incorporated.
 so none of its code is used. It was read only for architecture — the idea of
 assembling real `.S` with the GNU toolchain into linker-placed caves — and that
 general technique, not its expression, informs `src/dnfw/patch/assemble.py`.
+
+---
+
+## arpscale and degreetranspose (w-winter, via dn2_firmware_explore)
+
+<https://github.com/angellinares/dn2_firmware_explore> (AGPL-3.0, the project this one was forked
+from), pull requests #212, #214 and #278 by [w-winter](https://github.com/w-winter). v0.70 applies
+their 1.11 specs (`src/dnfw/mods/arpscale_code.json`, `src/dnfw/mods/degreetranspose_code.json`,
+byte for byte, upstream commit 5923e1b) through `src/dnfw/mods/inkey.py`; the scripts that
+assembled them are in `scripts/upstream_inkey/`, unchanged. Same licence as this project.
