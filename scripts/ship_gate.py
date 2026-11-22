@@ -2958,7 +2958,7 @@ def main() -> int:
                     return False, out[-900:]
                 r = json.loads(res.read_text())
                 facts = r.get("facts", {})
-                good = bool(r.get("ok")) and len(facts) >= 9 and all(facts.values())
+                good = bool(r.get("ok")) and len(facts) >= 10 and all(facts.values())
                 return good, ("the macros' offsets land on the mirror exactly and come off again; each project's "
                               "macros written after two seconds into their own sectors, read on LOAD and at power-on, "
                               "reset by NEW, a corrupted copy falls back, nothing written under ERASE's lock, every "

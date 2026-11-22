@@ -16,7 +16,11 @@ What it checks (each a key of the result's "facts"):
 6. NEW in 9: empty, and 9's record replaced;
 7. a power cycle: the active project's macros read back;
 8. ERASE MOD DATA's lock: nothing written;
-9. every sector written lies in 0x6E0500..0x6E05FF.
+9. every sector written lies in 0x6E0500..0x6E05FF;
+10. (v0.70) the mirror's blocks are VOICES: with track 3 on voice 6 and track 8 on voice 3, a macro
+    on track 3 moves voice 6's cell and leaves voice 3's (track 8's) alone; voice 6 gone to another
+    track, its cell put back; voice 4 taking track 3, its cell moved. (v0.69 moved block t for track
+    t: the wrong track, or nothing, Dubmaster's report.)
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ NEW_SITE, NEW_AFTER = 0x40042AF0, 0x40042AFA
 PF_AT, PF_END = 0x6E0500, 0x6E0600
 MIRROR = 0x800068E4
 VOICE_SOUND = 0x800052A8
+VOICE_TRACK = 0x80005308
 MACRO = 26                                      # sizeof(struct pf_macro): name 9, bip, val, 5 x (trk, slot, depth)
 
 
@@ -172,6 +177,39 @@ def run(cx):
         and a4 == 0x1000 + (30 - 10) * 256 and a5 == 0x1000 and a6 == 0x1000 and a7 == 0x7FFF
         and a8 == 0x7000 and sound_before == sound_after)
     offsets = [hex(x) for x in (a1, a2, a3, a4, a5, a6, a7, a8)]
+
+    # 10. voices, not tracks (v0.70): the voice -> track table set, every voice given a sound
+    vt_saved, vs_saved = m.read(VOICE_TRACK, 64), m.read(VOICE_SOUND, 64)
+    snd = struct.unpack(">I", m.read(VOICE_SOUND, 4))[0]
+    m.write(VOICE_SOUND, struct.pack(">16I", *([snd] * 16)))
+
+    def route(table):
+        m.write(VOICE_TRACK, struct.pack(">16I", *[table.get(v, 15) for v in range(16)]))
+    route({6: 2, 3: 7, 4: 9})
+    for v in range(16):
+        set_cell(v, S, 0x2000)
+    set_macro(0, b"", 0, 127, [(2, S, 30)])
+    set_macro(1, b"", 0, 0, [(0xFF, 0, 0)])
+    call("pf_publish")
+    call("pf_apply")
+    r1 = [cell(v, S) for v in range(16)]
+    route({4: 2, 6: 9, 3: 7})                 # voice 6 gone to track 10, voice 4 now plays track 3
+    call("pf_apply")
+    r2 = [cell(v, S) for v in range(16)]
+    set_macro(0, b"", 0, 0, [(0xFF, 0, 0)])
+    call("pf_publish")
+    call("pf_apply")
+    r3 = [cell(v, S) for v in range(16)]
+    m.write(VOICE_TRACK, vt_saved)
+    m.write(VOICE_SOUND, vs_saved)
+    moved = 0x2000 + 30 * 256
+    facts["10 voices, not tracks: track 3's macro moves the voice playing track 3 (voice 6), not voice 3 "
+          "(track 8); voice 6 put back when it goes to another track, voice 4 moved when it takes "
+          "track 3; the macro removed: every cell as it was"] = (
+        r1[6] == moved and all(r1[v] == 0x2000 for v in range(16) if v != 6)
+        and r2[4] == moved and r2[6] == 0x2000 and all(r2[v] == 0x2000 for v in range(16) if v != 4)
+        and all(x == 0x2000 for x in r3))
+    voices = {"r1": [hex(x) for x in r1], "r2": [hex(x) for x in r2], "r3": [hex(x) for x in r3]}
     boot()                                     # (back to the project's own, empty)
 
     # 3. a change in project 7
@@ -274,5 +312,5 @@ def run(cx):
     facts["9 every sector written lies in 0x6E0500..0x6E05FF"] = not outside and len(wlog) >= 5
 
     io.pop("log", None)
-    return {"facts": facts, "ok": all(facts.values()), "writes": [hex(s) for s, _ in wlog],
+    return {"facts": facts, "ok": all(facts.values()), "voices": voices, "writes": [hex(s) for s, _ in wlog],
             "outside": outside[:20], "offsets": offsets, "pf_reads": i32("pf_reads"), "pf_writes": i32("pf_writes")}
