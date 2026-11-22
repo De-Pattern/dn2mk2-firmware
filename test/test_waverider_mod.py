@@ -65,7 +65,9 @@ def test_applies_to_both_sections(applied, dn2_111):
     # v0.37: and the start-up animation: the stamp's code and its frames (ANIZ); v0.39: and
     # the mod's version label over its last frame (ANZL)
     kinds = [kind for kind, _ in chunks]
-    assert sorted(kinds) == sorted([platform.area.CODE] * (want + 1) + [b"ANIZ", b"ANZL"])
+    # v0.70: and w-winter's arpscale and degreetranspose, a CODE chunk each (src/dnfw/mods/inkey.py)
+    from dnfw.mods import inkey
+    assert sorted(kinds) == sorted([platform.area.CODE] * (want + 1 + len(inkey.chunks())) + [b"ANIZ", b"ANZL"])
     assert len(applied.payloads[7]) > len(dn2_111.container.find(7).unpack())
 
 
