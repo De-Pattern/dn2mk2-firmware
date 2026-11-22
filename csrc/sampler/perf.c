@@ -103,9 +103,9 @@ struct pf_pub pf_tab[2] D;
 volatile int pf_tsel D = 0;
 volatile u32 pf_gen D = 0;                      /* each publish: the interrupt re-reads on a change */
 /* the interrupt's own: what it last wrote into each cell, and what was there before it */
-static u16 wrote[PF_N * PF_T] D;
-static u16 base[PF_N * PF_T] D;
-static u8 held[PF_N * PF_T] D;                  /* 1: the cell holds our offset now */
+static u16 wrote[PF_N * PF_T][16] D;            /* v0.70: per voice (the mirror's blocks are voices) */
+static u16 base[PF_N * PF_T][16] D;
+static u16 held[PF_N * PF_T] D;                 /* bit v: voice v's cell holds our offset now */
 static struct pf_apply live[PF_N * PF_T] D;
 static int nlive D = 0;
 static u32 seen_gen D = 0xFFFFFFFFu;
@@ -179,17 +179,31 @@ static void changed(void)
 }
 
 /* the audio interrupt, after stock's modulation (link.c smp_mod_apply): each cell a macro moves
- * gets its offset on top of what stock put there. The mirror is per track (202 bytes a track,
- * docs/lfo4-build-plan.md; link.c MIRROR_CELL). A cell stock has not rewritten since (it still
- * holds what we wrote) gets the offset on top of what was there before us, so it never piles up. */
+ * gets its offset on top of what stock put there. The mirror's blocks are VOICES (202 bytes a
+ * voice; link.c MIRROR_CELL: the sound on voice b at 0x800052A8 + 4 b), and with the DN2's voice
+ * allocation a track's notes play on any of them: so a target on track t moves the cell of every
+ * voice the ColdFire's voice -> track table (0x80005308, link.c SLOT_TRACK) gives to t, and puts
+ * back the cell of a voice that has gone to another track. (v0.69 took block t for track t:
+ * right only while voice t played track t, so a macro moved the wrong track or nothing, and
+ * worked "on some trigs" -- Dubmaster, 2026-11-22. The emulator's tracks each sat on their own
+ * voice.) A cell stock has not rewritten since (it still holds what we wrote) gets the offset on
+ * top of what was there before us, so it never piles up. */
+#define VOICE_TRACK ((volatile u32 *)0x80005308u)
+
+static void put_back_voice(int i, int v)
+{
+    if (held[i] >> v & 1u) {
+        volatile u16 *cell = MIRROR_CELL(v, live[i].slot);
+        if (*cell == wrote[i][v])
+            *cell = base[i][v];
+        held[i] &= (u16)~(1u << v);
+    }
+}
+
 static void put_back(int i)
 {
-    if (held[i]) {
-        volatile u16 *cell = MIRROR_CELL(live[i].trk, live[i].slot);
-        if (*cell == wrote[i])
-            *cell = base[i];
-        held[i] = 0;
-    }
+    for (int v = 0; v < 16; v++)
+        put_back_voice(i, v);
 }
 
 void pf_apply(void)
@@ -212,26 +226,21 @@ void pf_apply(void)
     }
     for (int i = 0; i < nlive; i++) {
         int t = live[i].trk, off = live[i].off;
-        if (t > 15 || !VOICE_SOUND(t)) {
-            put_back(i);
-            continue;
-        }
-        volatile u16 *cell = MIRROR_CELL(t, live[i].slot);
-        u16 now = *cell;
-        u16 was = held[i] && now == wrote[i] ? base[i] : now;
-        if (!off) {
-            if (held[i]) {
-                *cell = was;
-                held[i] = 0;
+        for (int v = 0; v < 16; v++) {
+            if (t > 15 || !off || VOICE_TRACK[v] != (u32)t || !VOICE_SOUND(v)) {
+                put_back_voice(i, v);
+                continue;
             }
-            continue;
+            volatile u16 *cell = MIRROR_CELL(v, live[i].slot);
+            u16 now = *cell;
+            u16 was = (held[i] >> v & 1u) && now == wrote[i][v] ? base[i][v] : now;
+            int nv = clamp((int)was + off * 256, 0, 0x7FFF);
+            *cell = (u16)nv;
+            base[i][v] = was;
+            wrote[i][v] = (u16)nv;
+            held[i] |= (u16)(1u << v);
+            pf_frames++;
         }
-        int v = clamp((int)was + off * 256, 0, 0x7FFF);
-        *cell = (u16)v;
-        base[i] = was;
-        wrote[i] = (u16)v;
-        held[i] = 1;
-        pf_frames++;
     }
 }
 
