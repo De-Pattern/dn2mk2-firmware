@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.69 | 2026-11-21 | **PERFORM**: eight Analog Four MKII-style macros ([MOD] + [FX]), each offsetting up to five parameters on any tracks, saved per project, PERF MUTE; **DSP limit**: MACHINE SEL refuses a machine that would take the kit past what the DSP can run | `builds/v0.69-PERFORM/` | yes |
 | v0.68 | 2026-11-21 | **machine icons**: MACHINE SEL's left pane shows the mod machine under the cursor, its icon and name (the owner's sheet); **FLEX takes 12 dB louder** (a track's and MAIN/IN's, +24 dB) | `builds/v0.68-ICONS/` | yes |
 | v0.67 | 2026-11-21 | **the arpeggiator on MIDI tracks**: the ARPEGGIATOR menu on a MIDI track, its notes sent over MIDI one per arp step with N.LEN (upstream's midiarp, Angel Linares) | `builds/v0.67-MIDIARP/` | yes |
 | v0.66 | 2026-11-20 | **slides to the next trig**: SLEN NXT (the default) lasts until the track's next trig; FM+ DYN FUNC + turn jumps 1FRQ/2FRQ to whole ratios; FLEX takes of MAIN and IN recorded as they are, +12 dB on playback | `builds/v0.66-NXT/` | yes |
@@ -106,6 +107,58 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.69 — PERFORM (performance macros, the DSP limit)
+
+`DN2mod_v0.69_PERFORM_OS1.11.syx`
+sha256 `bfbd62a33d3e20731eb6874761270da0c45f17d4c050374b07904a83d6ee7f2e`
+Gate: CLEARED TO FLASH, 2026-11-21 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the new perform, performrec and guardrail, the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, the stress part with the guardrail's kits). Source: commit `55e1e97` (branch `perform`). Notes: `docs/perform.md`, `docs/guardrail.md`.
+
+Everything in v0.68, plus:
+
+**PERFORM** (the owner, after the Analog Four MKII's PERFORMANCE mode, its manual §9.3). [MOD] +
+[FX] opens it: eight macros, A–H, one per knob, each moving up to five targets (a track and one
+of its machine's modulatable parameters, each with a depth of −64..+63). A macro is an
+**offset**: it is added to the modulated value (the sound's own setting with its LFOs and
+p-locks), never written over it, and at 0 the parameter is exactly its own again. Push a knob
+(or YES) for MODULATION SETUP: A–E the five depths, F the column's track, G its parameter, H the
+value, push H for BIPOLAR (−64..+63), YES renames (8 characters), FUNC + NO clears the macro.
+FUNC + YES on the PERFORM page is PERF MUTE. FUNC + push resets a macro to 0. Saved per project
+in the +Drive's mod sectors (0x6E0500, two copies, a check word). [MOD] + [FX] again, NO, or a
+page key closes it; the [TRIG] keys and the keyboard play as usual while it is open.
+
+**DSP limit** (the guardrail, tester _aLinG_'s suggestion). Each mod machine weighs what its
+voices cost as the frame guard sees them (the SHARC runner's memory clock; a Monomachine/FM+
+track two voices; PERC at P-I, its heaviest family). MACHINE SEL refuses a machine that would
+take the kit's total past 320,000 cycles, the most our voices can take with none left out, and
+shows DSP LIMIT for two seconds; the track keeps its machine. Stock machines weigh nothing and a
+lighter machine is always allowed. Roughly: three VO-6 tracks, two DENS, seven PERC, eleven
+sample tracks.
+
+**Gate:** `perform` (UI: the combo, the macro page, MODULATION SETUP, renaming, PERF MUTE) and
+`performrec` (the offsets on the modulated mirror, put back at 0 and when muted or removed; each
+project's macros saved and loaded, a bad copy ignored). `guardrail`: three VO-6 tracks, a fourth
+refused with its message, the commit refused with the machine unchanged, a stock machine
+allowed. SHARC `stress`: three VO-6 tracks, seven P-I tracks and eleven ONESHOTs (the limit's
+kits) play every block with no voice left out; sixteen VO-6 voices do leave voices out. The
+`machines` step sets the other tracks to FM TONE before its picks (its power-on kit, a mod
+machine on all sixteen tracks, is past the limit).
+
+**Tests**
+1. [MOD] + [FX] opens PERFORM, again closes it; NO and the other page keys close it too.
+2. A macro with two targets on two tracks: turn it, both move; back to 0, both are their own again.
+3. BIPOLAR, and a negative depth: the parameter moves the other way.
+4. PERF MUTE: the macros drop out and come back.
+5. Rename a macro, SAVE PROJECT, power-cycle, reload: the macros as left. A second project keeps its own.
+6. Three VO-6 tracks, then a fourth: DSP LIMIT, the fourth keeps its machine; a stock or lighter machine is allowed.
+7. A kit inside the limit: any notes dropped? (FUNC on a PERC or Monomachine page shows the load.)
+8. The regression check (top of this file).
+
+**Known issues**
+- Turning a macro isn't recorded into patterns yet.
+- ERASE PROJECT doesn't clear the macros (nor the microtuning).
+- The limit counts every track as sounding, so it can refuse a kit whose tracks rarely play together.
+- Everything listed for v0.68.
 
 ## v0.68 — ICONS (machine icons in MACHINE SEL, FLEX takes louder)
 
