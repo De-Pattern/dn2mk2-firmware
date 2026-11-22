@@ -223,6 +223,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("kbrec", "KEYBOARD kept through grid recording (ColdFire)"),
        ("kbhold", "KEYBOARD HOLD: PTN + KEYBOARD, held notes, chords, release (ColdFire)"),
        ("midiarp", "the arp on MIDI tracks (ColdFire)"),
+       ("inkey", "the arp's offsets and the track's transpose in key: arpscale, degreetranspose (ColdFire)"),
        ("tune", "microtuning: KB SETUP's TUNE, the TUNING page, the frame's retune (ColdFire)"),
        ("tunerec", "microtuning: each project's tuning record (ColdFire)"),
        ("perform", "PERFORM: [MOD] + [FX], the macros, MODULATION SETUP, PERF MUTE (ColdFire)"),
@@ -2659,6 +2660,99 @@ def main() -> int:
                               json.dumps({k: x for k, x in facts.items() if not x}) + " " + json.dumps(res)[:1500])
             later("midiarp", "the arp on MIDI tracks (ColdFire)", "the arp on MIDI tracks (ColdFire)",
                   [cmd_ for cmd_, _ in ma_runs.values()] + [sorted(EMU_ENV.items())], ma_body)
+
+        # v0.70: w-winter's arpscale and degreetranspose (upstream, src/dnfw/mods/inkey.py, docs/inkey.md).
+        # The snapshot's playing pattern (L = *0x42c5a9a0, checked) set to C IONIAN (header SCALE, MODE,
+        # ROOT 0, the per-track switch 0); [KEYBOARD], TRIG 11 held (E4 in C major). The arp: track 1's
+        # MODE UP, its 16 offsets 0,2,2,-1,... with the audio ISR at its real rate, so the arp steps;
+        # at the step's tail (0x4002a390: d0 the held note, d1 12 x its octave, d2 the offset) and at
+        # its return (0x4002a39c, d0 the note played): ARP OFS IN SCALE on, each note is the held one
+        # moved d2 degrees of C major (+ d1), E4 + 2 = G4, where stock plays F#4; off, stock's sum.
+        # Degrees: the track's byte +1187 (bits 2..5) set to +2 in the playback copy, E4 plays G4; at
+        # 0 E4; with SCALE CHROMATIC +2 moves 2 semitones (F#4). (The [KEYBOARD] + [FUNC] + [+] keys
+        # are not driven here: [+] does not reach the transpose handler in this emulator, stock's
+        # [TRK] + [+] neither; w-winter's unit, upstream docs/flashing.md, 2026-10-12..14)
+        if "kh_on" in lay:
+            from dnfw.mods import inkey as IKg        # noqa: PLC0415
+            ik_L, ik_flag = 0x4121898C, IKg.FLAG
+            ik_hdr, ik_trk = ik_L + 0x1DD40, ik_L + 1187
+            ik_sound = 0x4210C08C + 52
+            ik_offs = [0, 2, 2, -1, 3, -2, 7, -7, 1, 4, -3, 5, 0, -8, 9, -1]
+            base_pokes = [f"poke:{ik_sound + 0x15F:#x}:01", f"poke:{ik_sound + 355:#x}:0fffff",
+                          f"poke:{ik_sound + 358:#x}:" + bytes(o & 0xFF for o in ik_offs).hex()]
+
+            def ik_scale(sc):
+                return [f"poke:{ik_hdr + 29:#x}:{sc:02x}0000", f"poke:{ik_hdr + 33:#x}:00"]
+            ik_runs = {}
+            for nm, flag in (("arp_on", 1), ("arp_off", 0)):
+                st_ = (["wait:6", "mem:0x42c5a9a0:4", f"poke:{ik_flag:#x}:{flag:02x}"] + base_pokes + ik_scale(0)
+                       + ["sync", "tap:18", "wait:6", "press:35", "wait:150", "release:35", "wait:4"])
+                ik_runs[nm] = st_, ["--isr-frame", "75000", "--regs-at", "0x4002a390", "--regs-at", "0x4002a39c"]
+            for nm, deg, sc in (("deg2", 0x08, 0), ("deg0", 0x00, 0), ("deg2_chromatic", 0x08, 0xFF)):
+                st_ = (["wait:6", "mem:0x42c5a9a0:4", f"mem:{ik_trk:#x}:1", f"poke:{ik_trk:#x}:{deg:02x}"] + ik_scale(sc)
+                       + ["sync", "tap:18", "wait:6", "press:35", "wait:4", "frame:p"])
+                ik_runs[nm] = st_, []
+            ik_cmds = {}
+            for nm, (st_, extra) in ik_runs.items():
+                js_ = work / f"inkey_{nm}.json"
+                ik_cmds[nm] = ([a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                                "--snapshot", snap, "--steps", ",".join(st_), "--json", js_] + extra, js_)
+
+            def ik_major(held, k):
+                """HELD moved K degrees of C IONIAN (upstream's rule: a note off the scale goes to the
+                nearest scale note, the lower on a tie, first)"""
+                semis = [0, 2, 4, 5, 7, 9, 11]
+                if k == 0:
+                    return held
+                o, pc = divmod(held, 12)
+                while pc not in semis:
+                    pc -= 1
+                d = o * 7 + semis.index(pc) + k
+                return 12 * (d // 7) + semis[d % 7]
+
+            def ik_body(tdir):
+                res = {}
+                for nm, (cmd_, js_) in ik_cmds.items():
+                    rc, out = run(f"inkey {nm}", cmd_, logs, env=EMU_ENV, trace=tdir)
+                    if rc != 0 or not js_.exists():
+                        return False, f"{nm}: " + out[-700:]
+                    r = json.loads(js_.read_text())
+                    L_ = int(r["memory"]["0x42c5a9a0"], 16)
+                    if nm.startswith("arp"):
+                        s8 = lambda v: v - (1 << 32) if v >> 31 else v        # noqa: E731
+                        pre = [(int(x["D0"], 16), int(x["D1"], 16), s8(int(x["D2"], 16)))
+                               for x in r["regs_at"].get("0x4002a390", [])]
+                        post = [int(x["D0"], 16) for x in r["regs_at"].get("0x4002a39c", [])]
+                        res[nm] = {"L": L_, "pre": pre, "post": post}
+                    else:
+                        b = pathlib.Path(r["frames"]["p"]["file"]).read_bytes()
+                        trig = struct.unpack(">H", b[34:36])[0]
+                        res[nm] = {"L": L_, "notes": [b[2 + 2 * v] for v in range(16) if trig >> v & 1]}
+                on, off = res["arp_on"], res["arp_off"]
+                facts = {
+                    "the snapshot's playing pattern is where the pokes went (L = *0x42c5a9a0)":
+                        all(x["L"] == ik_L for x in res.values()),
+                    "the arp stepped: at least three steps, one with a nonzero offset, every step returned":
+                        all(len(x["pre"]) >= 3 and len(x["pre"]) == len(x["post"])
+                            and any(k for _, _, k in x["pre"]) for x in (on, off)),
+                    "ARP OFS IN SCALE on: each note the held one moved its offset in degrees of C major "
+                    "(E4 + 2 = G4)":
+                        all(n == ik_major(h, k) + o for (h, o, k), n in zip(on["pre"], on["post"]))
+                        and 67 in on["post"],
+                    "ARP OFS IN SCALE off: stock's sum, in semitones (E4 + 2 = F#4)":
+                        all(n == h + o + k for (h, o, k), n in zip(off["pre"], off["post"])) and 66 in off["post"],
+                    "+2 degrees on track 1: E4 plays G4": res["deg2"]["notes"] == [67],
+                    "0 degrees: E4 plays E4 (the negative control)": res["deg0"]["notes"] == [64],
+                    "+2 degrees with SCALE CHROMATIC: 2 semitones, F#4": res["deg2_chromatic"]["notes"] == [66],
+                    "the build carries both mods' edits and code": bool(IKg.extents()) and len(IKg.chunks()) == 2,
+                }
+                good = all(facts.values())
+                return good, ("arp offsets move by degrees with ARP OFS IN SCALE on and by semitones off; a track's "
+                              "degrees move its notes in its scale, by semitones with none" if good else
+                              json.dumps({k: v for k, v in facts.items() if not v}) + " " + json.dumps(res)[:1500])
+            later("inkey", "the arp's offsets and the track's transpose in key: arpscale, degreetranspose (ColdFire)",
+                  "the arp's offsets and the track's transpose in key: arpscale, degreetranspose (ColdFire)",
+                  [c for c, _ in ik_cmds.values()] + [sorted(EMU_ENV.items())], ik_body)
 
         # v0.61: microtuning (csrc/sampler/tune.c, docs/microtuning.md). The frame: tn_retune on 16
         # voices (voice 15 of no track), POOLE ROD12 at ROOT D with every track tuned but track 4:
