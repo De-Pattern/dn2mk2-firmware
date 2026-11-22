@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.70 | 2026-11-22 | **arp scale lock** (ARP OFS IN SCALE: arp offsets in degrees of the track's scale) and **in-key transpose** ([KEYBOARD] + [FUNC] + [+]/[-] by degrees), w-winter's mods from upstream; **PERFORM fix**: macros move every voice playing their track | `builds/v0.70-INKEY/` | yes |
 | v0.69 | 2026-11-21 | **PERFORM**: eight Analog Four MKII-style macros ([MOD] + [FX]), each offsetting up to five parameters on any tracks, saved per project, PERF MUTE; **DSP limit**: MACHINE SEL refuses a machine that would take the kit past what the DSP can run | `builds/v0.69-PERFORM/` | yes |
 | v0.68 | 2026-11-21 | **machine icons**: MACHINE SEL's left pane shows the mod machine under the cursor, its icon and name (the owner's sheet); **FLEX takes 12 dB louder** (a track's and MAIN/IN's, +24 dB) | `builds/v0.68-ICONS/` | yes |
 | v0.67 | 2026-11-21 | **the arpeggiator on MIDI tracks**: the ARPEGGIATOR menu on a MIDI track, its notes sent over MIDI one per arp step with N.LEN (upstream's midiarp, Angel Linares) | `builds/v0.67-MIDIARP/` | yes |
@@ -107,6 +108,54 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.70 — INKEY (arp scale lock, in-key transpose, a PERFORM fix)
+
+`DN2mod_v0.70_INKEY_OS1.11.syx`
+sha256 `3038228d1ae5fae5e4e7eb4d10d0ae0eb574fac6311e83adf5ee55eeb4ec19fe`
+Gate: CLEARED TO FLASH, 2026-11-22 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. the new inkey and performrec's voice fact, the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `4686c45` (branch `inkey`). Notes: `docs/inkey.md`.
+
+Everything in v0.69, plus:
+
+**Arp scale lock and in-key transpose** (asked for by edtide on Discord; calliomilope pointed to
+upstream). Both are **w-winter's** mods from upstream (angellinares/dn2_firmware_explore,
+AGPL-3.0, pull requests #212, #214, #278), applied byte for byte through `src/dnfw/mods/inkey.py`
+as midiarp is: every guard and stock site checked first (none is one of ours), 25 edits, two CODE
+chunks at 0x467A8000 and 0x467B8000.
+- **ARP OFS IN SCALE** (SETTINGS > PERSONALIZE, off by default): each arp step's offset counts
+  degrees of the track's KB SETUP scale from its root (C major: E + 2 = G; stock F#). Offset 0
+  plays the held note; a note off the scale moves to the nearest scale note first. [UP] on an
+  active step in the ARPEGGIATOR menu marks it to move in semitones. SCALE CHROMATIC and MODE
+  CHORD MEMORY stay stock.
+- **Degree transpose**: [KEYBOARD] + [FUNC] + [+]/[-] (or [KEYBOARD] + [TRK] + [+]/[-]) moves
+  the active track -7..+7 degrees, one a press; blinks while held, takes effect on release,
+  shown as "+2'" in the track box; kept per track in each pattern; MIDI tracks too.
+
+**PERFORM fix** (Dubmaster, on v0.69: destinations "end up on wrong track or doing nothing",
+"working on some trigs"). The modulated mirror's blocks are VOICES, and a track's notes play on
+any free voice; v0.69 wrote block t for track t. Now each target moves every voice the voice ->
+track table (0x80005308) gives its track, and puts a voice's cell back when it leaves.
+
+**Gate:** `inkey`: the playing pattern C IONIAN, E4 held. The arp with the ISR at its real rate:
+ARP OFS IN SCALE on, every step's note is the held one moved its offset in degrees (E4 + 2 =
+G4); off, stock's semitones (F#4). A track's degrees: +2 plays G4, 0 plays E4, +2 on CHROMATIC
+plays F#4. `performrec` fact 10: track 3 on voice 6 and track 8 on voice 3: track 3's macro
+moves voice 6 only; voice 6 leaving is put back; voice 4 taking track 3 is moved. The [+]/[-]
+keys and the menu's marks are not driven in the emulator ([+] does not reach the transpose
+handler here, stock's neither); upstream's hardware reports cover them.
+
+**Tests**
+1. ARP OFS IN SCALE on, a scale in KB SETUP, an arp with offsets: notes stay in key; off: as before.
+2. [UP] on an active step in the ARPEGGIATOR menu: a plus in the graph, that step in semitones.
+3. [KEYBOARD] + [FUNC] + [+] twice: two degrees up, "+2'" in the track box; save, reload: kept.
+4. The same on a MIDI track.
+5. PERFORM: a macro on two tracks while a pattern plays: every trig of both moves, nothing else does.
+6. The regression check (top of this file).
+
+**Known issues**
+- A pattern with degrees, saved on stock firmware, loses its degrees.
+- Turning a macro isn't recorded into patterns yet; ERASE PROJECT doesn't clear macros or tunings.
+- Everything listed for v0.69.
 
 ## v0.69 — PERFORM (performance macros, the DSP limit)
 
