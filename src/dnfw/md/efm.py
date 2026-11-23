@@ -183,6 +183,15 @@ def split_w(p: Prog, k: int, kh: int) -> None:
     ss(p, kh + 1, 3)
 
 
+# v0.72 (the engine rewrite, owner 2026-11-23: lighter, the sound kept): the 56300's 48-bit
+# products in float32 where they round a signal: xround's 32 instructions become 8, the product in
+# one multiply rounded by one FIX ... BY. xfloor (the phase increments, up to 2^27: past float32's
+# 24 bits) stays exact, so the pitch is the Machinedrum's to the LSB. A result can differ from the 56300's by one 24-bit LSB
+# (-138 dB) where the exact product sits near a rounding boundary. EXACT = True is the
+# Machinedrum's arithmetic bit for bit (v0.17..v0.71).
+EXACT = False
+
+
 def xfloor(p: Prog, d: int, e: int, ch: int, cl: int, sh: int) -> None:
     """Rd = floor(Re C / 2^sh), exactly: Re a signed 24-bit integer, C = Fch 2^12 + Fcl
     (0 <= C < 2^24, halves as floats), 12 < sh <= 24. Clobbers R1-R3, R12, R13."""
@@ -247,6 +256,16 @@ def xround(p: Prog, d: int, ah: int, al: int, b: int) -> None:
     """Rd = hi(rnd(mpy(a, Rb))) exactly, a >= 0 given as the halves of A = 2a (Fah 2^12 +
     Fal), Rb a signed 24-bit integer: round(A Rb / 2^24), a tie to even. d may be b.
     Clobbers R1-R3, R12, R13."""
+    if not EXACT:
+        p.fconst(12, 4096.0)
+        p.fop(1, ah, "*", 12)
+        p.fop(1, 1, "+", al)                       # A
+        p.iconst(12, 0)
+        p.float_(2, b, 12)                         # b (read before d is written: d may be b)
+        p.fop(1, 1, "*", 2)                        # A b (float32)
+        p.iconst(12, -24)
+        p.fix_by(d, 1, 12)                         # round(A b / 2^24), a tie to even
+        return
     p.ash(1, b, -12)
     p.iconst(12, 4095)
     p.iop(2, b, "AND", 12)

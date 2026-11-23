@@ -226,8 +226,28 @@ def umulq(p: Prog, a: int, b: int, k: int) -> None:
 # 56300's limiter does. Subroutines (one copy for all machines) take R4 / R5 / R6 and
 # clobber R3-R10, R12-R15, I1; a sample loop keeps what it needs in R1, R2, R11.
 
-def _wmul_body(p: Prog, k: int = 23, flag: bool = False) -> None:
+# v0.72 (the engine rewrite): wmul, wmul2, wmul4 in float: the product in one multiply, floored by
+# one FIX ... BY (within one 24-bit LSB, -138 dB), 7 instructions where the split products took 30.
+# wmulr stays exact (its flag says whether bits fell below the word). WMUL_EXACT = True is the
+# Machinedrum's arithmetic bit for bit (v0.17..v0.71).
+WMUL_EXACT = False
+
+
+def _wmul_body(p: Prog, k: int = 23, flag: bool = False, exact: bool = False) -> None:
     # R4 = floor(R5 R6 / 2^k) through the limiter: sat(mpy(a, b)) (k 23), or of 2 mpy (k 22)
+    if not WMUL_EXACT and not flag and not exact:
+        p.iconst(12, 0)
+        p.float_(5, 5, 12)
+        p.float_(6, 6, 12)
+        p.fop(9, 5, "*", 6)                  # a b (float32)
+        p.fconst(13, 2.0 ** (k - 1))
+        p.fop(9, 9, "-", 13)                 # the rounding below floors
+        p.iconst(12, -k)
+        p.fix_by(4, 9, 12)                   # floor(a b / 2^k), within one LSB
+        if k == 23:
+            p.iconst(12, 0x7FFFFF)
+            p.iop(4, 4, "MIN", 12)
+        return
     p.ash(7, 5, -12)
     p.ash(8, 6, -12)
     p.iconst(12, 4095)
@@ -261,8 +281,15 @@ def _wmul_body(p: Prog, k: int = 23, flag: bool = False) -> None:
         p.iop(4, 4, "MIN", 12)
 
 
+_EXACT_HERE = False                          # v0.72: True while TRX-CP's code is written
+
+
 def wmul(p: Prog) -> None:
-    """R4 = sat(mpy(R5, R6)), exactly. Clobbers R3-R10, R12-R15, I1."""
+    """R4 = sat(mpy(R5, R6)) (float, within an LSB; exactly in TRX-CP). Clobbers R3-R10,
+    R12-R15, I1."""
+    if _EXACT_HERE and not WMUL_EXACT:
+        p.call("trx_wmul_x", lambda: _wmul_body(p, 23, False, True))
+        return
     p.call("trx_wmul", lambda: _wmul_body(p))
 
 
@@ -814,6 +841,16 @@ class TRXCP:
 
     @staticmethod
     def render(p: Prog, L: K.Layout) -> None:
+        # v0.72: TRX-CP keeps the 56300's exact products (its RATE 0 burst, as v0.51's filters)
+        global _EXACT_HERE
+        _EXACT_HERE = True
+        try:
+            TRXCP._render(p, L)
+        finally:
+            _EXACT_HERE = False
+
+    @staticmethod
+    def _render(p: Prog, L: K.Layout) -> None:
         C = L.C
         state_base(p, L)
         # the room: noise -> res4, times the room level (this block's); the level decays

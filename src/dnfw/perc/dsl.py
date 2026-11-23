@@ -209,6 +209,16 @@ class Prog:
             v = int(math.trunc(x)) if math.isfinite(x) else 0
             self.setR(d, max(-(1 << 31), min((1 << 31) - 1, v)))
 
+    def fix_by(self, d: int, a: int, s: int, note: str = "") -> None:
+        """v0.72: Rd = FIX Fa BY Rs: Fa times 2^Rs, rounded to the nearest integer, a tie to even
+        (MODE1.TRUNCATE is clear in our code, as our float arithmetic's rounding to nearest
+        already requires). One instruction where the exact 56300 products took thirty."""
+        self.e(f"R{d} = FIX F{a} BY R{s};", note)
+        if self.run:
+            x = self.F(a)
+            v = round(x * 2.0 ** s32(self.r[s])) if math.isfinite(x) else 0
+            self.setR(d, max(-(1 << 31), min((1 << 31) - 1, v)))
+
     def float_(self, d: int, a: int, s: int, note: str = "") -> None:
         """Fd = FLOAT Ra BY Rs: the signed integer Ra times 2^Rs."""
         self.e(f"F{d} = FLOAT R{a} BY R{s};", note)
