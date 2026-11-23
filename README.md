@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.71 | 2026-11-23 | **FLEX levels** to NiKo's measurements: a track's take +6 dB, MAIN/IN takes +4 dB (v0.68's +24 was 18-20 dB too hot) | `builds/v0.71-LEVELS/` | yes |
 | v0.70 | 2026-11-22 | **arp scale lock** (ARP OFS IN SCALE: arp offsets in degrees of the track's scale) and **in-key transpose** ([KEYBOARD] + [FUNC] + [+]/[-] by degrees), w-winter's mods from upstream; **PERFORM fix**: macros move every voice playing their track | `builds/v0.70-INKEY/` | yes |
 | v0.69 | 2026-11-21 | **PERFORM**: eight Analog Four MKII-style macros ([MOD] + [FX]), each offsetting up to five parameters on any tracks, saved per project, PERF MUTE; **DSP limit**: MACHINE SEL refuses a machine that would take the kit past what the DSP can run | `builds/v0.69-PERFORM/` | yes |
 | v0.68 | 2026-11-21 | **machine icons**: MACHINE SEL's left pane shows the mod machine under the cursor, its icon and name (the owner's sheet); **FLEX takes 12 dB louder** (a track's and MAIN/IN's, +24 dB) | `builds/v0.68-ICONS/` | yes |
@@ -108,6 +109,34 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.71 — LEVELS (FLEX take levels)
+
+`DN2mod_v0.71_LEVELS_OS1.11.syx`
+sha256 `af1a0e5a32aa34b3307c24e3388630b9ff36368dda470a5e5e2a44d098840099`
+Gate: CLEARED TO FLASH, 2026-11-23 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps, the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, flexlevel at the new gains). Source: commit `da3759c` (branch `levels`).
+
+Everything in v0.70, plus:
+
+**FLEX take levels** (the owner, 2026-11-22: v0.68's change was wrong; NiKo's numbers instead).
+NiKo measured on v0.67 (both gains +12 dB): a slate tone at -24 dBFS peak, recorded over USB
+into Ableton, needed GAIN -8 on a MAIN take and GAIN -6 on a track take to peak at -24 too. v0.68
+raised both to +24 instead. Now:
+- a track's take: +6 dB (`TRK_HW_DB`, 12 - 6), applied when the take is made;
+- a MAIN or IN take: +4 dB (`MAIN_PLAY_DB`, 12 - 8), applied when the marked take plays.
+
+MAIN and IN takes recorded on v0.68..v0.70 play at the new level by themselves. A track's take
+recorded on v0.68..v0.70 stays 18 dB hot: record it again, or set its GAIN to -18.
+
+**Tests**
+1. A source at -24 dBFS peak, recorded with FLEX REC from a track at GAIN 0: the take peaks at about -24 dBFS.
+2. The same from MAIN: about -24 dBFS.
+3. A MAIN take made on v0.70: now plays 20 dB quieter than it did.
+4. The regression check (top of this file).
+
+**Known issues**
+- A track's takes from v0.68..v0.70 are 18 dB hot (see above).
+- Everything listed for v0.70.
 
 ## v0.70 — INKEY (arp scale lock, in-key transpose, a PERFORM fix)
 
