@@ -36,7 +36,10 @@ PER_VOICE = {
     7: 27_337,          # DPRO WAVE
     14: 31_685,         # DPRO DDRW
     15: 58_339,         # DPRO DENS
-    16: 39_404,         # VO-6 (v0.72: its accumulators in float32, re-measured; 46,210 in v0.69)
+    # VO-6: v0.72's lighter VO-6 measured 39,404 (2 -> 6 voices); four tracks at that weight
+    # (315,232) lost one voice in 16 blocks on the runner (stress H), so 41,000: its worst
+    # block, a 4 % margin; three tracks fit, as before (46,210 in v0.69)
+    16: 41_000,
     18: 22_010,         # FM+ STAT
     19: 29_731,         # FM+ PAR
     20: 21_976,         # FM+ DYN

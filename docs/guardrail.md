@@ -30,7 +30,7 @@ weighs its heaviest family's voice (P-I).
 | Machine | Per voice | Voices | Weight |
 |---|---:|---:|---:|
 | DPRO DENS | 58,339 | 2 | 116,678 |
-| VO-6 | 39,404 | 2 | 78,808 |
+| VO-6 | 41,000 | 2 | 82,000 |
 | DPRO DDRW | 31,685 | 2 | 63,370 |
 | FM+ PAR | 29,731 | 2 | 59,462 |
 | DPRO WAVE | 27,337 | 2 | 54,674 |
@@ -45,8 +45,9 @@ weighs its heaviest family's voice (P-I).
 runner) and, before each voice, wants its expected cost (its last cost x 1.5, at least 60,000)
 to fit; our dispatch's own work is about 30,000 a block. So a kit's voices all fit while their
 total is at most 401,040 - 30,000 - max(60,000, 1.5 c) + c for the last voice's cost c: about
-322,000 at the least (STRETCH last). In tracks: four VO-6 tracks (315,232; three before v0.72's lighter VO-6) are allowed and a
-fifth refused; two DENS; seven PERC; eleven sample tracks (or more STRETCH).
+322,000 at the least (STRETCH last). In tracks: three VO-6 tracks (246,000) are allowed and a
+fourth refused (v0.72's lighter VO-6 measured 39,404 a voice, but four tracks at that weight
+lost a voice on the runner, so it keeps a 4 % margin); two DENS; seven PERC; eleven sample tracks (or more STRETCH).
 
 The first weights (v0.69's first try: the cost step's instructions + 4 x L2 + 10 x DDR, with a
 limit of 225,000) were too light: four VO-6 tracks, inside that limit, still lost voices on the
