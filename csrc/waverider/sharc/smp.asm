@@ -1075,7 +1075,7 @@ wr_sm_else_86.:
       R12 = 0x2;
       COMP(R8, R12);
       IF LT JUMP 0xbf283f;                   // -> wr_sm_else_88.
-      R12 = 0x42144d62;                 // 37.07556915283203
+      R12 = 0x40955c78;                 // 4.667537689208984
       F3 = F3 * F12;
 .GLOBAL wr_sm_else_88.;
 wr_sm_else_88.:
@@ -2676,7 +2676,7 @@ wr_sm_else_186.:
       R9 = R9 AND R12;
       R9 = PASS R9;
       IF EQ JUMP 0xbf34a4;                   // -> wr_sm_else_195.
-      R12 = 0x417d953a;                 // 15.848932266235352
+      R12 = 0x3fcaddc8;                 // 1.5848932266235352
       F0 = F0 * F12;
 .GLOBAL wr_sm_else_195.;
 wr_sm_else_195.:
@@ -2959,7 +2959,7 @@ wr_sm_else_185.:
       R9 = R9 AND R12;
       R9 = PASS R9;
       IF EQ JUMP 0xbf365e;                   // -> wr_sm_else_231.
-      R12 = 0x417d953a;                 // 15.848932266235352
+      R12 = 0x3fcaddc8;                 // 1.5848932266235352
       F0 = F0 * F12;
 .GLOBAL wr_sm_else_231.;
 wr_sm_else_231.:
@@ -3458,7 +3458,7 @@ wr_sm_else_272.:
       R9 = R9 AND R12;
       R9 = PASS R9;
       IF EQ JUMP 0xbf3983;                   // -> wr_sm_else_281.
-      R12 = 0x417d953a;                 // 15.848932266235352
+      R12 = 0x3fcaddc8;                 // 1.5848932266235352
       F0 = F0 * F12;
 .GLOBAL wr_sm_else_281.;
 wr_sm_else_281.:
