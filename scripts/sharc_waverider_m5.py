@@ -1356,7 +1356,8 @@ def step_stress(init, sound, machines) -> dict:
                     f.trigger(t)
             return f.to_bytes()
         return fr
-    rh, sh, eh, _ = scenario("H", 16, vo_frame(6), memory_clock=True)
+    n_vo = GR.LIMIT // GR.weight(MMx.TYPES[vo6])          # the VO-6 tracks the limit allows (v0.72: 4)
+    rh, sh, eh, _ = scenario("H", 16, vo_frame(2 * n_vo), memory_clock=True)
 
     def h2_frame(b):
         f = base_frame(sound, machines, overrides=perc_words(pi[0]), trigger=False,
@@ -1381,7 +1382,7 @@ def step_stress(init, sound, machines) -> dict:
     rh2, sh2, eh2, _ = scenario("H2", 16, h2_frame, memory_clock=True)
     rh3, sh3, eh3, _ = scenario("H3", 16, h3_frame, memory_clock=True)
     ri, si, ei, _ = scenario("I", 16, vo_frame(16), memory_clock=True)
-    gr_h = 3 * GR.weight(MMx.TYPES[vo6])
+    gr_h = n_vo * GR.weight(MMx.TYPES[vo6])
     gr_h2 = 7 * GR.weight(5)
     gr_h3 = 11 * GR.weight(one)
     undo_counts()
@@ -1439,7 +1440,7 @@ def step_stress(init, sound, machines) -> dict:
         "v0.49: G (12 P-I voices and a SID beside an ONESHOT on track 15, the memory clock): every block "
         "returns, voices are left out (PERC's), and the ONESHOT's output is, block for block, its output alone "
         "(G0): never left out": rg["ok"] and rg0["ok"] and bool(sg) and g_same and g_heard >= 10,
-        "v0.69, the guardrail: H (three VO-6 tracks, two voices each), H2 (seven P-I tracks) and H3 (eleven "
+        "v0.69, the guardrail: H (as many VO-6 tracks as the limit allows, two voices each), H2 (seven P-I tracks) and H3 (eleven "
         "ONESHOTs), kits within its LIMIT, play every block with no voice left out; I (sixteen VO-6 voices, past "
         "it) does not":
             rh["ok"] and rh2["ok"] and rh3["ok"] and ri["ok"] and max(gr_h, gr_h2, gr_h3) <= GR.LIMIT

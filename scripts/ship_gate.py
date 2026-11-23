@@ -2980,10 +2980,13 @@ def main() -> int:
             ty = lambda t: kit + 52 + 1163 * t + 0xDE      # noqa: E731
             L = {n: lay[n] for n in ("gr_allowed", "gr_refused", "gr_total", "smp_machine_commit")}
             M = lambda n, k=4: f"mem:{L[n]:#x}:{k}"        # noqa: E731
-            gs = ["wait:3"] + [f"poke:{ty(t):#x}:10" for t in range(1, 4)] + ["wait:2",
+            vo = GRg.weight(16)
+            n_ok = GRg.LIMIT // vo                     # VO-6 tracks that fit (v0.72: 4)
+            assert 2 <= n_ok <= 14
+            gs = ["wait:3"] + [f"poke:{ty(t):#x}:10" for t in range(1, n_ok + 1)] + ["wait:2",
                   f"call:{L['gr_allowed']:#x}:0:16", "wait:6", M("gr_refused"), M("gr_total"), "png:refused",
                   f"call:{L['smp_machine_commit']:#x}:0:0:16:1:1", M("gr_refused"), f"mem:{ty(0):#x}:1",
-                  f"call:{L['gr_allowed']:#x}:0:1", M("gr_refused")] + [f"poke:{ty(t):#x}:00" for t in range(1, 4)] + [
+                  f"call:{L['gr_allowed']:#x}:0:1", M("gr_refused")] + [f"poke:{ty(t):#x}:00" for t in range(1, n_ok + 1)] + [
                   f"call:{L['gr_allowed']:#x}:0:16", M("gr_refused"), M("gr_total")]
             gr_js = work / "guardrail.json"
             gr_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
@@ -3004,10 +3007,9 @@ def main() -> int:
                 ref = [struct.unpack(">I", b)[0] for b in seq(L["gr_refused"])]
                 tot = [struct.unpack(">I", b)[0] for b in seq(L["gr_total"])]
                 t0 = [b[0] for b in seq(ty(0))]
-                vo = GRg.weight(16)
                 facts = {
-                    "three VO-6 tracks: a fourth refused (its total past the limit), its message drawn":
-                        ref[:1] == [1] and tot[:1] == [4 * vo] and 3 * vo <= GRg.LIMIT < 4 * vo
+                    f"{n_ok} VO-6 tracks: one more refused (its total past the limit), its message drawn":
+                        ref[:1] == [1] and tot[:1] == [(n_ok + 1) * vo] and n_ok * vo <= GRg.LIMIT < (n_ok + 1) * vo
                         and "refused" in r["screens"],
                     "MACHINE SEL's commit refused: track 1's machine unchanged": ref[1:2] == [2] and t0[:1] and t0[0] != 16,
                     "a stock machine (weight 0) always allowed": ref[2:3] == [2],

@@ -36,7 +36,7 @@ PER_VOICE = {
     7: 27_337,          # DPRO WAVE
     14: 31_685,         # DPRO DDRW
     15: 58_339,         # DPRO DENS
-    16: 46_210,         # VO-6
+    16: 39_404,         # VO-6 (v0.72: its accumulators in float32, re-measured; 46,210 in v0.69)
     18: 22_010,         # FM+ STAT
     19: 29_731,         # FM+ PAR
     20: 21_976,         # FM+ DYN
