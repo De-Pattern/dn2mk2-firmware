@@ -44,7 +44,7 @@ def _trimmed(M) -> bool:
     if M in (ddrw, dens):
         return dpro.OS != 2
     if M is vo6:
-        return not vo6.SER_EXACT
+        return not vo6.SER_EXACT or not vo6.FLOOR_EXACT
     return False
 
 

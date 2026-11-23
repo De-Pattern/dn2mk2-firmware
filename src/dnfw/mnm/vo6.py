@@ -716,9 +716,18 @@ def _qconsts(p: Prog) -> None:
     p.fconst(14, 0.0)
 
 
+# v0.72 (the engine rewrite): the accumulators keep float32's precision instead of the 56300's
+# truncation to a 24-bit word (_floor, 13 % of VO-6): finer than the Monomachine, never coarser.
+# FLOOR_EXACT = True is the Monomachine's truncation, word for word (v0.26..v0.71).
+FLOOR_EXACT = False
+
+
 def _floor(p: Prog, x: int, t: int, u: int) -> None:
     """Fx = floor(Fx 2^23) / 2^23 (the 56300's a1: a word's value, the limiter's truncation), no
-    branch: trunc, then one LSB down where that went up (Fx - trunc < 0). Clobbers Ft, Fu."""
+    branch: trunc, then one LSB down where that went up (Fx - trunc < 0). Clobbers Ft, Fu.
+    v0.72: nothing unless FLOOR_EXACT (the value stays float32)."""
+    if not FLOOR_EXACT:
+        return
     p.fop(t, x, "*", 8)
     p.trunc(t, t)
     p.float_(t, t, 9)
