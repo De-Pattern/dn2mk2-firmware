@@ -251,9 +251,15 @@ def main() -> int:
     rec_at = end_at = fired_at = None
     t0 = shown = time.perf_counter()
     c.phase = "playing: waiting for the take"
+    lat = []                                  # v0.73: each period's voices on track T (the latency)
     for n in range(320):
         if not c.period():
             break
+        vt_ = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
+        lat.append({"n": n, "fired": c.long(lay["rt_fired"]) != fired0, "status": c.last_status[:2],
+                    "out": max((abs(x) for x in c.last_bufs[T]), default=0.0) if c.last_bufs else None,
+                    "bpm120": struct.unpack(">H", c.last_frame[2 * 108:2 * 108 + 2])[0] if c.last_frame else None,
+                    "voices": {v: c.read(CF_FRAME + 168 + 146 * v, 146).hex() for v in range(16) if vt_[v] == T}})
         if fired_at is None and c.long(lay["rt_fired"]) != fired0:
             fired_at = n
         st = c.last_status[0]
@@ -273,6 +279,11 @@ def main() -> int:
                   f"{c.read(TRACK_CUR + T, 1)[0]}, fired {fired_at}, recording {rec_at}, status {c.last_status[:2]}", flush=True)
         if fired_at is None and n > 120:
             break
+    rep["latency_trace"] = lat
+    if __import__("os").environ.get("DNFW_LAT_ONLY"):
+        pathlib.Path(a.json).write_text(json.dumps({"fired_at": fired_at, "rec_at": rec_at, "end_at": end_at,
+                                                    "trace": lat}))
+        return 0
     rep["numbers"]["fire"] = {"fired_at": fired_at, "rt_fired": c.long(lay["rt_fired"]), "rec_at": rec_at,
                               "end_at": end_at, "status": c.last_status[:4], "refused": c.long(lay["rt_refused"]),
                               "why": c.long(lay["rt_why"])}
