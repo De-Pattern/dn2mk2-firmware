@@ -81,6 +81,20 @@ def disasm(code: bytes, va: int) -> list[tuple[int, bytes, str]]:
     return merged
 
 
+# numbers our code uses whose negation falls in a moved range and that are not addresses
+KNOWN_NUMBERS = {0x44000000: "tune.c ram_ok's lower bound (DDR from 0x44000000)"}
+
+
+def _known_number(v: int) -> bool:
+    raw = struct.pack(">I", v)
+    return v in KNOWN_NUMBERS or all(0x20 <= c < 0x7F for c in raw)     # a four-character code
+
+
+def _moved_range(v: int, m: AddrMap) -> bool:
+    bss = m.bss_shift()
+    return (BASE <= v < m.end_a) or (bss is not None and bss[0] - 0x10000 <= v < bss[1])
+
+
 def _immediates(text: str) -> set[int]:
     """the values written as immediates (#n) in an instruction's text"""
     out = set()
@@ -106,6 +120,14 @@ def relocate_code(code: bytearray, va: int, m: AddrMap, rep: Report, where: str)
         if text.startswith(".short") or text.startswith("unknown"):
             continue
         imms = _immediates(text)
+        for v in imms:
+            neg = (-v) & 0xFFFFFFFF
+            if _moved_range(neg, m) and not _known_number(neg):
+                # GCC folds index arithmetic over two stock arrays into one constant: `2 x a0 -
+                # 0x42c5a91e` (v0.73-t1's jump wrap). Nothing tells such a constant is an address:
+                # the source must keep the base opaque
+                rep.refused.append((f"{where} {a:#x}", f"{text}: {-neg & 0xFFFFFFFF:#x} is minus a "
+                                    f"moved address ({neg:#x}): a derived constant; keep the base opaque"))
         for v in _values(text):
             if not (LO <= v < HI) or _ours(v):
                 continue

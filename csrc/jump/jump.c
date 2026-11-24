@@ -235,12 +235,18 @@ void jmp_wrap_tracks(void)
     if (!pat)
         return;
     int per_track = pat[PAT_MODE] != 0;
+    /* v0.73 (docs/os112-port.md): each array through its own base, kept opaque, so the compiler
+     * cannot fold one stock address into the other (it made TRACK_NEXT's 2 x cur - 0x42c5a91e,
+     * a constant no port can tell is an address) */
+    volatile u16 *next_at = TRACK_NEXT;
+    volatile const u8 *cur_at = TRACK_CUR;
+    __asm__("" : "+a"(next_at), "+a"(cur_at));
     for (int t = 0; t < 16; t++) {
         s16 len = per_track ? *(const s16 *)(pat + TRK_STRIDE * t + TRK_LENGTH)
                             : *(const s16 *)(pat + PAT_LENGTH);
-        u32 next = (u32)(u8)(TRACK_CUR[t] + 1u);
+        u32 next = (u32)(u8)(cur_at[t] + 1u);
         if (len >= 1)
             next %= (u32)(u16)len;
-        TRACK_NEXT[t] = (u16)next;
+        next_at[t] = (u16)next;
     }
 }

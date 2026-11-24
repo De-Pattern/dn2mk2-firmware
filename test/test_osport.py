@@ -94,3 +94,17 @@ def test_hook_sharing_a_byte_with_stock_survives(m):
     rep2 = port.Report()
     port.verify_calls(bytes(b), bytes(bad), m, len(m.a), rep2)
     assert rep2.refused
+
+
+@need
+def test_derived_address_constant_is_refused(m):
+    """v0.73-t1's jump wrap: GCC folded TRACK_NEXT into `2 x a0 - 0x42c5a91e`; a constant that
+    is minus a moved address is refused, a negated four-character code is not"""
+    code = bytearray(struct.pack(">HI", 0xD7FC, (-0x42C5A91E) & 0xFFFFFFFF))   # adda.l #-0x42c5a91e,a3
+    rep = port.Report()
+    port.relocate_code(code, 0x46AC1000, m, rep, "t")
+    assert rep.refused
+    ok = bytearray(struct.pack(">HI", 0x0681, (-0x444E3250) & 0xFFFFFFFF))     # addi.l #-'DN2P',d1
+    rep2 = port.Report()
+    port.relocate_code(ok, 0x46AC1000, m, rep2, "t")
+    assert not rep2.refused
