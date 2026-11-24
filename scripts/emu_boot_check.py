@@ -45,10 +45,13 @@ from emulib import quickboot                                  # noqa: E402
 from unicorn import UC_HOOK_CODE                              # noqa: E402
 from unicorn.m68k_const import UC_M68K_REG_A2, UC_M68K_REG_D3  # noqa: E402
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+from dnfw.osport.os import A, current as os_current            # noqa: E402
+
 ROOT = pathlib.Path("/mnt/d/01_Code/Z_Personal/dn2_firmware")
 SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
-CACHE = ROOT / "out/boot-check/control.json"
-REPORTER = 0x4011EA6A
+CACHE = ROOT / f"out/boot-check/control{'' if os_current() == '1.11' else '-' + os_current()}.json"
+REPORTER = A(0x4011EA6A)          # the firmware's fault reporter (per OS: dnfw.osport)
 ANIZ_LIMIT = 700_000_000                 # v0.37: past the intro's first frame (measured: shown before 700M)
 
 # **The control is only a control while the emulator it was measured on stays

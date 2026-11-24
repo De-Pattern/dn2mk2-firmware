@@ -59,35 +59,66 @@ class AddrMap:
         if s is None:
             return None, "in code that changed in 1.12 (no matching run around it)"
         nb = off + s[2]
-        if self.a[off:off + span] != self.b[nb:nb + span]:
+        if not self.same(off, nb, span):
             return None, f"in a matched run (shift {s[2]:+d}) but its own {span} bytes differ"
         return BASE + nb, f"matched run, shift {s[2]:+d}"
 
+    def same(self, oa: int, ob: int, span: int) -> bool:
+        """the two images' bytes agree over [oa, oa+span) / [ob, ob+span), a relinked absolute
+        pointer (a 32-bit word into MAIN OS or RAM, 0x40000000..0x4fffffff, in both) excepted"""
+        lo = (oa - 4) & ~1
+        mask = set()
+        for i in range(lo, oa + span, 2):
+            j = ob + (i - oa)
+            if i < 0 or j < 0:
+                continue
+            wa, wb = self.a[i:i + 4], self.b[j:j + 4]
+            if len(wa) == len(wb) == 4 and wa != wb and wa[0] >> 4 == 4 and wb[0] >> 4 == 4:
+                mask.update(range(i, i + 4))
+        return all(self.a[oa + k] == self.b[ob + k] for k in range(span) if oa + k not in mask)
+
     # -- outside the image (RAM) ---------------------------------------------------------
+    @functools.cached_property
+    def _refs(self) -> dict[int, list[int]]:
+        """every 32-bit word of 1.11 at an even offset whose value lies past the image (RAM), with
+        the shift its 1.12 counterpart shows, where both sit in a matched run with equal opcode
+        words before them: {value: [shift, ...]}"""
+        out: dict[int, list[int]] = collections.defaultdict(list)
+        a, b = self.a, self.b
+        for i in range(4, len(a) - 3, 2):
+            v = (a[i] << 24) | (a[i + 1] << 16) | (a[i + 2] << 8) | a[i + 3]
+            if v < self.end_a or v >= 0x90000000:
+                continue
+            s = self.seg_of(i)
+            if s is None:
+                continue
+            j = i + s[2]
+            if a[i - 4:i] != b[j - 4:j]:
+                continue
+            out[v].append(struct.unpack(">I", b[j:j + 4])[0] - v)
+        return out
+
     @functools.lru_cache(maxsize=None)
     def ram(self, va: int, near: int = 0x100):
-        """-> (1.12 va, why) or (None, why). Uses every reference to [va - near, va] in 1.11
-        code as an absolute long operand (a base the code adds to also counts)."""
-        votes: collections.Counter = collections.Counter()
-        for base in range(va, va - near - 1, -2):
-            pat = struct.pack(">I", base)
-            i = self.a.find(pat)
-            while i != -1:
-                s = self.seg_of(i)
-                if s is not None:
-                    j = i + s[2]
-                    if self.a[i - 4:i] == self.b[j - 4:j]:        # the opcode words agree
-                        nv = struct.unpack(">I", self.b[j:j + 4])[0]
-                        votes[nv - base] += 1
-                i = self.a.find(pat, i + 2)
-            if votes:
-                break
-        if not votes:
-            return None, "no reference in 1.11 code"
-        (d, n), *rest = votes.most_common()
-        if rest and rest[0][1] * 4 > n:
-            return None, f"references disagree: {votes.most_common(4)}"
-        return va + d, f"{n} reference(s) agree, shift {d:+d}" + (f" (base {hex(base)})" if base != va else "")
+        """-> (1.12 va, why) or (None, why). The references to [va - near, va] in 1.11 code (a
+        base the code adds to counts); failing those, every reference within 16 KB either side.
+        The shift is the one at least 95 % of them show (a few immediates that only look like
+        addresses vote too)."""
+        refs = self._refs
+        for lo, hi, what in ((va - near, va + 1, "reference(s)"),
+                             (va - 0x4000, va + 0x4000, "reference(s) within 16 KB")):
+            votes: collections.Counter = collections.Counter()
+            for base in range(lo, hi):
+                for d in refs.get(base, ()):
+                    votes[d] += 1
+            if not votes:
+                continue
+            (d, n), = votes.most_common(1)
+            tot = sum(votes.values())
+            if n >= 0.95 * tot:
+                return va + d, f"{n} of {tot} {what} agree, shift {d:+d}"
+            return None, f"{what} disagree: {votes.most_common(4)}"
+        return None, "no reference in 1.11 code"
 
     def map(self, va: int):
         if BASE <= va < self.end_a:

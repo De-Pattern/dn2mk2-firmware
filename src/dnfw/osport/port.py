@@ -1,0 +1,282 @@
+"""Port a gated 1.11 build to stock 1.12 (docs/os112-port.md).
+
+The build's MAIN OS is stock 1.11 with edits, plus the appended area (data chunks and CODE chunks
+that run from RAM). The port:
+
+1. **Edits.** Every byte run where the build's MAIN OS differs from stock 1.11 is moved to its
+   1.12 place (`AddrMap.image`); the stock bytes under it must agree in both images (a relinked
+   pointer aside), so an edit never lands on code that changed.
+2. **Operands.** In every executed range (the edits, and each CODE chunk's code), the 1.11
+   addresses an instruction carries as an absolute operand or a 32-bit immediate are found by
+   disassembly (objdump, ColdFire V4e) and translated. Nothing outside a decoded instruction is
+   touched.
+3. **Data.** A CODE chunk's data, and the data chunks, are copied as they are; every 32-bit word in
+   them that reads as a 1.11 address that moved is reported (`Report.data_words`), and the port
+   refuses unless each is listed in `DATA_OK` (known not to be an address) or `DATA_PTR` (a
+   pointer, translated).
+4. **The area** goes after 1.12's last byte instead of 1.11's.
+
+Everything translated or refused is in the report, with the instruction or the word, so the port
+is reviewable line by line.
+"""
+from __future__ import annotations
+
+import re
+import struct
+import subprocess
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .addrmap import BASE, AddrMap
+
+OBJDUMP = "m68k-linux-gnu-objdump"
+# a 1.11 address: MAIN OS, or RAM up to the top of stock's heap that our translator can place
+LO, HI = 0x40000000, 0x46700000
+# our own RAM (the area's chunks, the sample link's mirror, PROJECT RAM banks): never translated
+OURS = [(0x46700000, 0x48000000)]
+
+
+class PortError(RuntimeError):
+    pass
+
+
+@dataclass
+class Report:
+    edits: list = field(default_factory=list)          # (va11, va12, n)
+    operands: list = field(default_factory=list)       # (where, insn, v11, v12)
+    data_words: list = field(default_factory=list)     # (where, v11, v12, verdict)
+    refused: list = field(default_factory=list)        # (where, why)
+
+
+def _ours(v: int) -> bool:
+    return any(a <= v < b for a, b in OURS)
+
+
+def disasm(code: bytes, va: int) -> list[tuple[int, bytes, str]]:
+    """-> [(va, bytes, text)] of a linear decode"""
+    with tempfile.NamedTemporaryFile(suffix=".bin") as f:
+        f.write(code)
+        f.flush()
+        out = subprocess.run([OBJDUMP, "-D", "-b", "binary", "-m", "m68k:cfv4e",
+                              f"--adjust-vma={va:#x}", f.name],
+                             capture_output=True, text=True, check=True).stdout
+    rows = []
+    pat = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{4}\s)+)\s*(.*)$")
+    for line in out.splitlines():
+        m = pat.match(line)
+        if not m:
+            continue
+        a = int(m.group(1), 16)
+        raw = bytes.fromhex(m.group(2).replace(" ", ""))
+        rows.append((a, raw, m.group(3).strip()))
+    # objdump continues a long instruction's words on the next line(s) with no text
+    merged: list[tuple[int, bytes, str]] = []
+    for a, raw, text in rows:
+        if not text and merged and merged[-1][0] + len(merged[-1][1]) == a:
+            pa, praw, ptext = merged[-1]
+            merged[-1] = (pa, praw + raw, ptext)
+        else:
+            merged.append((a, raw, text))
+    return merged
+
+
+def _values(text: str) -> set[int]:
+    vals = set()
+    for h in re.findall(r"0x([0-9a-f]+)", text):
+        vals.add(int(h, 16))
+    for d in re.findall(r"#(-?\d+)\b", text):
+        vals.add(int(d) & 0xFFFFFFFF)
+    return vals
+
+
+def relocate_code(code: bytearray, va: int, m: AddrMap, rep: Report, where: str) -> None:
+    """translate, in place, the 1.11 addresses carried by the instructions of `code` (at `va`)"""
+    for a, raw, text in disasm(bytes(code), va):
+        if text.startswith(".short") or text.startswith("unknown"):
+            continue
+        for v in _values(text):
+            if not (LO <= v < HI) or _ours(v):
+                continue
+            needle = struct.pack(">I", v)
+            k = raw.find(needle, 2)
+            if k < 0:
+                continue
+            nv, why = m.map(v)
+            if nv is None and all(0x20 <= c < 0x7F for c in needle) and "#" in text:
+                rep.operands.append((f"{where} {a:#x}", text, v, v))   # a four-character code
+                continue
+            if nv is None:
+                rep.refused.append((f"{where} {a:#x}", f"{text}: {v:#x} {why}"))
+                continue
+            if nv != v:
+                o = a - va + k
+                assert code[o:o + 4] == needle
+                code[o:o + 4] = struct.pack(">I", nv)
+                rep.operands.append((f"{where} {a:#x}", text, v, nv))
+
+
+def data_words(blob: bytes, va: int, m: AddrMap, rep: Report, where: str,
+               ok: dict[int, str], ptr: dict[int, str]) -> bytearray:
+    out = bytearray(blob)
+    for o in range(0, len(blob) - 3, 2):
+        v = struct.unpack_from(">I", blob, o)[0]
+        if not (LO <= v < HI) or _ours(v):
+            continue
+        nv, why = m.map(v)
+        if nv is None or nv == v:
+            continue
+        at = va + o
+        if at not in ptr and at not in ok:
+            kind = _classify(v, nv, m)
+            if kind.startswith("pointer"):
+                ptr = {**ptr, at: kind}
+            else:
+                ok = {**ok, at: kind}
+        if at in ptr:
+            struct.pack_into(">I", out, o, nv)
+            rep.data_words.append((f"{where} {at:#x}", v, nv, "pointer: " + ptr[at]))
+        elif at in ok:
+            rep.data_words.append((f"{where} {at:#x}", v, nv, "not an address: " + ok[at]))
+        else:
+            rep.data_words.append((f"{where} {at:#x}", v, nv, "UNREVIEWED"))
+    return out
+
+
+def _classify(v: int, nv: int, m: AddrMap) -> str:
+    """a data word that reads as a moved 1.11 address: a pointer (to the start of a stock string,
+    identical in 1.12) or not an address (text, or anything else, left as it is)"""
+    raw = struct.pack(">I", v)
+    if all(c == 0 or 0x20 <= c < 0x7F for c in raw):
+        return "text"
+    if BASE <= v < m.end_a and BASE <= nv < m.end_b:
+        o, ob = v - BASE, nv - BASE
+        tail = m.a[o:o + 48]
+        z = tail.find(0)
+        # (a string's tail counts: GCC shares a string's tail with a shorter one, "MIDI")
+        if (z >= 3 and all(0x20 <= c < 0x7F for c in tail[:z])
+                and m.a[o - 8:o + z + 1] == m.b[ob - 8:ob + z + 1]):
+            return f"pointer to the stock string {tail[:z].decode()!r}"
+    return "not a stock string: data"
+
+
+def edit_runs(stock: bytes, build: bytes, gap: int = 8) -> list[tuple[int, int]]:
+    """[(offset, length)] where build differs from stock (runs merged across small gaps)"""
+    runs = []
+    i, n = 0, min(len(stock), len(build))
+    while i < n:
+        if stock[i] == build[i]:
+            i += 1
+            continue
+        j = i
+        last = i
+        while j < n and j - last <= gap:
+            if stock[j] != build[j]:
+                last = j
+            j += 1
+        runs.append((i, last + 1 - i))
+        i = last + 1
+    return runs
+
+
+def port_edits(stock11: bytes, build11: bytes, stock12: bytes, m: AddrMap, rep: Report,
+               insn_pad: int = 16) -> bytearray:
+    """stock 1.12 MAIN OS with the build's edits moved and their operands translated"""
+    out = bytearray(stock12)
+    for o, n in edit_runs(stock11, build11):
+        va = BASE + o
+        nva, why = m.image(va, span=1)
+        if nva is None:
+            rep.refused.append((f"edit {va:#x}+{n}", why))
+            continue
+        nb = nva - BASE
+        # the stock bytes under the edit and around it must be the same code in 1.12
+        lo, hi = max(0, o - insn_pad), o + n + insn_pad
+        if not m.same(lo, nb - (o - lo), hi - lo):
+            rep.refused.append((f"edit {va:#x}+{n}", "the stock code under it differs in 1.12"))
+            continue
+        piece = bytearray(build11[o:o + n])
+        # decode from the edit's own start (an edit writes whole instructions: a hook's jmp/jsr,
+        # or a replaced instruction), on to a little past it so its last one is whole
+        ctx_lo = o & ~1
+        ctx = bytearray(build11[ctx_lo:o + n + insn_pad])
+        before = bytes(ctx)
+        relocate_code(ctx, BASE + ctx_lo, m, rep, "edit")
+        for k in range(len(ctx)):
+            if ctx[k] != before[k]:
+                if not (o <= ctx_lo + k < o + n):
+                    continue                  # an operand in stock code: stock 1.12 has its own
+                piece[ctx_lo + k - o] = ctx[k]
+        out[nb:nb + n] = piece
+        rep.edits.append((va, nva, n))
+    return out
+
+
+# -- the whole build ---------------------------------------------------------------------------
+ROOT = Path(__file__).resolve().parents[3]
+DATA_ONLY = {0x47000000: "the DSP's tables (scripts/ship_gate.py DATA_ONLY)"}
+# words in a chunk's data that read as a moved 1.11 address and are known not to be one
+DATA_OK: dict[int, str] = {}
+# words in a chunk's data that are 1.11 addresses (pointers), translated
+DATA_PTR: dict[int, str] = {}
+
+
+def code_ranges() -> dict[int, list[tuple[int, int]]]:
+    """the same recorded code ranges as the gate's ColdFire step (scripts/ship_gate.py)"""
+    import json
+    lay = json.loads((ROOT / "src/dnfw/mods/waverider_code.json").read_text())["layout"]
+    out = {lay["is_wr"]: [(lay["is_wr"], lay["labels"])],
+           lay["c_load"]: [(lay["c_load"], lay["c_text_end"])]}
+    if "mchunk_code_end" in lay:
+        out[lay["slot_shim"]] = [(lay["slot_shim"], lay["name_long_5"])]
+    return out
+
+
+def port_area(blob: bytes, m: AddrMap, rep: Report) -> bytes:
+    """the appended area with each chunk's code relocated and its data checked"""
+    from ..patch import area
+    out = bytearray(blob)
+    total, count = struct.unpack_from(">II", blob, 4)
+    ranges = code_ranges()
+    for i in range(count):
+        cid = blob[12 + 12 * i:16 + 12 * i]
+        off, n = struct.unpack_from(">II", blob, 16 + 12 * i)
+        if cid != area.CODE:
+            body = data_words(blob[off:off + n], area.RUNTIME_VA + off, m, rep,
+                              cid.decode("latin-1"), DATA_OK, DATA_PTR)
+            out[off:off + n] = body
+            continue
+        load = struct.unpack_from(">I", blob, off)[0]
+        img_at, img_n = off + 16, struct.unpack_from(">I", blob, off + 4)[0]
+        image = bytearray(blob[img_at:img_at + img_n])
+        if load in DATA_ONLY:
+            pass                                   # data for the DSP: never a ColdFire address
+        else:
+            spans = ranges.get(load, [(load, load + img_n)])
+            covered = bytearray(img_n)
+            for lo, hi in spans:
+                seg = bytearray(image[lo - load:hi - load])
+                relocate_code(seg, lo, m, rep, f"chunk {load:#x}")
+                image[lo - load:hi - load] = seg
+                covered[lo - load:hi - load] = b"\x01" * (hi - lo)
+            # the rest of the chunk is data: reported, translated only where listed
+            k = 0
+            while k < img_n:
+                if covered[k]:
+                    k += 1
+                    continue
+                j = k
+                while j < img_n and not covered[j]:
+                    j += 1
+                image[k:j] = data_words(bytes(image[k:j]), load + k, m, rep,
+                                        f"chunk {load:#x} data", DATA_OK, DATA_PTR)
+                k = j
+        out[img_at:img_at + img_n] = image
+    return bytes(out)
+
+
+def port_main_os(build11: bytes, m: AddrMap, rep: Report) -> bytes:
+    from ..mods import platform
+    base, _ = platform.split(build11)
+    new_base = port_edits(m.a, base, m.b, m, rep)
+    return bytes(new_base) + port_area(build11[len(base):], m, rep)
