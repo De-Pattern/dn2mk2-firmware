@@ -4,6 +4,8 @@ This is a focused instruction-level test, not the full boot/UI shipping gate.
 """
 
 from pathlib import Path
+from functools import lru_cache
+import hashlib
 import json
 import os
 import struct
@@ -106,7 +108,8 @@ def test_existing_machine_page_dispatch_stays_intact(dispatch):
             assert dispatch(smp.TYPE_OF[machine], "wr_page", index)[2:10] == expected
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
+@lru_cache(maxsize=1)
 def compiled_runtime():
     from dnfw.cli.files import read_image
     from dnfw.firmware.load import load
@@ -120,6 +123,8 @@ def compiled_runtime():
     # compose checks displaced stock bytes, region limits and zero BSS.
     report = {"scope": "native page/capture source; USB delivery and hardware gates incomplete",
               "chunks": {k: len(built[k]["code"]) for k in ("chunk", "c_chunk", "machines_chunk")},
+              "chunk_sha256": {k: hashlib.sha256(built[k]["code"]).hexdigest()
+                               for k in ("chunk", "c_chunk", "machines_chunk")},
               "runtime_remaining_bytes": pages.C_SPAN - len(built["c_chunk"]["code"])}
     (ROOT / "out").mkdir(exist_ok=True)
     (ROOT / "out/sidecar-pages-compile-report.json").write_text(json.dumps(report, indent=2) + "\n")

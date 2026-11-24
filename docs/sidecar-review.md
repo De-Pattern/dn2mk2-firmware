@@ -6,9 +6,13 @@ engine identity in saved sounds, and send events to Sidecar. Eight independent
 mono returns enter the assigned voices before native filter/AMP/pan/FX sends.
 New compatible engines require a Pi package, not a new per-engine DN2 patch.
 
-The baseline is dn2mk2 v0.70 on Elektron OS 1.11, matching the development source
-this work was extracted from. Newer upstream changes are not silently mixed in.
-This is a source-review branch, not a new flashable release.
+The baseline is the exact dn2mk2 **v0.72** release on Elektron OS 1.11. The clean
+bridge was applied onto that tag and its generated payloads rebuilt. The earlier
+v0.70 extraction remains on `review/dn2-bridge`; current work is on
+`review/dn2-bridge-v072`. This is a review candidate, not a new firmware release.
+
+Maintainer-facing description: [proposed contribution](sidecar-proposal.md).
+Release ownership and version boundaries: [maintenance](sidecar-maintenance.md).
 
 ## Included and excluded
 
@@ -17,8 +21,10 @@ This is a source-review branch, not a new flashable release.
 - Manifest-driven catalog, selection, native pages and parameter formatting.
 - Native-return generator and guarded integration with existing firmware hooks.
 - Original fixtures and focused compiled tests, including saved-sound conversion.
-- No Pi drum DSP, plugin manifests/resources, device credentials, recordings,
-  prototype history, or new generated firmware payloads.
+- Regenerated ColdFire patch data and only the shared DSP return-routing tail;
+  every other v0.72 DSP object and the v0.72 native guard weights are retained.
+- No private Pi drum DSP, plugin manifests/resources, device credentials,
+  recordings, prototype history or full firmware images.
 
 The legacy eleven-control layout and `mega.perkons` ID are frozen compatibility
 data for existing sounds. They contain no engine implementation and no import of
@@ -55,23 +61,53 @@ Run that last command from the paired Sidecar checkout. Pure wire checks there
 do not require stock ROMs. Test receipts distinguish skips from passes. No check
 flashes or sends MIDI, and this adds no new mandatory full-build gate.
 
+For the optional playable public demo, first build SC Snare using the paired
+Sidecar checkout's `tools/dn2/build_public_demo.py --a64-bin PATH`. Set
+`SIDECAR_DEMO_PACKAGE` to its `build/dn2/public-demo/sc_snare.a64.rmp`, then run
+`test/test_sidecar_ui.py::test_compiled_metadata_transactions`. This exercises
+the real package's metadata through the compiled native client and Pi server;
+it does not render the plugin's DSP or install anything.
+
 ## Generated files and release boundary
 
-Recorded extraction check (2026-11-24): all 125 focused tests above passed
-(no skips; 8 minutes 13 seconds). The saved eight-part packets also passed the
-paired Pi session/receiver check. This was a one-time source-extraction check;
-the whole set is not a new mandatory gate for individual plugin/bridge edits.
-The standalone shared wire check passed fourteen frozen events through both
-host C/C++ and compiled ColdFire execution.
+Recorded v0.72 integration checks (2026-11-24):
 
-Generated ColdFire patch JSON and DSP objects are deliberately left at their
-upstream baseline in this source candidate. **Do not build a flash image from
-those stale generated files.** Before preparing a firmware candidate, regenerate
-the native-return tail with `scripts/gen_sidecar_tail.py --selas PATH`, then
-`scripts/gen_waverider_code.py` using the supported stock input and existing
-toolchains. Review the generated changes and run the applicable integrity,
-compiled routing and hardware checks. Follow the maintainer's release process
-when preparing an actual release; no release is being offered here.
+- The focused suite completed in 4 minutes 36 seconds: 124 passed and one
+  public-demo assertion failed. SC Snare has ten controls; its six unused cells
+  were correctly hidden, while the test expected sixteen populated cells.
+  After correcting that expectation, the affected metadata test and saved-part
+  recovery test both passed in 29 seconds. No runtime change was needed.
+  All 125 cases therefore have passing evidence; the entire suite was not rerun
+  after the assertion-only correction.
+- The compiled metadata client accepted all three synthetic manifests and the
+  unmodified public `sc.snare` package, including page formatting and unused cells.
+- Saved eight-part packets passed the paired Pi session/receiver check.
+- Fourteen frozen events matched host C/C++ and compiled ColdFire encoding.
+- All five packaged DSP-tail ownership/routing cases passed, including register
+  preservation, empty/disabled ownership and duplicate/invalid assignments.
+- The combined verification image passed byte-integrity preflight. The freshly
+  compiled native chunks match the regenerated patch data.
+
+Receipts are in ignored `out/sidecar-v072/`, `out/sidecar-ui-client.json`,
+`out/sidecar-pages-compile-report.json` and `out/sidecar-recovery/`; paired host
+receipts are under Sidecar's `build/dn2/`. These are one-time integration checks,
+not a new mandatory full-build gate for individual plugin or bridge edits.
+
+The v0.72 candidate includes regenerated ColdFire patch JSON and native-return
+tail objects. The generator verifies stock instructions, allocation bounds and
+exact replay of generated edits. The DSP audit confirms all v0.72 objects except
+the shared return tail are unchanged, including the optimized native engines.
+
+For later source edits, regenerate the return tail with
+`scripts/gen_sidecar_tail.py --selas PATH` when its generator changes, and
+`scripts/gen_waverider_code.py` when native UI/capture bindings change. The latter
+accepts `DNFW_STOCK_111` as well as the usual resource directory. Reuse unchanged
+engine objects; do not regenerate every native synth for a bridge-only edit.
+
+A local combined image has been built and passed preflight integrity checks.
+That is not full boot, real-time or hardware qualification and does not clear
+the image for flashing. Follow the maintainer's release process when preparing
+an actual release; no release is being offered here.
 
 Offline capture/converter/UI checks are not a project filesystem save/reopen,
 full boot, physical latency or worst-case eight-part playback qualification.

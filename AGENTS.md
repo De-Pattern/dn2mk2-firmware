@@ -1,8 +1,9 @@
 # Sidecar bridge review candidate
 
 - Read `docs/sidecar-review.md` before building or changing the adapter.
-- This is source preparation, not a release. Generated firmware payloads remain
-  at upstream baseline and must be regenerated before preparing a flash image.
+- This is a v0.72 integration/review candidate, not a release. Generated bridge
+  payloads are included; see the review document for exact offline evidence.
+  A local integrity-checked image is not hardware-qualified or cleared to flash.
 - Keep private Pi plugin code, manifests, resources, credentials and device logs
   out of this repository. Legacy storage/wire compatibility is deliberately kept.
 - Use changed-layer checks; do not add mandatory full-build gates for ordinary

@@ -3,6 +3,7 @@
 No device I/O. Original metadata-only fixtures; no private plugin or DSP dependency.
 """
 import json
+from functools import lru_cache
 import os
 from pathlib import Path
 import struct
@@ -16,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SIDECAR = Path(os.environ.get('SIDECAR_BRIDGE_ROOT', ROOT.parent / 'sidecar-bridge-public')).resolve()
 
 
-@pytest.fixture(scope='module')
+@pytest.fixture(scope='session')
+@lru_cache(maxsize=1)
 def ui_server():
     import sys
     opts = dict(cwd=SIDECAR, capture_output=True, text=True, check=True,
@@ -70,9 +72,16 @@ def test_compiled_metadata_transactions(capture, compiled_runtime, tmp_path, ui_
 
     count = 0
     revision_changed = False
-    for engine in ('bell', 'tone', 'noise'):
-        manifest = json.loads((SIDECAR / f'build/dn2/fixtures/{engine}.json').read_text())
-        package = SIDECAR / f'build/dn2/fixtures/{engine}.rmp'
+    cases = [(SIDECAR / f'build/dn2/fixtures/{engine}.json',
+              SIDECAR / f'build/dn2/fixtures/{engine}.rmp')
+             for engine in ('bell', 'tone', 'noise')]
+    public_demo = os.environ.get('SIDECAR_DEMO_PACKAGE')
+    if public_demo:
+        cases.append((SIDECAR / 'plugins/sc_snare/manifest.json', Path(public_demo)))
+    tested_ids = []
+    for manifest_file, package in cases:
+        manifest = json.loads(manifest_file.read_text())
+        tested_ids.append(manifest['id'])
         assert want(manifest['id']) == 1
         assert call('sc_sound_store', sound, ident) == 1
         call('sc_ui_follow')
@@ -130,7 +139,10 @@ def test_compiled_metadata_transactions(capture, compiled_runtime, tmp_path, ui_
             assert cpu.reg_read(reg.UC_M68K_REG_D2) == 0x12345678
             descriptor = cpu.reg_read(reg.UC_M68K_REG_D0)
             fields = struct.unpack('>11I', cpu.mem_read(descriptor, 44))
-            assert fields[2:10] == sc.GENERIC_PAGES[page] and fields[10] == pages.TAG
+            present = {k['p'] for k in manifest['knobs']}
+            expected = tuple(record if page * 8 + i + 1 in present else 0
+                             for i, record in enumerate(sc.GENERIC_PAGES[page]))
+            assert fields[2:10] == expected and fields[10] == pages.TAG
             title = bytes(cpu.mem_read(fields[0], 32)).split(b'\0')[0].decode()
             assert title == (manifest['page2_title'] if page else manifest['name'])
         call('smp_formats', sc.KIND)
@@ -176,7 +188,7 @@ def test_compiled_metadata_transactions(capture, compiled_runtime, tmp_path, ui_
             assert bytes(cpu.mem_read(0x401f7f94 + 60 * record + 8, 16)) == ranges
             assert bytes(cpu.mem_read(0x401f7f94 + 60 * record + 0x34, 4)) == formatter
     report = {'scope': 'compiled ColdFire client and Pi metadata server; cached manifest fixtures, no hardware',
-              'fixtures': ['bell', 'tone', 'noise'], 'responses': count,
+              'engines': tested_ids, 'responses': count,
               'checks': ['16 labels/ranges/defaults', 'all enum names', 'atomic publication',
                          'partial/malformed/duplicate/stale rejection', 'bounded retry', 'unchanged refresh', 'session change',
                          'native assembly page dispatch', 'native formatter values and manifest ranges',
