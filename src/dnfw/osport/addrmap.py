@@ -29,6 +29,13 @@ def _kmers(d: bytes, step: int) -> dict[bytes, int]:
     return {k: pos[k] for k, n in c.items() if n == 1}
 
 
+def _same_region(a: int, b: int) -> bool:
+    for lo, hi in ((0x40000000, 0x48000000), (0x80000000, 0x80020000)):
+        if lo <= a < hi:
+            return lo <= b < hi
+    return False
+
+
 class AddrMap:
     def __init__(self, a: bytes, b: bytes, min_run: int = 256):
         self.a, self.b = a, b
@@ -55,6 +62,8 @@ class AddrMap:
     def image(self, va: int, span: int = 8):
         """-> (1.12 va, why) or (None, why) for an address in 1.11's MAIN OS"""
         off = va - BASE
+        if off < self.segs[0][0] and self.a[:self.segs[0][0]] == self.b[:self.segs[0][0]]:
+            return va, "before the first matched run, and the same bytes in both"
         s = self.seg_of(off)
         if s is None:
             return None, "in code that changed in 1.12 (no matching run around it)"
@@ -110,7 +119,8 @@ class AddrMap:
             votes: collections.Counter = collections.Counter()
             for base in range(lo, hi):
                 for d in refs.get(base, ()):
-                    votes[d] += 1
+                    if _same_region(va, va + d):          # a vote off the end of RAM is a constant
+                        votes[d] += 1
             if not votes:
                 continue
             (d, n), = votes.most_common(1)

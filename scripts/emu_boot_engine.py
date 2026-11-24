@@ -26,6 +26,10 @@ never produces, this is where it shows.
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import os
@@ -52,7 +56,7 @@ from unicorn.m68k_const import (UC_M68K_REG_A2, UC_M68K_REG_A6,   # noqa: E402
 from emu_lfo4_tick import (EVAL_A, MIRROR_AT, MIRROR_BYTES, RATE, REST,   # noqa: E402
                            SET_FRAC, STATE, STATE_LEN, TRACKS)
 
-LOAD, SAVE = 0x400DD1EA, 0x400DD6A6     # (live, stored) and (stored, live, flag)
+LOAD, SAVE = A(0x400DD1EA), A(0x400DD6A6)     # (live, stored) and (stored, live, flag)
 SOUND_BYTES, STORED, VALUES_AT = 1163, 359, 28
 MACHINE_TYPE, STORED_MACHINE = 0xDE, 244        # sound+0xDE; stored+244 (0x400dd74e)
 FILTER_TYPE, STORED_FILTER = 0xDF, 245          # sound+0xDF; stored+245 (0x400dd754)
@@ -62,7 +66,7 @@ EXT_SLOTS, EXT_PARAMS = 256, 8
 
 ROOT = "/mnt/d/01_Code/Z_Personal/dn2_firmware"
 SYX = f"{ROOT}/00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
-REPORTER = 0x4011EA6A
+REPORTER = A(0x4011EA6A)
 STACK, SCRATCH = 0x46A00000, 0x46A10000       # above BSS end 0x466b74d0
 
 

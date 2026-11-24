@@ -46,7 +46,9 @@ from unicorn import UC_HOOK_CODE                              # noqa: E402
 from unicorn.m68k_const import UC_M68K_REG_A2, UC_M68K_REG_D3  # noqa: E402
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
-from dnfw.osport.os import A, current as os_current            # noqa: E402
+from dnfw.osport.os import A, audit_unicorn, current as os_current  # noqa: E402
+
+audit_unicorn()
 
 ROOT = pathlib.Path("/mnt/d/01_Code/Z_Personal/dn2_firmware")
 SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"

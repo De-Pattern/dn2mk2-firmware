@@ -48,6 +48,10 @@ Scenarios (each from a fresh machine):
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import bisect
 import json
@@ -64,10 +68,10 @@ from emulib.image import differences                           # noqa: E402
 from emulib import bounded                                      # noqa: E402
 from emulib.machine import Machine                             # noqa: E402
 
-BLK_READ, BLK_WRITE, BLK_TRIM = 0x4012C59A, 0x4012C780, 0x4012C4B2
-BLK_READY, BLK_SECTORS = 0x4461B68C, 0x4461B6B0
-SYSEX_ROUTER, SYSEX_SENDER = 0x4012166E, 0x401233F2
-KIT, SOUND_STRIDE = 0x4210C08C, 1163
+BLK_READ, BLK_WRITE, BLK_TRIM = A(0x4012C59A), A(0x4012C780), A(0x4012C4B2)
+BLK_READY, BLK_SECTORS = A(0x4461B68C), A(0x4461B6B0)
+SYSEX_ROUTER, SYSEX_SENDER = A(0x4012166E), A(0x401233F2)
+KIT, SOUND_STRIDE = A(0x4210C08C), 1163
 DEVICE = 48_340_992                     # the Kingston 32 GB part, reconfigured (docs/drive-storage-research.md)
 POOL0, POOL_END = 0x600000, 0x6C8001
 PL0, PL_END = 0x6D0000, 0x6E0300

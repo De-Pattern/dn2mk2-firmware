@@ -26,6 +26,10 @@ Usage: emu_coupled_recplay.py --build out/v048.syx [--break NAME] [--json OUT]""
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import math
@@ -130,7 +134,7 @@ def main() -> int:
     def word(slot):
         return struct.unpack(">H", c.read(snd + 0x14 + 2 * slot, 2))[0]
 
-    owner = c.call(0x4018A97A)[0]
+    owner = c.call(A(0x4018A97A))[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, 0, ONESHOT, 1, 1)
     setup.append(("track 0 ONESHOT", "direct call of smp_machine_commit (the UI's commit path, not MACHINE SEL's keys)"))
     c.poke(SM.MIRROR + 8, b"\x00" * 16 * SM.POOL_SLOTS)          # an empty pool: room to record
@@ -294,7 +298,7 @@ def main() -> int:
         c.frame_filter = fil
     setup.append(("the note", "UI: KEYBOARD, [TRIG 9] held"))
     kb, trig9 = names.get("KEYBOARD"), 33
-    KB_ON = 0x42431A99                                           # KEYBOARD's state byte (the gate's kbrec step)
+    KB_ON = A(0x42431A99)                                           # KEYBOARD's state byte (the gate's kbrec step)
     kb_was = c.read(KB_ON, 1)[0]
     if kb and not kb_was:                                        # a tap toggles it: only when it is off
         tap(kb)

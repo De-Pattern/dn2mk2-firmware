@@ -8,12 +8,16 @@ a harness has to put into a machine.
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[2] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import json
 import pathlib
 import struct
 
 BASE = 0x40000400                 # where MAIN OS loads
-AREA_VA = 0x4030B980              # the end of stock 1.11, where the DNFW area starts
+AREA_VA = A(0x4030B980)              # the end of stock 1.11, where the DNFW area starts
 
 
 def load_build(directory: str | pathlib.Path):

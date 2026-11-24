@@ -11,6 +11,10 @@ compared with the stock image (DT2_MAIN_IMG, loaded at 0x40000400)."""
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[2] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import atexit
 import json
 import os
@@ -40,7 +44,7 @@ def install(uc) -> None:
                 words = struct.unpack(">32I", bytes(uc.mem_read(sp, 128)))
             except Exception:                   # noqa: BLE001
                 words = ()
-            callers = [f"{v:#010x}" for v in words if 0x40000400 <= v < 0x40220000 or 0x46700000 <= v < 0x46B00000][:6]
+            callers = [f"{v:#010x}" for v in words if 0x40000400 <= v < A(0x40220000) or 0x46700000 <= v < 0x46B00000][:6]
             seen["first"].append({"address": f"{address:#010x}", "pc": f"{pc:#010x}", "callers": callers})
 
     uc.hook_add(UC_HOOK_MEM_READ, low, begin=0, end=LOW_END)

@@ -24,10 +24,14 @@ What it checks (each a key of "facts"):
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import math
 import struct
 
-NOW = 0x4058E8D4
+NOW = A(0x4058E8D4)
 VOICE_TRACK, CTL_FRAME = 0x80005308, 0x80005E60
 STORE_SECTOR = 0x600000
 
@@ -90,11 +94,11 @@ def run(cx):
 
     # -- the track: a SLICE track on SAMP 1 (slot 0), SLCE at NOTE ---------------------------
     kit = struct.unpack(">I", m.read(0x800052A0, 4))[0]
-    trk = m.read(0x42431A6C, 1)[0] & 15
+    trk = m.read(A(0x42431A6C), 1)[0] & 15
     snd_ = kit + 52 + 1163 * trk
 
     def set_rec(rid, value):
-        r = struct.unpack(">3i", m.read(0x401F7F94 + 60 * rid, 12))
+        r = struct.unpack(">3i", m.read(A(0x401F7F94) + 60 * rid, 12))
         m.write(snd_ + 20 + 2 * r[1], struct.pack(">H", (value + (r[2] >> 8)) << 8))
     m.write(snd_ + 0xDE, bytes([13]))
     set_rec(SM.SAMP_REC, 1)

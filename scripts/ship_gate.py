@@ -103,6 +103,11 @@ the full run reuses the standalone passes only while nothing they read has chang
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A, current as _os_current  # noqa: E402  (docs/os112-port.md)
+OS_V = _os_current()                    # the stock OS this run is for (DN2_OS)
+
 import argparse
 import datetime
 import hashlib
@@ -163,7 +168,7 @@ MNM_EXC_TREES = {"src/dnfw/mnm": "c27c4179af8142a94794fcafac097b5b99edd267",
 # without the golden runs test_mnm collects only its 8 tests that need none (they skip as a
 # module); its 366 golden cases are not collected at all (measured on v0.39's tree, 2026-11-05)
 MNM_EXC_REST = 8
-TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
+TESTS = ["test/test_safety.py", "test/test_osport.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py",                    # v0.45: test_ping_coldfire/_live dropped with PING
          "test/test_shft_live.py", "test/test_mnm.py",
@@ -502,8 +507,16 @@ def main() -> int:
         # tests these sources, not an older build of them)
         if wanted("rebuild"):
             rb = work / "rebuilt.syx"
+            # v0.73 (docs/os112-port.md): a 1.12 build is this tree's 1.11 build, ported
+            stock_b = a.stock if OS_V == "1.11" else ROOT.parent / "Digitone_II_OS1.11.syx"
+            rb11 = rb if OS_V == "1.11" else work / "rebuilt_OS1.11.syx"
             rc_b, out_b = run("rebuild", [sys.executable, "-c", "from dnfw.cli.main import main; main()", "mods", "apply",
-                                          a.stock, "--mod", "waverider", "-o", rb], logs, env={"PYTHONPATH": str(ROOT / "src")})
+                                          stock_b, "--mod", "waverider", "-o", rb11], logs,
+                              env={"PYTHONPATH": str(ROOT / "src"), "DN2_OS": "1.11"})
+            if OS_V != "1.11" and rc_b == 0:
+                rc_b, out_b = run("rebuild_port", [sys.executable, "scripts/port112.py", rb11, "-o", rb,
+                                                   "--report", work / "port112.json"], logs,
+                                  env={"PYTHONPATH": str(ROOT / "src"), "DN2_OS": "1.11"})
             same_b = rc_b == 0 and rb.exists() and read_image(rb) == build_bytes
             gate("the build is this tree's", same_b, "dnfw mods apply here gives the same file, byte for byte"
                  if same_b else ("it differs: rebuild it from this tree" if rc_b == 0 else out_b[-400:]))
@@ -629,7 +642,7 @@ def main() -> int:
             ob_args = [sys.executable, "scripts/gate_overbridge.py", work / "stock_section_3_MAIN_OS.bin",
                        bdir / "section_3_MAIN_OS.bin"]
             rc_o, out_o = run("overbridge", [*ob_args, "--json", work / "overbridge.json"], logs)
-            rc_c, out_c = run("overbridge_control", [*ob_args, "--control", "0x400DB092"], logs)
+            rc_c, out_c = run("overbridge_control", [*ob_args, "--control", f"{A(0x400DB092):#x}"], logs)
             last = out_o.strip().splitlines()[-1] if out_o.strip() else ""
             good = rc_o == 0 and rc_c == 0 and last.startswith("PASS")
             gate("Overbridge's code untouched", good,
@@ -719,7 +732,7 @@ def main() -> int:
         # (scripts/emu_waverider_menu.py's link16 step)
         from dnfw.mods import waverider as W        # noqa: PLC0415
         lay = W.SPEC.get("layout", {})
-        snap = ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"
+        snap = ROOT.parent / f"digikit/out/snapshots/dn2-{OS_V}/ui800M-v014.snap"
         EMU_ENV = {"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"]) / "section_3_MAIN_OS.bin"),
                    "DNFW_EMU_FLAGS": '{"weakptr": false}',
                    "DNFW_LOWTRAP": "1"}   # v0.46: every emulator step traps wild reads (emulib/lowtrap.py)
@@ -926,7 +939,7 @@ def main() -> int:
             g = {k: hex(lay.get(k, 0)) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n", "trim_s",
                                                   "trim_e", "nm_text", "rec_pv_on", "smp_func_held", "smp_cmds",
                                                   "smp_saved", "trim_head_x", "sn_opens", "sn_results")}
-            kit = 0x4210C08C                    # the snapshot's live kit ([0x800052a0])
+            kit = A(0x4210C08C)                    # the snapshot's live kit ([0x800052a0])
             snd = hex(kit + 52 + 1163 * 2)      # track 3's sound
             steps = (f"wait:3,mem:0x800052a0:4,mem:{snd}:256,poke:{g['trim_slot']}:00000004,"
                      f"poke:{g['trim_n']}:00017700,poke:{g['trim_s']}:00000000,poke:{g['trim_e']}:00017700,"
@@ -1066,7 +1079,7 @@ def main() -> int:
             hires = hex(SMx.MIRROR + 0x78000)
             pat = bytes((k * 37) % 200 for k in range(1024)).hex()
             tb = _st.pack(">9I", 0, 30000, 0, 36000, 70000, 40000, 72000, 140000, 72000).hex()
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             pk = ",".join(f"poke:{kit + 52 + 1163 * t + 0xDE:#x}:0d,poke:{kit + 52 + 1163 * t + 108:#x}:0000"
                           for t in range(16))
             # v0.42: the menus poked over the SLICE track's page itself (slice.c closes a menu whose
@@ -1167,7 +1180,7 @@ def main() -> int:
         if "slc_alloc_n" in lay:
             from dnfw.sampler import machines as SMx    # noqa: PLC0415
             sid = SMx.SLICE_REC
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             get = ",".join(f"call:0x40037c52:0:{sid}:{k},wait:2" for k in (0, 2, 4))
             steps = (f"wait:3,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,tap:19,wait:6,tap:25,wait:4,"
                      f"tap:27,wait:4,tap:29,wait:4,tap:19,wait:6,yes,wait:6,png:m,yes,wait:6,"
@@ -1205,7 +1218,7 @@ def main() -> int:
                              "RANDOM's locks are slices": all(v % 512 == 0 and 512 <= v <= 63 * 512 for v in d0[3:6]),
                              "NO keeps RANDOM's locks": len(d0) >= 9 and d0[6:9] == d0[3:6]}
                     if letgo:
-                        trk = [int(v, 16) for k, v in m.items() if k.split("@")[0] == "0x42431a6c"]
+                        trk = [int(v, 16) for k, v in m.items() if k.split("@")[0] == f"{A(0x42431a6c):#x}"]
                         lgv = [int(v, 16) for k, v in m.items() if k.split("@")[0] == hex(lay["slc_letgo"])]
                         facts.update({"RANDOM stays open after YES": sts[1:2] == [5],
                                       "on track 2": trk == [1],
@@ -1230,7 +1243,7 @@ def main() -> int:
         if "smp_mod_apply" in lay:
             from dnfw.sampler import machines as SMx    # noqa: PLC0415
             M = SMx.MIRROR
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             snd0 = kit + 52
             samp0 = snd0 + 0x6A
 
@@ -1275,7 +1288,7 @@ def main() -> int:
             ph_new = "smp_pos_in" in lay
             ph_cmd, phjs = None, work / "playhead.json"
             if ph_new:                          # (a run of its own: the list's steps below are timed)
-                F_ = "0x4058e8d4"
+                F_ = f"{A(0x4058e8d4):#x}"
                 pkt = 0x46A23000                 # (above the harness's call stack: SENTINEL + 0x2C00)
                 per = f"{lay['smp_periods']:#x}"
                 wd = f"{lay['wr_draws']:#x}"
@@ -1367,7 +1380,7 @@ def main() -> int:
                               for n in ("v0", "v1", "v2", "v3", "v4")}
                         dr = [int(pm[k], 16) for k in (wd, f"{wd}@2", f"{wd}@3", f"{wd}@4") if k in pm]
                         facts["v0.40: the newest note's playhead (0x2000, then 0xA000 over 0x2100, 0xA008, the first voice again at 0xE000)"] = (
-                            pm.get("0x42431a6c") == "00" and heads == [0x2000, 0xA000, 0xA008, 0xE000])
+                            pm.get(f"{A(0x42431a6c):#x}") == "00" and heads == [0x2000, 0xA000, 0xA008, 0xE000])
                         facts["v0.40: a moved playhead drawn at the next pass, a still one not redrawn"] = (
                             len(dr) == 4 and sh["v1"] != sh["v0"] and sh["v2"] != sh["v1"] and dr[1] > dr[0]
                             and dr[2] == dr[1] and sh["v3"] == sh["v2"] and sh["v4"] != sh["v3"] and dr[3] > dr[2])
@@ -1434,7 +1447,7 @@ def main() -> int:
             # not a sample machine, so not a use. Every other kit's types poked to 0 (FM).
             # SELECT UNUSED marks {0, 2, 4, 5, 7} (5); UNLOAD empties exactly those
             if "smp_fb_mark_unused" in lay:
-                P0, PSTR, KSTR = 0x4121898C, 122478, 23921
+                P0, PSTR, KSTR = A(0x4121898C), 122478, 23921
                 d2 = bytearray(d[:0xC10])
                 for k in range(8):
                     struct.pack_into("<IIfI", d2, 8 + 16 * k, 0x84001000 + 0x40000 * k, 24000, 1.0, 1)
@@ -1609,7 +1622,7 @@ def main() -> int:
                         lent(LDATA + 4 + 4 * k, 1000 + k, 2, nm) for k, nm in enumerate(hh)) + b"".join(
                         lent(LDATA + 4 + 64 + 4 * k, 1000 + k, 0, nm) for k, nm in enumerate(pab))
                     nfold = b"INCOMING".ljust(32, b"\0") + b"RECORDED".ljust(32, b"\0") + b"AT HIHAT".ljust(32, b"\0")
-                    TICK = 0x4058E8D4
+                    TICK = A(0x4058E8D4)
                     rt, mq, cur, mcur = lay["smp_fb_rowtext"], lay["smp_mq_off"], lay["smp_fb_cur"], lay["smp_fb_mcur"]
                     snap_ = [mem(rt, 144), mem(mq), mem(cur), mem(TICK)]
                     ns = base + lead + [f"poke:{LRAM + 0x200:#x}:{nidx.hex()}", f"poke:{LRAM + 0x200 + 2048 * 64:#x}:{nfold.hex()}",
@@ -1743,7 +1756,7 @@ def main() -> int:
         if "smp_quant" in lay:
             from dnfw.mnm import machines as MMx    # noqa: PLC0415
             from dnfw.perc import machines as PMx   # noqa: PLC0415
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             snd0 = kit + 52
             st = ["wait:2", "png:stock"]
             for ty in MMx.TYPES:
@@ -1822,7 +1835,7 @@ def main() -> int:
         # up (smp_question_up 1); its YES is the question's (it closes, no menu); back on the
         # page, YES opens the menu, NO closes it
         if "smp_question_up" in lay:
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             Q, H, S = lay["smp_question_up"], lay["smp_held_lo"], lay["slc_state"]
             qs = (f"wait:3,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,call:{Q:#x},press:25,wait:2,yes,"
                   f"wait:4,mem:{H:#x}:4,release:25,wait:6,mem:{S:#x}:4,mem:{H:#x}:4,press:17,wait:2,tap:8,"
@@ -1873,7 +1886,7 @@ def main() -> int:
         # commit resets the sound to the new machine's defaults, SAMP to OFF). Track 1 on
         # ONESHOT with SAMP 5; MACHINE SEL, DOWN, YES: the next sample machine, SAMP still 5
         if "smp_machine_commit" in lay:
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             sa, ty = kit + 52 + 20 + 2 * 43, kit + 52 + 0xDE
             ks = (f"wait:3,poke:{ty:#x}:08,poke:{sa:#x}:0500,wait:4,tap:2,wait:6,func-src,wait:20,down,wait:4,"
                   f"yes,wait:20,types,mem:{sa:#x}:2")
@@ -1907,9 +1920,9 @@ def main() -> int:
             from dnfw.mnm import machines as MMf      # noqa: PLC0415
             from dnfw.perc import machines as PMf     # noqa: PLC0415
             from dnfw.sampler import machines as SMf  # noqa: PLC0415
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             snd0 = kit + 52
-            clock, memcpy = 0x4058E8D4, 0x40134490
+            clock, memcpy = A(0x4058E8D4), A(0x40134490)
             ptch, other = PMf.PARAMS[0][1], PMf.PARAMS[2][1]
             wprs, wlo, wtop = PMf.PARAMS[3][1], PMf.PARAMS[3][2], PMf.PARAMS[3][3]
             w_on = wlo + (95 * 2 * wtop + 127) // 254
@@ -2011,10 +2024,10 @@ def main() -> int:
         # buffer; DOWN B2, UP B1, UP 127 (smp_set_samp's write past the record, through smp_quant)
         if "rt_buf_code" in lay:
             from dnfw.sampler import machines as SMp   # noqa: PLC0415
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             snd0 = kit + 52
             samp0 = snd0 + 20 + 2 * 43
-            clock, memcpy = 0x4058E8D4, 0x40134490
+            clock, memcpy = A(0x4058E8D4), A(0x40134490)
             srec = SMp.SAMP_REC
             b1, b2, b8 = SMp.BUF_SAMP0, SMp.BUF_SAMP0 + 2, SMp.BUF_SAMP0 + 14
 
@@ -2084,7 +2097,7 @@ def main() -> int:
         # idle packets' unit 18, permille) in percent, rounded, and -1 when none came in the last
         # second; a PERC page with FUNC held draws it in the tempo's place
         if "smp_dsp_load" in lay:
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             ms = ["wait:3", f"poke:{kit + 52 + 0xDE:#x}:05", "wait:20", "png:tempo",
                   f"poke:{lay['smp_load_peak']:#x}:00000274",                  # 628 permille
                   # (the emulator runs no audio periods: the clock and the packet's time are set)
@@ -2122,7 +2135,7 @@ def main() -> int:
             from dnfw.mnm import machines as MMo     # noqa: PLC0415
             from dnfw.perc import machines as PMo    # noqa: PLC0415
             from dnfw.perc import live as PLo        # noqa: PLC0415
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             snd0 = kit + 52
             sa, ty = snd0 + 20 + 2 * 43, snd0 + 0xDE
             sid = MMo.TYPES[MMo.NAMES.index("SID 6581")]
@@ -2157,7 +2170,7 @@ def main() -> int:
         # NO SAMPLE ON SAMP)
         if "smp_lst_open" in lay and "smp_held_lo" in lay:
             from dnfw.sampler import machines as SMp    # noqa: PLC0415
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             snd0, snd1 = kit + 52, kit + 52 + 1163
             srec = SMp.RECORDS[SMp.SAMP_REC][0]
             lo_ = lay["smp_lst_open"]
@@ -2182,7 +2195,7 @@ def main() -> int:
                     m = r["memory"]
                     sh = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("h2", "h3")}
                     facts = {"the list opens on track 1": int(m[hex(lo_)], 16) == 1,
-                             "TRK + [TRIG 2]: track 2": int(m["0x42431a6c"], 16) == 1,
+                             "TRK + [TRIG 2]: track 2": int(m[f"{A(0x42431a6c):#x}"], 16) == 1,
                              "UP there: the list closed, not taking it": int(m[f"{hex(lo_)}@2"], 16) == 0,
                              "after MACHINE SEL in and out, YES on a SLICE page answers": sh["h2"] != sh["h3"]}
                     good = all(facts.values())
@@ -2197,7 +2210,7 @@ def main() -> int:
         # nine DOWNs to GRID, YES, RIGHT: the FLTR column drawn with MULTI-MODE marked on its
         # first row; LEFT: GRID under the cursor again; RIGHT once more: the same column
         if "colsw" in lay:
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             ty = kit + 52 + 0xDE
             rs = (f"wait:3,poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20," + "down,wait:3," * 9
                   + "png:r0,yes,wait:20,right,wait:20,png:r1,left,wait:20,png:r2,right,wait:20,png:r3,types,"
@@ -2250,7 +2263,7 @@ def main() -> int:
         mb_snap, mb_js, ms_js = work / "machines-boot.snap", work / "machines-boot.json", work / "machines.json"
         stock_sec = work / "stock_section_3_MAIN_OS.bin"
         mb_cmd = [a.venv, "-u", "scripts/emu_machine_boot.py", "--build", bdir, "--stock", stock_sec,
-                  "--snapshot", ROOT.parent / "digikit/out/snapshots/dn2-1.11/boot400M.snap",
+                  "--snapshot", ROOT.parent / f"digikit/out/snapshots/dn2-{OS_V}/boot400M.snap",
                   "--types", ",".join(map(str, mb_types)), "--out", mb_snap, "--json", mb_js]
         ms_cmd = [a.venv, "-u", "scripts/emu_machine_sweep.py", "--snapshot", mb_snap, "--stock", stock_sec,
                   "--mod-types", ",".join(map(str, mb_types)), "--list", ",".join(map(str, _cfm.LIST_NEW)),
@@ -2487,7 +2500,7 @@ def main() -> int:
         from dnfw.sampler import machines as SMk        # noqa: PLC0415
         KB = "mem:0x42431a99:4"
         kb_steps = ["wait:6", KB, "tap:18", "wait:8", KB, "tap:19", "wait:8", KB, "tap:19", "wait:8", KB,
-                    f"poke:{0x4210C08C + 52 + 1163 * 2 + 0xDE:#x}:{SMk.TYPE_OF['ONESHOT']:02x}",
+                    f"poke:{A(0x4210C08C) + 52 + 1163 * 2 + 0xDE:#x}:{SMk.TYPE_OF['ONESHOT']:02x}",
                     "press:16", "wait:2", "tap:27", "wait:2", "release:16", "wait:8", KB,
                     "tap:19", "wait:8", KB, "tap:19", "wait:8", KB,
                     "tap:18", "wait:8", KB, "tap:19", "wait:8", KB, "tap:19", "wait:8", KB, "png:end"]
@@ -2524,7 +2537,7 @@ def main() -> int:
         # released at once
         if "kh_on" in lay:
             HL = {n: lay[n] for n in ("kh_on", "kh_close", "jmp_on", "wr_screen_obj")}
-            SUS, LISTS, MSG = 0x445FE6E0, 0x445FE6F0, 0x46A08000
+            SUS, LISTS, MSG = A(0x445FE6E0), A(0x445FE6F0), 0x46A08000
             hw = f"walk:{HL['wr_screen_obj']:#x}"
             combo = ["press:23", "wait:10", "tap:18", "wait:10", "release:23", "wait:10"]
             midi = [f"poke:{MSG:#x}:803c40", f"call:0x40121aae:{MSG:#x}", f"mem:{LISTS:#x}:8"]
@@ -2604,10 +2617,10 @@ def main() -> int:
         # a synth track (arp off): the starter and a voice in the frame, as stock
         if "kh_on" in lay:
             from dnfw.mods import midiarp as MAg      # noqa: PLC0415
-            kit_ = 0x4210C08C
+            kit_ = A(0x4210C08C)
             ma_mask, ma_mode = kit_ + 0x5CDA, kit_ + 52 + 0x15F
-            ma_cnt = {"starter": 0x40137D3C, "sender": 0x4012B8B0, "keygate": 0x402D0694,
-                      "seqgate": 0x402D0664, "trighook": 0x402D06DC, "vtrig": 0x400DB524}
+            ma_cnt = {"starter": A(0x40137D3C), "sender": A(0x4012B8B0), "keygate": A(0x402D0694),
+                      "seqgate": A(0x402D0664), "trighook": A(0x402D06DC), "vtrig": A(0x400DB524)}
             ma_runs = {}
             for nm, mask, mode in (("midi_arp", "0001", "01"), ("midi_off", "0001", "00"), ("synth_arp", "0000", "00")):
                 js_ = work / f"midiarp_{nm}.json"
@@ -2674,9 +2687,9 @@ def main() -> int:
         # [TRK] + [+] neither; w-winter's unit, upstream docs/flashing.md, 2026-10-12..14)
         if "kh_on" in lay:
             from dnfw.mods import inkey as IKg        # noqa: PLC0415
-            ik_L, ik_flag = 0x4121898C, IKg.FLAG
+            ik_L, ik_flag = A(0x4121898C), IKg.FLAG
             ik_hdr, ik_trk = ik_L + 0x1DD40, ik_L + 1187
-            ik_sound = 0x4210C08C + 52
+            ik_sound = A(0x4210C08C) + 52
             ik_offs = [0, 2, 2, -1, 3, -2, 7, -7, 1, 4, -3, 5, 0, -8, 9, -1]
             base_pokes = [f"poke:{ik_sound + 0x15F:#x}:01", f"poke:{ik_sound + 355:#x}:0fffff",
                           f"poke:{ik_sound + 358:#x}:" + bytes(o & 0xFF for o in ik_offs).hex()]
@@ -2717,7 +2730,7 @@ def main() -> int:
                     if rc != 0 or not js_.exists():
                         return False, f"{nm}: " + out[-700:]
                     r = json.loads(js_.read_text())
-                    L_ = int(r["memory"]["0x42c5a9a0"], 16)
+                    L_ = int(r["memory"][f"{A(0x42c5a9a0):#x}"], 16)
                     if nm.startswith("arp"):
                         s8 = lambda v: v - (1 << 32) if v >> 31 else v        # noqa: E731
                         pre = [(int(x["D0"], 16), int(x["D1"], 16), s8(int(x["D2"], 16)))
@@ -2773,7 +2786,7 @@ def main() -> int:
             M = lambda n, k=4: f"mem:{L[n]:#x}:{k}"                       # noqa: E731
             ts = ["wait:3", f"poke:{vt_va:#x}:{vtrack}"]
             from dnfw.sampler import machines as SMt     # noqa: PLC0415
-            ty5 = 0x4210C08C + 52 + 1163 * 5 + 0xDE      # track 6's machine (the snapshot's kit)
+            ty5 = A(0x4210C08C) + 52 + 1163 * 5 + 0xDE      # track 6's machine (the snapshot's kit)
             for tun, mask in ((9, 0xFFFF & ~(1 << 3)), (0, 0xFFFF)):
                 ts += [f"call:{L['tn_set']:#x}:{tun}:2:{mask}", f"poke:{scratch:#x}:{nw}",
                        f"call:{L['tn_retune']:#x}:{scratch:#x}", f"mem:{scratch:#x}:34"]
@@ -2976,7 +2989,7 @@ def main() -> int:
         # the limit itself is safe: a kit within it plays with no voice left out)
         if "gr_allowed" in lay:
             from dnfw.sampler import guardrail as GRg      # noqa: PLC0415
-            kit = 0x4210C08C
+            kit = A(0x4210C08C)
             ty = lambda t: kit + 52 + 1163 * t + 0xDE      # noqa: E731
             L = {n: lay[n] for n in ("gr_allowed", "gr_refused", "gr_total", "smp_machine_commit")}
             M = lambda n, k=4: f"mem:{L[n]:#x}:{k}"        # noqa: E731
@@ -3189,7 +3202,8 @@ def main() -> int:
             exc = mnm_exception()
             if isinstance(exc, str):
                 return False, exc
-            rc, out = run("pytest", py_cmd, logs, env={"PYTHONPATH": "src"}, trace=tdir)
+            rc, out = run("pytest", py_cmd, logs, env={"PYTHONPATH": "src", "DN2_OS": "1.11"},  # source-level: 1.11
+                          trace=tdir)
             last = out.strip().splitlines()[-1] if out.strip() else ""
             # "586 passed, 1 skipped in 512.3s (0:08:32)": the counts, as serial pytest prints them
             ok = rc == 0 and re.search(r"\b\d+ passed\b", last) is not None

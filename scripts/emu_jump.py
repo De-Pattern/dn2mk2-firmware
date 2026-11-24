@@ -46,6 +46,10 @@ Prints one JSON line `emu_jump <scenario>: {...}`; `--json` keeps it with the tr
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import hashlib
 import json
@@ -64,15 +68,15 @@ from emulib.panel import NO, YES, Panel                 # noqa: E402
 
 PLAY, PTN = (2, 3), (2, 6)
 TRIG = [(3 + k // 8, k % 8) for k in range(16)]         # codes 25..40
-SEQ_ISR, SEQ_VECTOR = 0x400D987A, 121
-CUE = 0x400D93F0
+SEQ_ISR, SEQ_VECTOR = A(0x400D987A), 121
+CUE = A(0x400D93F0)
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
-P0, PSTRIDE = 0x4121898C, 122478                         # pattern n at P0 + n * PSTRIDE (0x400fa17c)
-K0, KSTRIDE = 0x4210C08C, 23921                          # its kit
+P0, PSTRIDE = A(0x4121898C), 122478                         # pattern n at P0 + n * PSTRIDE (0x400fa17c)
+K0, KSTRIDE = A(0x4210C08C), 23921                          # its kit
 LEN, MODE, SCALE, TRK, TLEN = 122196, 122201, 122202, 1701, 1164
-FAULT_REPORTER = 0x4011EA6A
-BLK_READ, BLK_WRITE = 0x4012C59A, 0x4012C780
-BLK_READY, BLK_SECTORS = 0x4461B68C, 0x4461B6B0
+FAULT_REPORTER = A(0x4011EA6A)
+BLK_READ, BLK_WRITE = A(0x4012C59A), A(0x4012C780)
+BLK_READY, BLK_SECTORS = A(0x4461B68C), A(0x4461B6B0)
 SET_SECTOR = 0x6FF000
 CALLS_A_TICK = 4                                         # ISR entries a tick here (measured)
 CUE_STEP, END_STEP = 3, 36
@@ -207,13 +211,13 @@ def main() -> int:
     trace = []
 
     def pat_index():
-        return (u32(0x42C5A9A0) - P0) // PSTRIDE
+        return (u32(A(0x42C5A9A0)) - P0) // PSTRIDE
 
     def record(tag=""):
-        block = m.read(0x42C5A900, 0x200) + m.read(0x446483D0, 0xF4)
-        row = {"n": len(trace), "tag": tag, "pat": pat_index(), "a91c": u16(0x42C5A91C), "tick": u8(0x42C5A91E),
-               "t6": u32(0x42C5A9D0) * 6 + u32(0x42C5A9D4),
-               "cur": list(m.read(0x42C5A984, 16)), "next": list(m.read(0x42C5A964, 16)),
+        block = m.read(A(0x42C5A900), 0x200) + m.read(A(0x446483D0), 0xF4)
+        row = {"n": len(trace), "tag": tag, "pat": pat_index(), "a91c": u16(A(0x42C5A91C)), "tick": u8(A(0x42C5A91E)),
+               "t6": u32(A(0x42C5A9D0)) * 6 + u32(A(0x42C5A9D4)),
+               "cur": list(m.read(A(0x42C5A984), 16)), "next": list(m.read(A(0x42C5A964), 16)),
                "digest": hashlib.sha256(block).hexdigest()[:16]}
         trace.append(row)
         return row
@@ -226,7 +230,7 @@ def main() -> int:
             record(tag)
 
     def global_step():
-        return u32(0x42C5A9D0)
+        return u32(A(0x42C5A9D0))
 
     out = {"scenario": a.scenario, "variant": a.variant, "stock": a.stock}
 
@@ -292,7 +296,7 @@ def main() -> int:
     ticks(3)
     cue_at = len(trace)
     out["cue_global_step"] = global_step()
-    out["cue_tick"] = u8(0x42C5A91E)
+    out["cue_tick"] = u8(A(0x42C5A91E))
     if a.scenario in ("off", "on"):
         cue_a02()
     elif a.scenario == "pc":
@@ -357,7 +361,7 @@ def rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with
         m.write(pat + SCALE, bytes([sc]))
 
     def pat_index():
-        v = u32(0x42C5A9A0)
+        v = u32(A(0x42C5A9A0))
         return (v - P0) // PSTRIDE if v >= P0 else -1
     count = [0]
 

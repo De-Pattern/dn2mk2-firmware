@@ -30,6 +30,10 @@ does the firmware's EXCEPTION reporter, and a page or menu that does not change 
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import os
@@ -47,9 +51,9 @@ FUNC, SRC, FLTR = (2, 0), (0, 1), (0, 2)    # codes 17, 2, 3
 TRK, TRIG1 = (1, 7), 25                     # [TRK] code 16; [TRIG 1..16] codes 25..40
 KIT = 0x800052A0                            # the live kit; sound t at + 52 + 1163 t
 SOUND_TYPE = 0xDE
-ACTIVE = 0x42431A6C                         # the UI's active track (byte)
-REDRAW = 0x4011D32A                         # the UI loop's draw of every view on its screen
-REPORTER = 0x4011EA6A                       # the firmware's EXCEPTION reporter
+ACTIVE = A(0x42431A6C)                         # the UI's active track (byte)
+REDRAW = A(0x4011D32A)                         # the UI loop's draw of every view on its screen
+REPORTER = A(0x4011EA6A)                       # the firmware's EXCEPTION reporter
 LOW_END = 0x3FFFFFFF                        # below DDR: nothing of ours may read here
 
 
@@ -87,7 +91,7 @@ class Run:
         if len(self.low) < 8:
             sp = uc.reg_read(self.K.UC_M68K_REG_A7)
             words = struct.unpack(">32I", bytes(uc.mem_read(sp, 128)))
-            callers = [f"{v:#010x}" for v in words if 0x40000400 <= v < 0x40220000][:6]
+            callers = [f"{v:#010x}" for v in words if 0x40000400 <= v < A(0x40220000)][:6]
             self.low.append({"address": f"{address:#010x}", "pc": f"{pc:#010x}", "callers": callers,
                              "step": self.step})
 

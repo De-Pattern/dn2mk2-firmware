@@ -277,6 +277,39 @@ def port_area(blob: bytes, m: AddrMap, rep: Report) -> bytes:
 
 def port_main_os(build11: bytes, m: AddrMap, rep: Report) -> bytes:
     from ..mods import platform
-    base, _ = platform.split(build11)
+    n11 = platform.SPEC["stock_length"]                # 1.11's, whatever DN2_OS says
+    at = platform.SPEC["calls_va"] - BASE
+    if (len(build11) < n11 or len(m.a) != n11
+            or build11[at:at + len(platform.SPEC["hook"]) // 2].hex() != platform.SPEC["hook"]):
+        raise PortError("not a DN2 mk2 build on stock 1.11 (no platform loader, or the wrong length)")
+    base = build11[:n11]
     new_base = port_edits(m.a, base, m.b, m, rep)
     return bytes(new_base) + port_area(build11[len(base):], m, rep)
+
+
+def port_syx(build11: Path, out: Path, stock11: Path | None = None, stock12: Path | None = None) -> Report:
+    """build11 (.syx, a DN2 mk2 build on stock 1.11) -> out (.syx on stock 1.12), signed; the
+    report says every edit, operand and data word. Refuses on any refusal."""
+    from ..cli.files import read_image
+    from ..firmware.load import load
+    from .addrmap import AddrMap, main_os
+    stock11 = stock11 or ROOT.parent / "Digitone_II_OS1.11.syx"
+    stock12 = stock12 or ROOT.parent / "Digitone_II_OS1.12.syx"
+    m = AddrMap(main_os(stock11), main_os(stock12))
+    rep = Report()
+    fw = load(read_image(build11))
+    secs = {s.id: s for s in fw.container.sections}
+    main12 = port_main_os(secs[3].unpack(), m, rep)
+    if rep.refused or any(w[3] == "UNREVIEWED" for w in rep.data_words):
+        raise PortError(f"{len(rep.refused)} refused: {rep.refused[:5]}")
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "s3.bin").write_bytes(main12)
+        (d / "s7.bin").write_bytes(secs[7].unpack())
+        r = subprocess.run([__import__("sys").executable, "-c", "from dnfw.cli.main import main; main()",
+                            "build", str(stock12), "-s", f"3={d / 's3.bin'}", "-s", f"7={d / 's7.bin'}",
+                            "-o", str(out)], capture_output=True, text=True,
+                           env={**__import__("os").environ, "PYTHONPATH": str(ROOT / "src"), "DN2_OS": "1.11"})
+        if r.returncode != 0:
+            raise PortError(r.stdout[-400:] + r.stderr[-400:])
+    return rep

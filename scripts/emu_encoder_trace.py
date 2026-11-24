@@ -37,6 +37,10 @@ Usage: emu_encoder_trace.py --enc 4 --slot 67 --detents 12 --gap 200000 --json O
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import os
@@ -49,9 +53,9 @@ sys.path.insert(0, str(HERE))
 from emulib import bounded                                      # noqa: E402
 
 SNAP = str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap")
-TICK = 0x466758B0
-ACC, PENDING, LAST = 0x445A0DC4, 0x445A0DEC, 0x445A0D9C
-DRIVER, QSEND, QRECV, SETTER = 0x4011FC2C, 0x40001896, 0x40001928, 0x40037B74
+TICK = A(0x466758B0)
+ACC, PENDING, LAST = A(0x445A0DC4), A(0x445A0DEC), A(0x445A0D9C)
+DRIVER, QSEND, QRECV, SETTER = A(0x4011FC2C), 0x40001896, 0x40001928, 0x40037B74
 KIT = 0x800052A0
 # The page's knob state (0x4011336e's a2, 20 bytes an encoder: +0 timeout, +8 acceleration,
 # +12 remainder, +16 rest counter), as the FLTR page of this snapshot places it.
@@ -189,7 +193,7 @@ def main() -> int:
         hooks.append(uc.hook_add(UC_HOOK_MEM_WRITE, on_w, begin=wa, end=wa + wl - 1))
     panel.settle(5_000_000)
     if a.machine is not None:
-        owner = guest(m, 0x4018A97A)
+        owner = guest(m, A(0x4018A97A))
         guest(m, 0x40031880, owner + 0xF4, 0, a.machine, 1, 1)
         panel.settle(5_000_000)
     rec_ids = [int(x, 0) for x in a.records.split(",") if x]
@@ -197,8 +201,8 @@ def main() -> int:
     def records():
         out_ = {}
         for i in rec_ids:
-            r = struct.unpack(">15i", bytes(m.read(0x401F7F94 + 60 * i, 60)))
-            t = struct.unpack(">4I", bytes(m.read(0x4243325C + 68 * i + 4, 16)))
+            r = struct.unpack(">15i", bytes(m.read(A(0x401F7F94) + 60 * i, 60)))
+            t = struct.unpack(">4I", bytes(m.read(A(0x4243325C) + 68 * i + 4, 16)))
             out_[i] = {"range": r[3], "default": r[4], "flag": r[5], "fmt": hex(r[13] & 0xFFFFFFFF),
                        "type": [hex(x) for x in t]}
         return out_
@@ -224,7 +228,7 @@ def main() -> int:
             uc_.mem_write(st_ + 16, struct.pack(">i", a.rest))
             primed["done"] = True
         log.append(("step", seqn["n"], now(), args(3)[2], before))
-    hooks.append(uc.hook_add(UC_HOOK_CODE, on_step, begin=0x4011336E, end=0x4011336E))
+    hooks.append(uc.hook_add(UC_HOOK_CODE, on_step, begin=A(0x4011336E), end=A(0x4011336E)))
     if a.no_wheel:
         for src in getattr(panel.timers, "sources", (panel.timers,)):
             if hasattr(src, "channels") and 2 in src.channels and type(src).__name__ == "Pits":

@@ -21,6 +21,10 @@ a tempo change, a trigless lock, a trig with SLIDE and no p-lock, a new sound mi
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import hashlib
 import json
@@ -38,14 +42,14 @@ from emulib.machine import Machine                             # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 STATE, SRC, OUT = 0x8000DE60, 0x80003AF0, 0x800068E4
-OWNER, VSOUND, FRAMES = 0x80005308, 0x800052A8, 0x4058E8D4
+OWNER, VSOUND, FRAMES = 0x80005308, 0x800052A8, A(0x4058E8D4)
 TEMPO_AT = 0x80005E60 + 216
 KIT, SOUND_STRIDE = 0x800052A0, 1163
 SYNC = 0x4002549C                       # (sound, voice): the sound into the voice's mirror block
-UNDO = 0x400DAF44                       # (voice, mirror, sound): the locked slots back to the sound
-BITMAP_CLEAR = 0x400DB052               # (voice)
-BUILD, APPLY = 0x400D85E8, 0x400DB092
-LOAD, SAVE, CLEAR = 0x400DE51E, 0x400DE718, 0x4003D14E
+UNDO = A(0x400DAF44)                       # (voice, mirror, sound): the locked slots back to the sound
+BITMAP_CLEAR = A(0x400DB052)               # (voice)
+BUILD, APPLY = A(0x400D85E8), A(0x400DB092)
+LOAD, SAVE, CLEAR = A(0x400DE51E), A(0x400DE718), 0x4003D14E
 REC, RECS, INDEX, COUNTS, TABLE_BYTES = 258, 80, 20640, 22256, 22256 + 2048
 LIST_BYTES = 20 + 202 * 8
 FREQ, FDBK = 67, 31                     # FILTER FREQ (shared), FM TONE's FEEDBACK (a machine param)
@@ -174,7 +178,7 @@ def samp_lock_checks(machine, call, frame, trig, table, snd, lay, put16, put32):
 
     def lfo_adds(uc_, ad, sz, us):
         put16(OUT + 2 * idx(V, SAMP_SLOT), machine.word(OUT + 2 * idx(V, SAMP_SLOT)) + (43 << 8))
-    h = machine.uc.hook_add(UC_HOOK_CODE, lfo_adds, begin=0x400DB22C, end=0x400DB22C)
+    h = machine.uc.hook_add(UC_HOOK_CODE, lfo_adds, begin=A(0x400DB22C), end=A(0x400DB22C))
     try:
         call(lay["smp_mod_apply"], OUT)
     finally:
@@ -413,7 +417,7 @@ def main() -> int:
         uc_.reg_write(K.UC_M68K_REG_A7, sp + 4)
         uc_.reg_write(K.UC_M68K_REG_D0, OUT)
         uc_.reg_write(K.UC_M68K_REG_PC, ret)
-    uc.hook_add(UC_HOOK_CODE, smoother, begin=0x400DB12A, end=0x400DB12A)
+    uc.hook_add(UC_HOOK_CODE, smoother, begin=A(0x400DB12A), end=A(0x400DB12A))
 
     f0 = machine.long(FRAMES)
     isr_frames = machine.long(FRAMES)
@@ -716,8 +720,8 @@ def main() -> int:
         from dnfw import slides as DSL                          # noqa: PLC0415
         check("v0.66: the harness's SLEN table is dnfw.slides' (NXT 15)",
               DSL.SLEN_NXT == NXT and tuple(DSL.SLEN_UNITS) == UNITS and DSL.SLEN_DEFAULT == NXT)
-        P = machine.long(0x42C5A9A0)
-        owner = call(0x4018A97A)["D0"]
+        P = machine.long(A(0x42C5A9A0))
+        owner = call(A(0x4018A97A))["D0"]
         upat = call(0x4003EFA8, owner)["D0"] if owner else 0
         ptrs = []
         for tt in range(16):
@@ -944,7 +948,7 @@ def main() -> int:
         panel.settle(10_000_000)
         panel.tap(key(25))                                      # a trig on step 1
         panel.settle(10_000_000)
-        P = machine.long(0x42C5A9A0)                            # the pattern: step flags u16 at +2 step (track 1)
+        P = machine.long(A(0x42C5A9A0))                            # the pattern: step flags u16 at +2 step (track 1)
         flags0 = machine.word(P)
         panel.hold(key(25), 5_000_000)
         panel.settle(10_000_000)

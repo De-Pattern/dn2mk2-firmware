@@ -23,6 +23,10 @@ frame composed after it was.
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import os
@@ -36,8 +40,8 @@ sys.path.insert(0, str(HERE.parent / "src"))
 sys.path.insert(0, str(HERE))
 
 KIT, SOUND_TYPE = 0x800052A0, 0xDE
-REDRAW = 0x4011D32A
-REPORTER = 0x4011EA6A
+REDRAW = A(0x4011D32A)
+REPORTER = A(0x4011EA6A)
 
 
 def differences(stock: bytes, image: bytes, base: int = 0x40000400):
@@ -104,7 +108,7 @@ def main() -> int:
             sp = uc.reg_read(K.UC_M68K_REG_A7)
             words = struct.unpack(">32I", bytes(uc.mem_read(sp, 128)))
             st["low"].append({"address": f"{address:#010x}", "pc": f"{pc:#010x}",
-                              "callers": [f"{v:#010x}" for v in words if 0x40000400 <= v < 0x40220000][:6],
+                              "callers": [f"{v:#010x}" for v in words if 0x40000400 <= v < A(0x40220000)][:6],
                               "after_poke": st["poked"] is not None})
 
     def reporter(uc, address, size, user):
@@ -144,7 +148,7 @@ def main() -> int:
         hook_at = out[5]
 
         def at(addr, cb, *rest, **kw):
-            if addr == 0x4012D2FA and bytes(uc.mem_read(addr, 2)) != b"\x60\xfe":
+            if addr == A(0x4012D2FA) and bytes(uc.mem_read(addr, 2)) != b"\x60\xfe":
                 return None
             return hook_at(addr, cb, *rest, **kw)
         return (*out[:5], at, *out[6:])

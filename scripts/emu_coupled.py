@@ -24,6 +24,10 @@ last block), .smp_out(t) (a sample voice's own output)."""
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import os
 import pathlib
 import struct
@@ -41,7 +45,7 @@ CF_FRAME = 0x80005E60                   # the frame as the ColdFire builds it (1
 CF_REPLY_TAIL = 0x80005E40              # the SPI reply's tail: the DSP's status, 16 BE halfwords
 CF_TDM_TX, CF_TDM_RX = 0x4E6E0100, 0x4E6DF100
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
-SEQ_ISR, SEQ_VECTOR = 0x400D987A, 121   # the sequencer's timer ISR (emu_jump.py, emu_waverider_menu.py)
+SEQ_ISR, SEQ_VECTOR = A(0x400D987A), 121   # the sequencer's timer ISR (emu_jump.py, emu_waverider_menu.py)
 SEQ_ENTRIES_A_STEP = 24                 # 4 entries a tick, 6 ticks a sixteenth (measured, emu_jump.py)
 UI_SLICE = 1_000_000                    # ColdFire instructions a period between ISRs (the UI loop's pass needs about this here)
 # v0.48, the timing-faithful mode (docs/coupled-emulator.md): on the unit the audio ISR takes
@@ -50,8 +54,8 @@ UI_SLICE = 1_000_000                    # ColdFire instructions a period between
 # the UI's slice and the timers count (the fast stepper's blocks x per_block)
 ISR_SHARE_STOPPED = 0.56
 AUDIO_HZ = 1500
-TICK = 0x466758B0                       # the panel task's 60 Hz tick (the timer wheel's, every PIT2)
-IDLE_SPIN = 0x400CF0E2                  # the idle task's bra.s * (docs/coldfire-tasks.md)
+TICK = A(0x466758B0)                       # the panel task's 60 Hz tick (the timer wheel's, every PIT2)
+IDLE_SPIN = A(0x400CF0E2)                  # the idle task's bra.s * (docs/coldfire-tasks.md)
 
 
 def _bits(x: float) -> int:
@@ -434,7 +438,7 @@ class Coupled:
         def on_spin(uc_, ad, sz, us):
             spins["n"] += 1
         h = self.uc.hook_add(UC_HOOK_CODE, on_spin, begin=IDLE_SPIN, end=IDLE_SPIN)
-        t0, f0 = self.long(TICK), self.long(0x4058E8D4)
+        t0, f0 = self.long(TICK), self.long(A(0x4058E8D4))
         fired0 = dict(self.panel.timers.fired)
         ui0, isr0 = self.ui_units, len(self.isr_units)
         self.periods(n, label=f"timing report ({self.timing})")
@@ -445,7 +449,7 @@ class Coupled:
         ui = self.ui_units - ui0
         out = {"mode": self.timing, "periods": n, "audio_s": n / AUDIO_HZ,
                "tick_60hz": self.long(TICK) - t0, "tick_want": round(60 * n / AUDIO_HZ, 1),
-               "frames": self.long(0x4058E8D4) - f0, "timers_fired": fired,
+               "frames": self.long(A(0x4058E8D4)) - f0, "timers_fired": fired,
                "isr_units_median": sorted(isr)[len(isr) // 2] if isr else None,
                "ui_units_a_period": ui / n, "frame_units": self.frame_units,
                "idle_spin_share_of_ui": (spins["n"] * per / ui) if ui else None}

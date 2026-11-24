@@ -21,11 +21,15 @@ What it checks (each a key of the result's "facts"):
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import struct
 
-ACTIVE = 0x405CD899
-NOW = 0x4058E8D4
-PJ_LOAD, PJ_GET_PROJECT = 0x40042E6E, 0x4018A97A
+ACTIVE = A(0x405CD899)
+NOW = A(0x4058E8D4)
+PJ_LOAD, PJ_GET_PROJECT = 0x40042E6E, A(0x4018A97A)
 STUB_OPEN, STUB_TEMP = 0x40042B92, 0x40040190
 NEW_SITE, NEW_AFTER = 0x40042AF0, 0x40042AFA
 TN_AT, TN_END = 0x6E0400, 0x6E0500

@@ -56,6 +56,39 @@ def to112(x: int) -> int:
     return t[k]
 
 
+ISSUED: set[int] = set()
+
+
 def A(x: int) -> int:
     """a 1.11 address on the OS of this run"""
-    return x if current() == "1.11" else to112(x)
+    if current() == "1.11":
+        return x
+    v = to112(x)
+    ISSUED.add(v)
+    return v
+
+
+def audit_unicorn() -> None:
+    """On 1.12, refuse a code hook at an address that did not come from `A` and where 1.11 and 1.12
+    hold different code: a 1.11 address a script forgot to translate. (Same code at the same
+    address in both, before 1.12's first change, needs no translation.)"""
+    if current() == "1.11":
+        return
+    import unicorn
+    if getattr(unicorn.Uc, "_dnfw_audited", False):
+        return
+    main11 = (ROOT.parent / "sec111" / "section_3_MAIN_OS.bin").read_bytes()
+    main12 = (ROOT.parent / "sec112" / "section_3_MAIN_OS.bin").read_bytes()
+    base = 0x40000400
+    orig = unicorn.Uc.hook_add
+
+    def hook_add(self, htype, callback, user_data=None, begin=1, end=0, *a, **k):
+        if htype & unicorn.UC_HOOK_CODE and begin == end and base <= begin < base + len(main12):
+            o = begin - base
+            if begin not in ISSUED and main11[o:o + 6] != main12[o:o + 6]:
+                raise SystemExit(f"osport audit: a code hook at {begin:#x}, not from A() and not "
+                                 f"the same code in 1.11 and 1.12: an untranslated 1.11 address")
+        return orig(self, htype, callback, user_data, begin, end, *a, **k)
+
+    unicorn.Uc.hook_add = hook_add
+    unicorn.Uc._dnfw_audited = True

@@ -64,6 +64,10 @@ BASE = 0x40000400
 SPEC = json.loads((pathlib.Path(__file__).with_name("platform_code.json")).read_text())
 
 STOCK_LENGTH = SPEC["stock_length"]
+# v0.73 (docs/os112-port.md): a run that reads a build ported to 1.12 (DN2_OS=1.12) finds the area
+# after 1.12's MAIN OS. Builds are only ever made on 1.11 (`join` refuses any other length).
+if __import__("os").environ.get("DN2_OS", "1.11") == "1.12":
+    STOCK_LENGTH = 3_196_288
 RUNTIME_VA = area.RUNTIME_VA       # the data window: the header, then the data chunks
 DATA_LIMIT = SPEC["data_limit"]    # the window ends below lfowaves' NOIS state
 
@@ -108,7 +112,17 @@ def split(content: bytes) -> tuple[bytes, list[tuple[bytes, bytes]]]:
 
 def installed(content: bytes) -> bool:
     at = SPEC["calls_va"] - BASE
-    return bytes(content[at:at + len(SPEC["hook"]) // 2]).hex() == SPEC["hook"]
+    return bytes(content[at:at + len(SPEC["hook"]) // 2]).hex() == _hook()
+
+
+def _hook() -> str:
+    """the start-up hook's bytes: `jsr <loader>`, at the loader's address on this run's OS"""
+    if __import__("os").environ.get("DN2_OS", "1.11") != "1.12":
+        return SPEC["hook"]
+    from ..osport.os import to112
+    link = f"{SPEC['link_va']:08x}"
+    assert link in SPEC["hook"]
+    return SPEC["hook"].replace(link, f"{to112(SPEC['link_va']):08x}")
 
 
 def join(base: bytes, chunks: list[tuple[bytes, bytes]]) -> bytes:

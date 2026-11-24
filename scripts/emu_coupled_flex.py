@@ -39,6 +39,10 @@ Usage: emu_coupled_flex.py --build out/v049.syx [--break notrig|nosamp|wrongbuf|
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import math
@@ -53,13 +57,13 @@ from emu_coupled import CF_FRAME, Coupled                       # noqa: E402
 from emu_coupled_recplay import best_match, chirp              # noqa: E402
 
 KIT, STRIDE = 0x800052A0, 1163
-SEQ_PATTERN, TRACK_CUR = 0x42C5A9A0, 0x42C5A984
+SEQ_PATTERN, TRACK_CUR = A(0x42C5A9A0), A(0x42C5A984)
 PAT_LENGTH, PAT_LOCK_TABLE = 122196, 97872
 FLEX = 17
 T = 1                                    # the FLEX track (not 0: the voice table reads 0 for an idle voice)
 SLOT_RLEN, SLOT_SAMP, SLOT_SRC = 40, 43, 38
 SLOT_TRACK = 0x80005308
-KB_ON = 0x42431A9C                       # KEYBOARD's state (1 on; measured on stock, 2026-11-10)
+KB_ON = A(0x42431A9C)                       # KEYBOARD's state (1 on; measured on stock, 2026-11-10)
 
 
 STATE, SRC, OUT = 0x8000DE60, 0x80003AF0, 0x800068E4
@@ -99,7 +103,7 @@ def install_smoother_model(c):
         uc_.reg_write(K.UC_M68K_REG_A7, sp + 4)
         uc_.reg_write(K.UC_M68K_REG_D0, OUT)
         uc_.reg_write(K.UC_M68K_REG_PC, ret)
-    c.uc.hook_add(UC_HOOK_CODE, smoother, begin=0x400DB12A, end=0x400DB12A)
+    c.uc.hook_add(UC_HOOK_CODE, smoother, begin=A(0x400DB12A), end=A(0x400DB12A))
 
 
 def main() -> int:
@@ -155,7 +159,7 @@ def main() -> int:
         held(code, False)
     kit = c.long(KIT)
     snd = kit + 52 + STRIDE * T
-    owner = c.call(0x4018A97A)[0]
+    owner = c.call(A(0x4018A97A))[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, T, FLEX, 1, 1)
     rep["setup"].append(("track 1 FLEX", "direct: smp_machine_commit (the UI's commit path)"))
     if a.pool:                                                   # v0.55: track 2 ONESHOT, from the start
@@ -465,7 +469,7 @@ def main() -> int:
         return set(c.panel.panel.lit(bytes(f[-1]))) if f else set()
 
     def aged():
-        c.poke(lay["smp_knob_at"], struct.pack(">I", (c.long(0x4058E8D4) - 3000) & 0xFFFFFFFF))
+        c.poke(lay["smp_knob_at"], struct.pack(">I", (c.long(A(0x4058E8D4)) - 3000) & 0xFFFFFFFF))
         c.periods(6)
     tap(19)                                                      # GRID RECORD: a held trig takes locks
     held(25, True)
