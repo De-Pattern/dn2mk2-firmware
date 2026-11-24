@@ -107,7 +107,7 @@ def main() -> int:
 
         def at_drawn(uc, address, size, user):
             k = uc.reg_read(UC_M68K_REG_D3)
-            src = int.from_bytes(uc.mem_read(spec["source_data_ptr"], 4), "big")
+            src = int.from_bytes(uc.mem_read(A(spec["source_data_ptr"]), 4), "big")   # stock BSS: per OS
             got = bytes(uc.mem_read(src, 1024))
             res["drawn"] += 1
             if got != expect[k]:
