@@ -177,6 +177,9 @@ def main() -> int:
     c.call(lay["fx_set"], T, 2, 1)
     rep["setup"].append(("pattern 4 steps; the track's SRC IN and R.LEN 1 step (fx_set)", "direct: written"))
     c.input = chirp
+    if __import__("os").environ.get("DNFW_LAT_MAIN"):                                   # v0.73 latency: record MAIN, silence in
+        c.call(lay["fx_set"], T, 0, 1)
+        c.input = None
     c.periods(4, label="settle")
     if not link("0. track 1 is FLEX", c.read(snd + 0xDE, 1)[0] == FLEX, f"type {c.read(snd + 0xDE, 1)[0]}"):
         return finish()
@@ -186,6 +189,12 @@ def main() -> int:
     tl0 = c.read(pat + 1153, 1)[0]
     link("0b. v0.54: switching to FLEX sets the track's trig LEN to INF (127); track 0 (not switched) keeps its own",
          tl == 127 and tl0 != 127, f"track {T} {tl}, track 0 {tl0}")
+    if __import__("os").environ.get("DNFW_LAT_MAIN"):                                   # track 0 (FM): GRID RECORD, [TRIG 1], off
+        held(16, True); tap(25); held(16, False)
+        c.periods(4)
+        tap(19); tap(25); tap(19)
+        c.periods(4)
+        rep["setup"].append(("track 0: a trig on step 1 (GRID RECORD)", "UI"))
     held(16, True)
     tap(24 + T + 1)                                              # [TRK] + [TRIG 2]: track 1
     held(16, False)
@@ -258,6 +267,7 @@ def main() -> int:
         vt_ = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
         lat.append({"n": n, "fired": c.long(lay["rt_fired"]) != fired0, "status": c.last_status[:2],
                     "out": max((abs(x) for x in c.last_bufs[T]), default=0.0) if c.last_bufs else None,
+                    "out0": max((abs(x) for x in c.last_bufs[0]), default=0.0) if c.last_bufs else None,
                     "bpm120": struct.unpack(">H", c.last_frame[2 * 108:2 * 108 + 2])[0] if c.last_frame else None,
                     "voices": {v: c.read(CF_FRAME + 168 + 146 * v, 146).hex() for v in range(16) if vt_[v] == T}})
         if fired_at is None and c.long(lay["rt_fired"]) != fired0:
@@ -280,7 +290,7 @@ def main() -> int:
         if fired_at is None and n > 120:
             break
     rep["latency_trace"] = lat
-    if __import__("os").environ.get("DNFW_LAT_ONLY"):
+    if __import__("os").environ.get("DNFW_LAT_ONLY") and not __import__("os").environ.get("DNFW_LAT_MAIN"):
         pathlib.Path(a.json).write_text(json.dumps({"fired_at": fired_at, "rec_at": rec_at, "end_at": end_at,
                                                     "trace": lat}))
         return 0
@@ -301,6 +311,19 @@ def main() -> int:
                 f"entry {e0}; others {[(k, e) for k, e in enumerate(ents) if k and (e[0] or e[1])]}"):
         return finish()
     addr, frames = e0[0], e0[1]
+    if __import__("os").environ.get("DNFW_LAT_MAIN"):
+        ws = [c.dsp_word(addr + 4 * i) for i in range(min(frames, 6000) // 2)]
+        smp = []
+        for w in ws:
+            for h in (w & 0xFFFF, w >> 16):
+                smp.append(((h ^ 0x8000) - 0x8000) / 32768.0)
+        peak = max((abs(x) for x in smp), default=0)
+        onset = next((i for i, x in enumerate(smp) if abs(x) > max(1e-3, peak * 0.02)), None)
+        n0 = next((r["n"] for r in lat if (r.get("out0") or 0) > 1e-6), None)
+        pathlib.Path(a.json).write_text(json.dumps({"fired_at": fired_at, "rec_at": rec_at, "note0_period": n0,
+            "onset_frames": onset, "peak": peak, "frames": frames, "bpm120": lat[0].get("bpm120"),
+            "trace": [{k: r[k] for k in ("n", "status", "out0")} for r in lat[:60]]}))
+        return 0
 
     def frames_at(off, n):
         out = []
