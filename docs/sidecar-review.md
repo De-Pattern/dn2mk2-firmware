@@ -57,6 +57,13 @@ flashes or sends MIDI, and this adds no new mandatory full-build gate.
 
 ## Generated files and release boundary
 
+Recorded extraction check (2026-11-24): all 125 focused tests above passed
+(no skips; 8 minutes 13 seconds). The saved eight-part packets also passed the
+paired Pi session/receiver check. This was a one-time source-extraction check;
+the whole set is not a new mandatory gate for individual plugin/bridge edits.
+The standalone shared wire check passed fourteen frozen events through both
+host C/C++ and compiled ColdFire execution.
+
 Generated ColdFire patch JSON and DSP objects are deliberately left at their
 upstream baseline in this source candidate. **Do not build a flash image from
 those stale generated files.** Before preparing a firmware candidate, regenerate
