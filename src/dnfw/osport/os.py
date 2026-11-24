@@ -44,6 +44,8 @@ def _save(t: dict) -> None:
 
 
 def to112(x: int) -> int:
+    if 0x46700000 <= x < 0x48000000 or x < 0x40000400:
+        return x                    # our own RAM (the area's chunks, buffers), and below MAIN OS
     t = _table()
     k = f"{x:#010x}"
     if k not in t:
@@ -86,8 +88,10 @@ def audit_unicorn() -> None:
         if htype & unicorn.UC_HOOK_CODE and begin == end and base <= begin < base + len(main12):
             o = begin - base
             if begin not in ISSUED and main11[o:o + 6] != main12[o:o + 6]:
+                import traceback
+                where = "".join(traceback.format_stack(limit=6)[:-1])
                 raise SystemExit(f"osport audit: a code hook at {begin:#x}, not from A() and not "
-                                 f"the same code in 1.11 and 1.12: an untranslated 1.11 address")
+                                 f"the same code in 1.11 and 1.12: an untranslated 1.11 address\n{where}")
         return orig(self, htype, callback, user_data, begin, end, *a, **k)
 
     unicorn.Uc.hook_add = hook_add

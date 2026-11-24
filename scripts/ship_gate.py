@@ -1218,7 +1218,7 @@ def main() -> int:
                              "RANDOM's locks are slices": all(v % 512 == 0 and 512 <= v <= 63 * 512 for v in d0[3:6]),
                              "NO keeps RANDOM's locks": len(d0) >= 9 and d0[6:9] == d0[3:6]}
                     if letgo:
-                        trk = [int(v, 16) for k, v in m.items() if k.split("@")[0] == f"{A(0x42431a6c):#x}"]
+                        trk = [int(v, 16) for k, v in m.items() if k.split("@")[0] == "0x42431a6c"]
                         lgv = [int(v, 16) for k, v in m.items() if k.split("@")[0] == hex(lay["slc_letgo"])]
                         facts.update({"RANDOM stays open after YES": sts[1:2] == [5],
                                       "on track 2": trk == [1],
@@ -1288,7 +1288,7 @@ def main() -> int:
             ph_new = "smp_pos_in" in lay
             ph_cmd, phjs = None, work / "playhead.json"
             if ph_new:                          # (a run of its own: the list's steps below are timed)
-                F_ = f"{A(0x4058e8d4):#x}"
+                F_ = "0x4058e8d4"
                 pkt = 0x46A23000                 # (above the harness's call stack: SENTINEL + 0x2C00)
                 per = f"{lay['smp_periods']:#x}"
                 wd = f"{lay['wr_draws']:#x}"
@@ -1380,7 +1380,7 @@ def main() -> int:
                               for n in ("v0", "v1", "v2", "v3", "v4")}
                         dr = [int(pm[k], 16) for k in (wd, f"{wd}@2", f"{wd}@3", f"{wd}@4") if k in pm]
                         facts["v0.40: the newest note's playhead (0x2000, then 0xA000 over 0x2100, 0xA008, the first voice again at 0xE000)"] = (
-                            pm.get(f"{A(0x42431a6c):#x}") == "00" and heads == [0x2000, 0xA000, 0xA008, 0xE000])
+                            pm.get("0x42431a6c") == "00" and heads == [0x2000, 0xA000, 0xA008, 0xE000])
                         facts["v0.40: a moved playhead drawn at the next pass, a still one not redrawn"] = (
                             len(dr) == 4 and sh["v1"] != sh["v0"] and sh["v2"] != sh["v1"] and dr[1] > dr[0]
                             and dr[2] == dr[1] and sh["v3"] == sh["v2"] and sh["v4"] != sh["v3"] and dr[3] > dr[2])
@@ -2195,7 +2195,7 @@ def main() -> int:
                     m = r["memory"]
                     sh = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("h2", "h3")}
                     facts = {"the list opens on track 1": int(m[hex(lo_)], 16) == 1,
-                             "TRK + [TRIG 2]: track 2": int(m[f"{A(0x42431a6c):#x}"], 16) == 1,
+                             "TRK + [TRIG 2]: track 2": int(m["0x42431a6c"], 16) == 1,
                              "UP there: the list closed, not taking it": int(m[f"{hex(lo_)}@2"], 16) == 0,
                              "after MACHINE SEL in and out, YES on a SLICE page answers": sh["h2"] != sh["h3"]}
                     good = all(facts.values())
@@ -2730,7 +2730,7 @@ def main() -> int:
                     if rc != 0 or not js_.exists():
                         return False, f"{nm}: " + out[-700:]
                     r = json.loads(js_.read_text())
-                    L_ = int(r["memory"][f"{A(0x42c5a9a0):#x}"], 16)
+                    L_ = int(r["memory"]["0x42c5a9a0"], 16)
                     if nm.startswith("arp"):
                         s8 = lambda v: v - (1 << 32) if v >> 31 else v        # noqa: E731
                         pre = [(int(x["D0"], 16), int(x["D1"], 16), s8(int(x["D2"], 16)))

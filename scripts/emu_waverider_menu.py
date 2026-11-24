@@ -1939,6 +1939,7 @@ def main() -> int:
     for spec in a.access:
         from unicorn import UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE, UC_MEM_WRITE
         va, n = (int(v, 0) for v in spec.split(":"))
+        va = A(va)                              # v0.73: a 1.11 address, on this run's OS
 
         def touched(uc_, kind, address, size, value, user, va=va):
             pc = uc.reg_read(K.UC_M68K_REG_PC)
@@ -1954,10 +1955,10 @@ def main() -> int:
     counts: dict[str, int] = {}
     frames_at_reset = [0]
     for va in a.count:
-        def count_hit(uc_, address, size, user):   # (v0.67: not `counted`, guest_call's tally, which it hid)
-            key = f"{address:#010x}"
+        def count_hit(uc_, address, size, user, v11=int(va, 0)):   # (v0.67: not `counted`, guest_call's tally, which it hid)
+            key = f"{v11:#010x}"                    # v0.73: keyed by the 1.11 address asked for
             counts[key] = counts.get(key, 0) + 1
-        uc.hook_add(UC_HOOK_CODE, count_hit, begin=int(va, 0), end=int(va, 0))
+        uc.hook_add(UC_HOOK_CODE, count_hit, begin=A(int(va, 0)), end=A(int(va, 0)))
 
     pixels: dict[str, int] = {}
     if a.pixel_callers:
@@ -1998,7 +1999,7 @@ def main() -> int:
             chain = " ".join(f"{v:08x}" for v in words if 0x40000400 <= v < 0x40310000)
             key = f"{address:#010x}: " + " ".join(chain.split(" ")[:12])
             stacks[key] = stacks.get(key, 0) + 1
-        uc.hook_add(UC_HOOK_CODE, stacked, begin=int(va, 0), end=int(va, 0))
+        uc.hook_add(UC_HOOK_CODE, stacked, begin=A(int(va, 0)), end=A(int(va, 0)))
 
     # v0.22: every UI-queue item the main loop pops (type, code, flags, time), after the
     # pop at 0x4002f17e: how keys and encoders arrive (the recorder's input filter)
@@ -2014,13 +2015,13 @@ def main() -> int:
 
     regs_at: dict[str, list] = {}
     for va in a.regs_at:
-        def at(uc_, address, size, user):
-            rows = regs_at.setdefault(f"{address:#010x}", [])
+        def at(uc_, address, size, user, v11=int(va, 0)):
+            rows = regs_at.setdefault(f"{v11:#010x}", [])          # v0.73: keyed by the 1.11 address
             if len(rows) < 6 or a.regs_last:
                 rows.append({f"{r}{i}": f"{uc.reg_read(getattr(K, f'UC_M68K_REG_{r}{i}')):#010x}"
                              for r in "DA" for i in range(8)})
                 del rows[:-max(6, a.regs_last)]
-        uc.hook_add(UC_HOOK_CODE, at, begin=int(va, 0), end=int(va, 0))
+        uc.hook_add(UC_HOOK_CODE, at, begin=A(int(va, 0)), end=A(int(va, 0)))
 
     # the long arguments of the last entry to each --args-at VA, for `call:` to reuse
     # (`argN@VA`): MACHINE SEL's model object, say, which no fixed address holds
@@ -2028,7 +2029,7 @@ def main() -> int:
     for va in a.args_at:
         def took(uc_, address, size, user):
             entry_args[address] = tuple(arg(4 * n) & 0xFFFFFFFF for n in range(1, 6))
-        uc.hook_add(UC_HOOK_CODE, took, begin=int(va, 0), end=int(va, 0))
+        uc.hook_add(UC_HOOK_CODE, took, begin=A(int(va, 0)), end=A(int(va, 0)))
 
     track_getter5: dict[str, int] = {}
 
@@ -2137,6 +2138,7 @@ def main() -> int:
     guest_call.returned = returned
     for spec in a.set_d0_at:
         va, val = (int(x, 0) for x in spec.split(":"))
+        va = A(va)                              # v0.73: a 1.11 address, on this run's OS
 
         def set_d0(uc_, address, size, user, val=val):
             uc_.reg_write(K.UC_M68K_REG_D0, val & 0xFFFFFFFF)
@@ -2267,15 +2269,15 @@ def main() -> int:
                 elif x.startswith("sound"):
                     args.append(machine.long(KIT_POINTER) + 52 + SOUND_STRIDE * int(x[5:]))
                 elif x.startswith("long@"):
-                    args.append(machine.long(int(x[5:], 0)))
+                    args.append(machine.long(A(int(x[5:], 0))))
                 elif x.startswith("arg") and "@" in x:
                     # argN@VA, or argN@VA-OFF: an object that argument points into
                     n, va = x[3:].split("@")
                     va, _, off = va.partition("-")
-                    args.append((entry_args[int(va, 0)][int(n) - 1] - int(off or "0", 0)) & 0xFFFFFFFF)
+                    args.append((entry_args[A(int(va, 0))][int(n) - 1] - int(off or "0", 0)) & 0xFFFFFFFF)
                 else:
                     args.append(int(x, 0) & 0xFFFFFFFF)
-            ran = guest_call(int(parts[1], 0), *args, want_count=True)
+            ran = guest_call(A(int(parts[1], 0)), *args, want_count=True)
             d0 = returned["d0"]
             calls_made.append({"fn": parts[1], "args": [f"{v:#x}" for v in args], "ran": ran,
                                "d0": d0 - (1 << 32) if d0 & 0x80000000 else d0})
@@ -2369,17 +2371,17 @@ def main() -> int:
             # v0.40: addl:VA:N, N added to the u32 at VA (the frame counter 0x4058e8d4 moved
             # on as the audio interrupt would, without running it)
             _, va, n = step.split(":")
-            machine.write(int(va, 0), struct.pack(">I", (machine.long(int(va, 0)) + int(n, 0)) & 0xFFFFFFFF))
+            machine.write(A(int(va, 0)), struct.pack(">I", (machine.long(A(int(va, 0))) + int(n, 0)) & 0xFFFFFFFF))
             print(f"  addl {va} += {n}")
         elif step.startswith("poke:"):
             _, va, data = step.split(":")
-            machine.write(int(va, 0), bytes.fromhex(data))
+            machine.write(A(int(va, 0)), bytes.fromhex(data))
             print(f"  poke {va} = {data}")
         elif step.startswith("onpc:"):
             # v0.45: onpc:PC:VA:HEX: the next time PC runs, write HEX at VA, once (as code there
             # would have: the stock modulation apply's offset on SAMP, written where it adds it)
             _, pc_s, va, data = step.split(":")
-            pc_v, va_v, by = int(pc_s, 0), int(va, 0), bytes.fromhex(data)
+            pc_v, va_v, by = A(int(pc_s, 0)), A(int(va, 0)), bytes.fromhex(data)
             once = {}
 
             def onpc_hit(uc_, ad, sz, us, va_v=va_v, by=by, once=once):
@@ -2394,7 +2396,7 @@ def main() -> int:
             # the first node at screen + 28, +0 the next, +8 the view, the sentinel at screen +
             # 20; a view's first long its class), each view's class, in order, into memory[]
             _, va = step.split(":")
-            scr = machine.long(int(va, 0))
+            scr = machine.long(A(int(va, 0)))
             node, classes = machine.long(scr + 28), []
             while node and node != scr + 20 and len(classes) < 32:
                 view = machine.long(node + 8)
@@ -2406,7 +2408,7 @@ def main() -> int:
             _, va, n = step.split(":")
             # a second read of the same address keeps the first: key it by its order
             key = va if va not in mems else f"{va}@{len(mems)}"
-            mems[key] = machine.read(int(va, 0), int(n, 0)).hex()
+            mems[key] = machine.read(A(int(va, 0)), int(n, 0)).hex()    # keyed by the 1.11 address
         elif step.startswith("sync:"):
             # One track, through the routine the ISR's note path calls when a
             # triggered track's sound has changed (0x40026bbc / 0x40026bfe).

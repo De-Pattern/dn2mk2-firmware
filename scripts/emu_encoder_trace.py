@@ -187,6 +187,7 @@ def main() -> int:
     from unicorn import UC_HOOK_MEM_WRITE
     for w in a.watch:
         wa, wl = (int(x, 0) for x in w.split(":"))
+        wa = A(wa)                              # v0.73: a 1.11 address, on this run's OS
 
         def on_w(uc_, acc, ad, sz, val, us):
             log.append(("write", seqn["n"], now(), hex(uc_.reg_read(K.UC_M68K_REG_PC)), hex(ad), sz, val))
