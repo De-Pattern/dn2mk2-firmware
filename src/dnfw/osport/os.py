@@ -93,7 +93,8 @@ def audit_unicorn() -> None:
             # (digikit's own hooks, e.g. its instruction patches, come from scanning the image
             # it runs: 1.12's addresses already; only a hook our scripts set is judged)
             o = begin - base
-            if begin not in ISSUED and main11[o:o + 6] != main12[o:o + 6]:
+            near = any(begin - k in ISSUED for k in range(0, 257, 2))   # A(base) + a small offset
+            if not near and main11[o:o + 6] != main12[o:o + 6]:
                 import traceback
                 where = "".join(traceback.format_stack(limit=6)[:-1])
                 raise SystemExit(f"osport audit: a code hook at {begin:#x}, not from A() and not "
