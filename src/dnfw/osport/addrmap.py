@@ -107,15 +107,31 @@ class AddrMap:
             out[v].append(struct.unpack(">I", b[j:j + 4])[0] - v)
         return out
 
+    @functools.lru_cache(maxsize=1)
+    def bss_shift(self):
+        """(start, end, shift) of BSS when both its bounds moved by the same amount, read from the
+        start-up clear loop (`movea.l #start,a0 ; move.l #end,d1` at 0x400004ba in both)"""
+        o = 0x400004BA - BASE
+        if self.a[o:o + 2] != b"\x20\x7c" or self.b[o:o + 2] != b"\x20\x7c":
+            return None
+        sa, sb = (struct.unpack_from(">I", x, o + 2)[0] for x in (self.a, self.b))
+        ea, eb = (struct.unpack_from(">I", x, o + 8)[0] for x in (self.a, self.b))
+        if eb - ea != sb - sa:
+            return None
+        return max(sa, self.end_a), ea, sb - sa
+
     @functools.lru_cache(maxsize=None)
-    def ram(self, va: int, near: int = 0x100):
+    def ram(self, va: int, near: int = 0x100, strict: bool = False):
         """-> (1.12 va, why) or (None, why). The references to [va - near, va] in 1.11 code (a
         base the code adds to counts); failing those, every reference within 16 KB either side.
         The shift is the one at least 95 % of them show (a few immediates that only look like
         addresses vote too)."""
+        bss = None if strict else self.bss_shift()
+        if bss is not None and bss[0] <= va < bss[1]:
+            return va + bss[2], f"BSS (its start and end both moved {bss[2]:+d}: the clear loop, 0x400004ba)"
         refs = self._refs
-        for lo, hi, what in ((va - near, va + 1, "reference(s)"),
-                             (va - 0x4000, va + 0x4000, "reference(s) within 16 KB")):
+        windows = [(va - near, va + 1, "reference(s)"), (va - 0x4000, va + 0x4000, "reference(s) within 16 KB")]
+        for lo, hi, what in windows:
             votes: collections.Counter = collections.Counter()
             for base in range(lo, hi):
                 for d in refs.get(base, ()):
@@ -129,6 +145,16 @@ class AddrMap:
                 return va + d, f"{n} of {tot} {what} agree, shift {d:+d}"
             return None, f"{what} disagree: {votes.most_common(4)}"
         return None, "no reference in 1.11 code"
+
+    def strict(self, va: int):
+        """an immediate's translation: only on stock code's own evidence (its bytes matched in the
+        image, or stock's references at or near it agreeing), never BSS's blanket shift: a number
+        that merely lies in RAM's range (a four-character code, a bound) has none and stays"""
+        if BASE <= va < self.end_a:
+            return self.image(va)
+        if va >= self.end_a:
+            return self.ram(va, strict=True)
+        return None, "below MAIN OS"
 
     def map(self, va: int):
         if BASE <= va < self.end_a:

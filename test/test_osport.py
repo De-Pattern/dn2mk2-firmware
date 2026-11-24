@@ -61,3 +61,16 @@ def test_operand_translated(m):
     port.relocate_code(code, 0x46AC1000, m, rep, "t")
     assert struct.unpack(">I", code[2:6])[0] == 0x4011ED4A
     assert struct.unpack(">I", code[8:12])[0] == 0x46AC0000
+
+
+@need
+def test_immediates_need_stock_evidence(m):
+    """a four-character code in BSS's numeric range stays a number (the blanket BSS shift is for
+    address operands only); an explicit address operand in BSS moves with BSS"""
+    dnfw = 0x444E4657                                           # 'DNFW'
+    code = bytearray(struct.pack(">HI", 0x0C80, dnfw)              # cmpi.l #'DNFW',d0
+                     + struct.pack(">HI", 0x1039, 0x42431A6C))     # move.b 0x42431a6c,d0
+    rep = port.Report()
+    port.relocate_code(code, 0x46AC1000, m, rep, "t")
+    assert struct.unpack(">I", code[2:6])[0] == dnfw
+    assert struct.unpack(">I", code[8:12])[0] == 0x42432A6C

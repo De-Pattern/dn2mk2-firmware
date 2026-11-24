@@ -81,6 +81,16 @@ def disasm(code: bytes, va: int) -> list[tuple[int, bytes, str]]:
     return merged
 
 
+def _immediates(text: str) -> set[int]:
+    """the values written as immediates (#n) in an instruction's text"""
+    out = set()
+    for d in re.findall(r"#(-?\d+)\b", text):
+        out.add(int(d) & 0xFFFFFFFF)
+    for h in re.findall(r"#0x([0-9a-f]+)", text):
+        out.add(int(h, 16))
+    return out
+
+
 def _values(text: str) -> set[int]:
     vals = set()
     for h in re.findall(r"0x([0-9a-f]+)", text):
@@ -95,6 +105,7 @@ def relocate_code(code: bytearray, va: int, m: AddrMap, rep: Report, where: str)
     for a, raw, text in disasm(bytes(code), va):
         if text.startswith(".short") or text.startswith("unknown"):
             continue
+        imms = _immediates(text)
         for v in _values(text):
             if not (LO <= v < HI) or _ours(v):
                 continue
@@ -102,10 +113,14 @@ def relocate_code(code: bytearray, va: int, m: AddrMap, rep: Report, where: str)
             k = raw.find(needle, 2)
             if k < 0:
                 continue
-            nv, why = m.map(v)
-            if nv is None and all(0x20 <= c < 0x7F for c in needle) and "#" in text:
-                rep.operands.append((f"{where} {a:#x}", text, v, v))   # a four-character code
-                continue
+            if v in imms:
+                # an immediate: a number unless there is direct evidence it is an address
+                nv, why = m.strict(v)
+                if nv is None:
+                    rep.data_words.append((f"{where} {a:#x}", v, v, f"immediate left as a number: {text}"))
+                    continue
+            else:
+                nv, why = m.map(v)
             if nv is None:
                 rep.refused.append((f"{where} {a:#x}", f"{text}: {v:#x} {why}"))
                 continue
