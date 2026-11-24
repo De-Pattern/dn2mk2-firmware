@@ -85,7 +85,13 @@ def audit_unicorn() -> None:
     orig = unicorn.Uc.hook_add
 
     def hook_add(self, htype, callback, user_data=None, begin=1, end=0, *a, **k):
-        if htype & unicorn.UC_HOOK_CODE and begin == end and base <= begin < base + len(main12):
+        import sys as _sys
+        caller = _sys._getframe(1).f_code.co_filename
+        ours = "/scripts/" in caller.replace("\\", "/") or "/src/dnfw/" in caller.replace("\\", "/")
+        if (ours and htype & unicorn.UC_HOOK_CODE and begin == end
+                and base <= begin < base + len(main12)):
+            # (digikit's own hooks, e.g. its instruction patches, come from scanning the image
+            # it runs: 1.12's addresses already; only a hook our scripts set is judged)
             o = begin - base
             if begin not in ISSUED and main11[o:o + 6] != main12[o:o + 6]:
                 import traceback
