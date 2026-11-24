@@ -104,7 +104,7 @@ def fit(n, w):
 
 
 def steps(lay):
-    kit = A(0x4210C08C)
+    kit = 0x4210C08C   # 1.11: goes into steps, which emu_waverider_menu translates
     snd0, M = kit + 52, SMx.MIRROR
     samp0 = snd0 + 0x6A
 

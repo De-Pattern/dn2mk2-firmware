@@ -58,7 +58,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-KIT = A(0x4210C08C)
+KIT = 0x4210C08C   # 1.11: goes into steps, which emu_waverider_menu translates
 SOUND = 1163
 # v0.38 (blskk: "arpeggiator, note edit and sampler make the digitone crash"): the stock arp,
 # KEYBOARD and its chord memories (what NOTE EDIT stores) on the sample machines. The arp's
@@ -68,7 +68,7 @@ SLCE_AT = 0x6C                          # SLCE's value (record 257, slot 44): 0 
 # the snapshot's project settings (the getter at 0x40194212, read in the emulator): +29 the
 # KEYBOARD's scale, +30 its MODE when +33 bit 0 is clear (5: the chord memories), and the
 # chord memories, one a [TRIG] key: 16 notes at +35 + 16 k, ended by -1 (0x4003c17c)
-PROJ = A(0x412366CC)
+PROJ = 0x412366CC   # 1.11: goes into steps, which emu_waverider_menu translates
 KB_MODE, KB_TRACKWISE, CHORDS = 30, 33, 35
 BIG_CHORD = bytes([0, 3, 7, 10, 12, 15, 19, 22, 24, 27, 31, 34, 0xFF, 0xFF, 0xFF, 0xFF])    # 12 notes
 
