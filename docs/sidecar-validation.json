@@ -1,8 +1,8 @@
 {
   "scope": "Merge proposal; offline evidence only, no hardware or flash clearance",
   "base": "348622ee462932ce2d146010ea4d7b1323c3b6bd",
-  "code_revision": "f5921e9097b594832b5ce49c820cfe5d251a8f78",
-  "companion_code_revision": "5b9405dd865490b863ef1d6fb7ced536b0945b77",
+  "code_revision": "404317f7ca529704e14ffe5b60f1db47d7f46006",
+  "companion_code_revision": "857d21aa72a195d701909544555b6348615a0848",
   "focused_tests": {
     "passed": 125,
     "skipped": 0,
@@ -25,5 +25,6 @@
     "project filesystem save/reopen",
     "physical latency/alignment",
     "worst-case eight-part playback"
-  ]
+  ],
+  "revision_note": "Public no-reply author metadata; source tree preserved. This receipt-only update does not change tested code."
 }
