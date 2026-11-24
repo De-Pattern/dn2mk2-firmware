@@ -1,7 +1,7 @@
 # Add eight native Sidecar parts with manifest-driven machine pages
 
-Draft PR body, prepared locally for `De-Pattern/dn2mk2-firmware:main`.
-No PR or maintainer message has been sent.
+Contribution for `De-Pattern/dn2mk2-firmware:main`, requesting review for inclusion
+in the normal build. This is a source contribution, not a firmware release.
 
 ## What changes
 
@@ -23,10 +23,11 @@ and native control/UI patch data are regenerated.
 
 ## Companion and compatibility
 
-The Pi endpoint is a separate Sidecar proposal against its `dev` branch. It is
-required for the feature; upstream Sidecar releases without that endpoint do
-not provide DN2 native parts. The companion source/patch series must accompany
-this proposal. Neither endpoint requires the other's product version number to
+The required Pi endpoint is available on the [experimental Sidecar branch](https://github.com/Ericxgao/sidecar-firmware/tree/propose/dn2-native),
+based on Sidecar `dev`. Upstream Sidecar releases without that endpoint do not
+provide DN2 native parts. Users currently need both modified codebases; public
+built-ins and SC Snare suffice, with no private plugin library required.
+Neither endpoint requires the other's product version number to
 match: the event, session and metadata formats are the compatibility boundary.
 
 Without a matching ACK/RESET session the Pi cannot take native return ownership.
@@ -48,7 +49,10 @@ neither is necessary for compatible plugins within today's sixteen-control ABI.
 
 ## Validation
 
-Exact commands, evidence and limitations are in [the review guide](sidecar-review.md).
+Exact commands, evidence and limitations are in [the review guide](https://github.com/Ericxgao/dn2mk2-firmware/blob/propose/sidecar-native/docs/sidecar-review.md)
+and [validation receipt](https://github.com/Ericxgao/dn2mk2-firmware/blob/propose/sidecar-native/docs/sidecar-validation.json).
+All 125 focused DN2 tests passed without skips. Fourteen frozen wire events and
+saved eight-part packets also passed their Pi receiver checks.
 The source-integrated image passed integrity preflight and all five packaged
 DSP-tail routing/register-preservation cases. Compiled native UI/capture/storage
 tests, frozen wire events and saved eight-part packets are covered by focused
@@ -66,3 +70,10 @@ Please review the native binding locations and return ownership/storage contract
 for inclusion in the normal DN2MK2 build. This would let users install ordinary
 DN2MK2 updates without maintaining a separate per-release Sidecar patch. The
 Pi companion can be reviewed separately; it need not be released simultaneously.
+
+This is AI-assisted work developed primarily for personal use. I'm offering the
+generic integration for adoption, but cannot commit to maintaining either fork
+independently across future releases or providing ongoing public support. The
+Pi side is being shared for adoption discussion, not presented as an officially
+supported Sidecar DN2 edition. I would appreciate a decision on whether this
+endpoint and its native bindings are a fit for DN2MK2 to own upstream.
