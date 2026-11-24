@@ -996,6 +996,7 @@ int smp_set_samp(int track, int value)
  * sound to the new machine's defaults, SAMP to OFF). Anything else is stock's. */
 u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
 {
+    if (type >= 256u) return 0; /* UI-only catalog rows must never become sound types. */
     extern int gr_allowed(u32 track, u32 type);
     if (!gr_allowed(track, type))               /* v0.69: the guardrail (guard.c): refused, said so */
         return 0;
@@ -1008,6 +1009,17 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
     }
     int was = track < 16 && KIT ? SOUND_TYPE(track) : -1;
     u32 r = MACHINE_COMMIT(model, track, type, a, b);
+    /* External Perkons uses the Pi manifest defaults through the native setter,
+     * so both stored sound values and the active engine mirrors are updated. */
+    if (track < 16 && KIT && type == SC_TYPE && SOUND_TYPE(track) == SC_TYPE && was != SC_TYPE) {
+        u32 owner = UI_OWNER();
+        for (int j = 0; owner && j < SC_PARAMS; j++) {
+            u32 id = sc_ids[j >> 3][j & 7];
+            u32 ps = PARAM_SET(owner, id, track);
+            if (ps)
+                SET_VALUE(ps, id, sc_defaults[j], track, 0, 0, 1);
+        }
+    }
     if ((keep >> 8) > 0 && SOUND_TYPE(track) == (int)type && smp_samp_word((int)track) != keep)
         smp_set_samp_word((int)track, keep);
     /* v0.48: a fresh ONESHOT/STRETCH/REPITCH/BOUNCE starts at the DT2's LEN, 120.00 (fmt.c
@@ -2027,6 +2039,14 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         extern int slc_stock_asked;             /* v0.30: a stock question's keys; its */
         slc_stock_asked = 0;                    /* answer is not left for the next YES */
         return (u32)it;
+    }
+    if (!rec_overlay && !smp_lst_open && !smp_fb_open) {
+        extern int sc_pick_pop(u8 *, int);
+        if (sc_pick_pop(it, smp_func_held)) {
+            if (it[0] == IT_KEY && down && code < 32) eaten |= 1u << code;
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
     }
     if (!rec_overlay && it[0] == IT_KEY && (code == K_ENC_A + 4 || code == K_ENC_A + 5)) {
         /* v0.50: E or F pushed with a trig held on TRIG page 2 clears SLD / SLEN (slide.c); its

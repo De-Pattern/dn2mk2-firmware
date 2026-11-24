@@ -191,7 +191,8 @@ LOOKUP_SITE_STOCK = bytes.fromhex("0f150025d748")   # parcels, MSW first
 LOOKUP16_DM = 0x2DEE04                       # 16 words; 0x2dee00 is the [-1] guard (0)
 from ..mnm import machines as _mnm_types    # noqa: E402
 from ..sampler import machines as _smp_types
-MACHINE_TYPES = max(16, max(_mnm_types.TYPES) + 1, max(_smp_types.TYPES) + 1)   # v0.26: 17 with a Monomachine machine at 16; v0.44: 18, BOUNCE at 17
+from ..sidecar import machines as _sc_types
+MACHINE_TYPES = max(16, max(_mnm_types.TYPES) + 1, max(_smp_types.TYPES) + 1, _sc_types.TYPE + 1)
 SMP_ENGINE_SLOT = 5                          # the engine slot the sample machines borrow
 SMP_TYPES = _smp_types.TYPES                 # ONESHOT WERP STRETCH REPITCH GRID SLICE (v0.19); v0.44 BOUNCE (17)
 ENGINES = {5: "PERC", 8: "ONESHOT", 12: "GRID"}   # types with an engine of ours
@@ -224,7 +225,7 @@ def lookup16() -> bytes:
     the frame's own type word; one whose machine has no renderer yet stays silent on that
     slot. Any other type reads 0 (FM Tone), as stock answers 5-7."""
     table = [t if t < 5 or t in ENGINES and t < 8 else
-             SMP_ENGINE_SLOT if t in SMP_TYPES or t in MNM_TYPES else 0 for t in range(MACHINE_TYPES)]
+             SMP_ENGINE_SLOT if t in SMP_TYPES or t in MNM_TYPES or t == _sc_types.TYPE else 0 for t in range(MACHINE_TYPES)]
     return struct.pack(f"<{1 + MACHINE_TYPES}I", 0, *table)
 
 

@@ -21,6 +21,17 @@ POLL = "wr_poll"                        # the UI loop's redraw test (coldfire.PO
 OVERLAY = "wr_cell"                     # after each stock cell widget: parameter slides' marks
 # v0.14: the sample link (csrc/sampler), linked into the same chunk
 LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "sampler" / "hooks.S",
+                SOURCE.parents[1] / "sidecar" / "bridge.c",
+                SOURCE.parents[1] / "sidecar" / "wire.c",
+                SOURCE.parents[1] / "sidecar" / "sound.c",
+                SOURCE.parents[1] / "sidecar" / "ui.c",
+                SOURCE.parents[1] / "sidecar" / "ui_page.c",
+                SOURCE.parents[1] / "sidecar" / "catalog.c",
+                SOURCE.parents[1] / "sidecar" / "load.c",
+                SOURCE.parents[1] / "sidecar" / "select.c",
+                SOURCE.parents[1] / "sidecar" / "machlist.c",
+                SOURCE.parents[1] / "sidecar" / "usb.c",
+                SOURCE.parents[1] / "sidecar" / "hooks.S",
                 SOURCE.parents[1] / "sampler" / "smp_page.c", SOURCE.parents[1] / "sampler" / "rec.c",
                 SOURCE.parents[1] / "sampler" / "fmt.c", SOURCE.parent / "md_page.c",
                 SOURCE.parents[1] / "sampler" / "slice.c",
@@ -57,7 +68,18 @@ LINK_ENTRIES = ["ms_icon_hook", "ms_label_hook", "pf_ui", "pf_sel", "pf_col", "p
 SLIDE_ENTRIES = ["sl_ui_table", "sl_cell", "sl_knob", "sl_screen", "sl_page_up", "sl_page_seen", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
                  "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_nxt_last", "sl_ticks"]
 LINK_ENTRIES = LINK_ENTRIES + SLIDE_ENTRIES
+LINK_ENTRIES += ["sc_capture", "sc_pop", "sc_encode", "sc_usb_try", "sc_overflows", "sc_queued", "sc_exported"]
+LINK_ENTRIES += ["sc_set_link", "sc_rx", "sc_midi_wait", "sc_midi_poll", "sc_midi_poll_hook", "sc_sent", "sc_retries"]
+LINK_ENTRIES += ["sc_sound_identity", "sc_sound_store", "sc_id_ok"]
+LINK_ENTRIES += ["sc_ui_want", "sc_ui_publish", "sc_ui_view", "sc_ui_request", "sc_ui_receive", "sc_ui_session"]
+LINK_ENTRIES += ["sc_ui_want_context"]
+LINK_ENTRIES += ["sc_ui_follow", "sc_ui_generic", "sc_ui_label", "sc_ui_page", "sc_ui_page_count"]
+LINK_ENTRIES += ["sc_catalog_open", "sc_catalog_publish", "sc_catalog_view", "sc_catalog_session", "sc_catalog_request", "sc_catalog_receive"]
+LINK_ENTRIES += ["sc_load_start", "sc_load_cancel", "sc_load_state", "sc_load_session", "sc_load_request", "sc_load_receive"]
 
+LINK_ENTRIES += ["sc_select", "sc_select_apply", "sc_select_poll", "sc_edit_mask"]
+LINK_ENTRIES += ["sc_ui_sound_view", "sc_pick_seen", "sc_pick_visible", "sc_pick_target", "sc_pick_close", "sc_pick_poll", "sc_pick_pop", "sc_pick_draw", "wr_screen_obj"]
+LINK_ENTRIES += ["sc_list_types", "sc_list_types_hook", "sc_list_name", "sc_list_current", "sc_list_label"]
 
 def available() -> bool:
     return cbuild.available()

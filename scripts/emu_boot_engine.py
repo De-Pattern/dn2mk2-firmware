@@ -174,6 +174,8 @@ def main() -> int:
                    help="v0.51: SAVE and LOAD a FLEX sound with FLEX REC's settings in its words "
                         "(rectrig.c fx_set: slots 38, 46, 40, 32, 37, 27, v0.52 33 MUTE SRC; SRC's low byte the mark 0xF1); "
                         "every word must come back as it went")
+    p.add_argument("--sidecar-roundtrip", action="store_true",
+                   help="SAVE/LOAD all eleven Perkons words, fractional bytes and all 36 programs")
     p.add_argument("--filter-max", type=int, default=5,
                    help="the highest filter type the build's LOAD keeps (5 stock; 6 with PING, v0.27..v0.44)")
     args = p.parse_args()
@@ -394,6 +396,16 @@ def main() -> int:
               f"{ {k: hex(v) for k, v in got.items()} } (want { {k: hex(v) for k, v in want.items()} }), type {typ}")
         if not ok:
             fails.append("FLEX REC's settings did not round-trip")
+
+    if args.sidecar_roundtrip:
+        from emulib.sidecar_recall import verify
+        base = after.long(0x800052A0)
+        real = bytes(after.uc.mem_read(base + 52, SOUND_BYTES)) if base else bytes(SOUND_BYTES)
+        try:
+            count = verify(after, real)
+            print(f"  SIDECAR RECALL PASS: {count} cases; machine and all eleven words exact")
+        except AssertionError as exc:
+            fails.append(f"Perkons sound SAVE/LOAD: {exc}")
 
     # The filter type, the same way: PING (v0.27..v0.44) widened the LOAD bound (0x400dd2bc)
     # so type 6 survived; stock (and v0.45, PING removed) loads anything above 5 as 0, Multi-Mode.

@@ -49,10 +49,12 @@ from ..mnm import machines as _mnm           # noqa: E402
 # PERC; the Monomachine's machines (docs/mnm.md: 6, 7, then 14.. after the sample machines);
 # the Digitakt II's sample machines (docs/sampler.md, 8..13): all WaveTone clones
 from ..sampler import machines as _smpm         # noqa: E402
-NEW_TYPES = tuple(range(5, max(13, *_mnm.TYPES, _smpm.BOUNCE_TYPE) + 1))   # v0.44: to 17, BOUNCE
+from ..sidecar import machines as _sc
+NEW_TYPES = tuple(range(5, max(13, *_mnm.TYPES, _smpm.BOUNCE_TYPE, _sc.TYPE) + 1))
 CLONE = 1                               # WaveTone
 LONG_NAME, SHORT_NAME = "Perc", "PRC"           # v0.11: PERC in Waverider's place
 MACHINE_NAMES = {5: ("Perc", "PRC"),
+                 _sc.TYPE: ("Sidecar", "SIDE"),
                  8: ("Oneshot", "ONE"), 9: ("Werp", "WRP"), 10: ("Stretch", "STR"),
                  11: ("Repitch", "RPT"), 12: ("Grid", "GRD"), 13: ("Slice", "SLC"),
                  _smpm.BOUNCE_TYPE: ("Flex", "FLX"),       # v0.44: a section of its own, after the sample machines
@@ -72,7 +74,7 @@ LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
 # PERC, RESONATOR, CZ after Swarmer; then the Digitakt II's sample machines in its own
 # order (v0.15: all five; v0.13 offered ONESHOT and GRID); then MIDI
-LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, 8, 9, 10, 11, 13, 12, *((_smpm.BOUNCE_TYPE,) if _smpm.BOUNCE_LISTED else ()), 4)   # v0.19: SLICE before GRID, the DT2's order; v0.44 BOUNCE after them (group 3: its own divider)
+LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, _sc.TYPE, 8, 9, 10, 11, 13, 12, *((_smpm.BOUNCE_TYPE,) if _smpm.BOUNCE_LISTED else ()), 4)
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
@@ -558,7 +560,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     if len(cimage) > pages.C_SPAN:
         raise ComposeError(f"the page renderer ({len(cimage)} B) is larger than its {pages.C_SPAN:#x}")
     ptable = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in pages.LABELS_OUT) + "\n"
-    pblob = assemble(pages.source(csyms["wr_page_draw"], csyms["wr_cell"]) + ptable, base=pages.LOAD)
+    pblob = assemble(pages.source(csyms["wr_page_draw"], csyms["wr_cell"], csyms["sc_ui_page"],
+                                 csyms["sc_ui_page_count"]) + ptable, base=pages.LOAD)
     asm = pblob[:-4 * len(pages.LABELS_OUT)]
     if pages.LOAD + len(asm) > PAGES_END:
         raise ComposeError(f"the pages assembly ({len(asm)} B) runs past {PAGES_END:#010x}")
@@ -674,6 +677,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(POLL_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_poll"]),
          "the UI loop's redraw test: wr_poll asks for a redraw while a modulation marker on "
          "Waverider's page would move, then answers as stock", POLL_STOCK)
+    edit(0x40120782, bytes.fromhex("4df9") + _long(csyms["sc_midi_wait"]),
+         "Sidecar: register MIDI task readiness before its unchanged event wait",
+         bytes.fromhex("4df94000141a"))
+    edit(0x401207A8, bytes.fromhex("4eb9") + _long(csyms["sc_midi_poll_hook"]),
+         "Sidecar: bounded USB drain on every MIDI queue pass; replay the A5 load",
+         bytes.fromhex("4bf940001876"))
 
     # v0.22: the RECORDER's screen -- its keys and knobs, its draw, FUNC + VOICE
     _need(content, UI_POP_SITE - 6, bytes.fromhex("48794059d214"), "the UI loop pushes its queue")
@@ -721,6 +730,13 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          MACHSEL_COLSW_STOCK)
     edit(MACHSEL_COMMIT_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_machine_commit"]),
          "MACHINE SEL's commit: between two sample machines SAMP is kept (rec.c)", MACHSEL_COMMIT_STOCK)
+    edit(0x4005B33C, bytes.fromhex("4eb9") + _long(csyms["sc_list_types_hook"]),
+         "MACHINE SEL adds frozen Pi catalog rows to the native vector", bytes.fromhex("4eb94004d8b6"))
+    edit(0x4005A8A8, bytes.fromhex("4eb9") + _long(csyms["sc_list_name"]),
+         "MACHINE SEL names Pi rows from their frozen manifest catalog", bytes.fromhex("4eb9400dc332"))
+    for site in (0x4005B6C2, 0x4005A9C8, 0x4005A5C6, 0x4005A632):
+        edit(site, bytes.fromhex("4eb9") + _long(csyms["sc_list_current"]),
+             "MACHINE SEL marks the full saved Pi engine identity", bytes.fromhex("4eb94003134e"))
     # v0.68 (owner): MACHINE SEL's left pane shows the mod machine under the cursor, its icon
     # and its label in place of the wave and "SYN" (csrc/sampler/msicon.c, dnfw.msicons)
     edit(MACHSEL_ICON_SITE, bytes.fromhex("4eb9") + _long(csyms["ms_icon_hook"]),
@@ -770,7 +786,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
 
     # the sample link: SysEx in (v0.14); out over the TDM link alone (v0.20)
     edit(LINK_RX_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_rx_hook"]),
-         "the SysEx router: the sample link's requests (F0 00 20 3C 7D 01) to smp_rx", LINK_RX_STOCK)
+         "the SysEx router: native Sidecar session requests to sc_rx, then sample link requests to smp_rx", LINK_RX_STOCK)
 
     # the fast link (v0.16): the SSI ISR, its transmit fill done, through smp_tdm_hook
     _need(content, TDM_SITE + 8, bytes.fromhex("2f024eb94012a4e6"), "the ISR goes on: push d2 ; jsr 0x4012a4e6")
@@ -875,6 +891,17 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # checks [C_LOAD, c_text_end) as code
     layout["c_load"] = pages.C_LOAD
     layout["c_text_end"] = csyms["__text_end"]
+    for name in ("sc_list_types", "sc_list_types_hook", "sc_list_name", "sc_list_current", "sc_list_label"):
+        layout[name] = csyms[name]
+    for name in ("sc_capture", "sc_pop", "sc_encode", "sc_usb_try", "sc_overflows", "sc_queued", "sc_exported",
+                 "sc_sound_identity", "sc_sound_store", "sc_id_ok",
+                 "sc_ui_want", "sc_ui_publish", "sc_ui_view", "sc_ui_request", "sc_ui_receive", "sc_ui_session",
+                 "sc_ui_follow", "sc_ui_generic", "sc_ui_label", "sc_ui_page", "sc_ui_page_count",
+                 "sc_catalog_open", "sc_catalog_publish", "sc_catalog_view", "sc_catalog_session", "sc_catalog_request", "sc_catalog_receive",
+                 "sc_load_start", "sc_load_cancel", "sc_load_state", "sc_load_session", "sc_load_request", "sc_load_receive", "sc_select", "sc_select_apply", "sc_select_poll", "sc_edit_mask", "sc_ui_sound_view", "sc_pick_seen", "sc_pick_visible", "sc_pick_target", "sc_pick_close", "sc_pick_poll", "sc_pick_pop", "sc_pick_draw", "wr_screen_obj"):
+        layout[name] = csyms[name]
+    for name in ("sc_set_link", "sc_rx", "sc_midi_wait", "sc_midi_poll", "sc_midi_poll_hook", "sc_sent", "sc_retries"):
+        layout[name] = csyms[name]
     for name in ("smp_hi", "smp_walk", "smp_booted", "smp_cmds", "smp_tdm_sent", "smp_tdm_heard",
                  "smp_lfo_hook", "smp_lfo_fix", "smp_bank_live", "smp_bank_count", "smp_bank_blocked", "smp_lp_bank",   # v0.65
                  "smp_row_step", "smp_word_row", "smp_row_word", "smp_name", "smp_discard", "smp_set_samp_word", "smp_samp_word",

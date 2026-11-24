@@ -23,6 +23,7 @@ applies committed SHARC objects (`scripts/gen_waverider_sharc.py`).
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import sys
 
@@ -35,7 +36,7 @@ from dnfw.patch.assemble import assemble, available     # noqa: E402
 from dnfw.waverider import coldfire as CF               # noqa: E402
 from dnfw.waverider import cpage                        # noqa: E402
 
-STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
+STOCK = pathlib.Path(os.environ.get("DNFW_STOCK_111", ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"))
 OUT_JSON = ROOT / "src/dnfw/mods/waverider_code.json"
 
 
@@ -53,7 +54,6 @@ def replay(stock: bytes, edits: list[dict]) -> bytes:
 def main() -> int:
     if not available():
         raise SystemExit("no m68k assembler found (m68k-linux-gnu-as; WSL is fine)")
-    import os
     if os.environ.get("DNFW_SMP_STORE_TEST"):
         raise SystemExit("DNFW_SMP_STORE_TEST is for emulator builds only; unset it to write the spec")
     stock = load(read_image(STOCK)).container.find(3).unpack()

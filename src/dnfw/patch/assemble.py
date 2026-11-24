@@ -21,6 +21,7 @@ is linked at that address before the bytes are extracted.
 from __future__ import annotations
 
 import shutil
+import os
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ CPU = "54455"
 AS_NAMES = ("m68k-linux-gnu-as", "m68k-elf-as", "m68k-none-elf-as")
 LD_NAMES = ("m68k-linux-gnu-ld", "m68k-elf-ld", "m68k-none-elf-ld")
 OBJCOPY_NAMES = ("m68k-linux-gnu-objcopy", "m68k-elf-objcopy", "m68k-none-elf-objcopy")
+PROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 class AssemblerMissing(RuntimeError):
@@ -66,6 +68,7 @@ class Toolchain:
             text=True,
             errors="replace",
             stdin=subprocess.DEVNULL,
+            creationflags=PROCESS_FLAGS,
         )
 
 
@@ -98,6 +101,7 @@ def find_toolchain() -> Toolchain | None:
             probe = subprocess.run(
                 [wsl, "-e", name, "--version"],
                 capture_output=True, text=True, errors="replace", stdin=subprocess.DEVNULL,
+                creationflags=PROCESS_FLAGS,
             )
             if probe.returncode == 0:
                 return name

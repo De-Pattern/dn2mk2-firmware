@@ -5,6 +5,19 @@
         .text
         .globl  smp_rx_hook
 
+| MACHINE SEL's scalar list getter uses hidden result a0, a2 is its view.
+| The stock getter takes no stack arguments (the caller leaves context there).
+        .globl sc_list_types_hook
+sc_list_types_hook:
+        move.l %a0,-(%sp)
+        jsr 0x4004d8b6
+        movea.l (%sp)+,%a0
+        move.l %a2,-(%sp)
+        move.l %a0,-(%sp)
+        jsr sc_list_types
+        addq.l #8,%sp
+        rts
+
 | The SysEx router 0x4012166e at 0x4012169a (was: lea 0x40207ae6,%a3), once per F0
 | message other than F0 7E, in the MIDI input task: a0 = a1 = the message, d1 its
 | length, d2 its source; those must survive, and d0, d3, a2 are free (the USB probe's
@@ -15,6 +28,7 @@ smp_rx_hook:
         move.l  %d2, -(%sp)
         move.l  %d1, -(%sp)
         move.l  %a0, -(%sp)
+        jsr     sc_rx                         | private native bridge; same read-only args
         jsr     smp_rx
         lea     12(%sp), %sp
         movem.l (%sp), %d0-%d2/%a0-%a1

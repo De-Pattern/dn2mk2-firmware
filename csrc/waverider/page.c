@@ -22,6 +22,7 @@
  * from dnfw.waverider.pages.
  */
 #include "wr_gen.h"
+#include "../sidecar/ui.h"
 
 typedef unsigned int u32;
 typedef unsigned char u8;
@@ -137,12 +138,14 @@ static int perc_type(void)
 static const char *stock_long[WR_NAMED] __attribute__((section(".data")));
 static const char *stock_short[WR_NAMED] __attribute__((section(".data")));
 static int names_on __attribute__((section(".data"))) = -1;
+static u32 names_sc_stamp __attribute__((section(".data")));
 
 static void wr_names(void)
 {
     int on = wr_active();
-    int key = on == 1 ? 16 + perc_type() : on;   /* PERC: one set of names a machine */
-    if (key == names_on)
+    u32 sc_stamp = sc_ui_follow();
+    int key = on == 1 ? WR_KINDS + 1 + perc_type() : on; /* disjoint from every machine kind */
+    if (key == names_on && (on != SC_KIND || names_sc_stamp == sc_stamp))
         return;
     extern void smp_formats(int kind);
     smp_formats(on);                            /* v0.15: the sample machines' value text */
@@ -154,16 +157,24 @@ static void wr_names(void)
         }
         const char *l = on ? wr_named_long[on - 1][k] : 0;
         const char *sh = on ? wr_named_short[on - 1][k] : 0;
+        if (on == SC_KIND && sc_ui_generic())
+            for (int p = 0; p < SC_ALL_PARAMS; p++)
+                if (sc_all_ids[p] == id) { l = sc_ui_label(p, 0); sh = sc_ui_label(p, 1); break; }
         if (on == 1)
             for (int j = 0; j < 8; j++)
                 if (perc_param_ids[j] == id) {
-                    l = perc_longs[perc_long[key - 16][j]];
-                    sh = perc_short[key - 16][j];
+                    l = perc_longs[perc_long[key - WR_KINDS - 1][j]];
+                    sh = perc_short[key - WR_KINDS - 1][j];
                 }
         NAME_LONG(id) = l ? l : stock_long[k];
         NAME_SHORT(id) = sh ? sh : stock_short[k];
     }
     names_on = key;
+    if (on == SC_KIND && names_sc_stamp != sc_stamp) {
+        extern void *wr_screen_obj;
+        if (wr_screen_obj) SET_DIRTY(wr_screen_obj);
+    }
+    names_sc_stamp = sc_stamp;
 }
 
 /* v0.22: the UI loop's draw of its screen (0x4011d32a(screen, canvas), at 0x4002e4ca),
@@ -186,6 +197,7 @@ void wr_screen(void *screen, void *canvas)
     extern int smp_list_visible(void);
     extern void smp_list_draw(void *canvas);
     extern void sl_screen(int phase, int covered);      /* parameter slides (csrc/slides) */
+    sc_pick_seen(0);
     sl_screen(0, 0);
     SCREEN_DRAW(screen, canvas);
     extern int sn_up(void);
@@ -199,8 +211,10 @@ void wr_screen(void *screen, void *canvas)
     extern int pf_visible(void);                /* v0.69: PERFORM (csrc/sampler/perf.c) */
     extern void pf_draw(void *canvas);
     sl_screen(1, rec_visible() || slc_visible() || smp_fb_visible() || smp_list_visible() || tn_visible()
-              || pf_visible());
-    if (pf_visible())
+              || pf_visible() || sc_pick_visible());
+    if (sc_pick_visible())
+        sc_pick_draw(canvas);
+    else if (pf_visible())
         pf_draw(canvas);
     else if (tn_visible())
         tn_draw(canvas);
@@ -235,6 +249,7 @@ int wr_poll(void *screen)
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
     rec_poll();
     wr_names();
+    sc_pick_poll();
     /* the RECORDER's meter and state move: a redraw asked for as stock asks (the dirty
      * byte), 25 times a second. v0.15..v0.19 answered 1 here without setting the byte:
      * the loop then pushed its other buffer undrawn (0x4011d32a draws only when the byte
@@ -521,6 +536,22 @@ void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
     sl_cell(view, canvas, x0, y0, id);          /* parameter slides: SLD/SLEN on TRIG page 2 */
 }
 
+/* Sidecar's 21-pixel box holds four label-font characters. Keep the formatter
+ * unchanged for the native value header; preserve a numeric suffix in the box
+ * so Voice 1/2 and Mode 1/2 do not collapse to the same truncated label. */
+static void sc_box_text(char *s)
+{
+    int n = 0;
+    while (s[n]) n++;
+    if (n <= 4) return;
+    int end = n;
+    while (n && s[n - 1] >= '0' && s[n - 1] <= '9') n--;
+    int digits = end - n;
+    if (digits && digits < 4)
+        for (int i = 0; i < digits; i++) s[4 - digits + i] = s[n + i];
+    s[4] = 0;
+}
+
 void wr_page_draw(void *view, void *canvas)
 {
     int page = ((int (*)(void *))method(view, 132))(view);
@@ -541,6 +572,37 @@ void wr_page_draw(void *view, void *canvas)
             return;
     }
 
+    if (kind == SC_KIND) {
+        sc_pick_seen((u32)view);
+        extern void smp_knob_page(void *, void *, const unsigned short *,
+                                  const char *const *, const char *const *, unsigned);
+        const char *labels[8], *texts[8];
+        char values[8][16];
+        unsigned short ids[8];
+        const u32 *descriptor = sc_ui_generic() ? sc_ui_page(page) : 0;
+        const ScUiView *metadata = sc_ui_sound_view();
+        unsigned value_labels = 0;
+        for (int i = 0; i < 8; i++) ids[i] = descriptor ? (unsigned short)descriptor[2 + i] : sc_ids[page][i];
+        for (int i = 0; i < 8; i++) {
+            u32 id = ids[i];
+            labels[i] = id ? NAME_SHORT(id) : "-";
+            texts[i] = values[i];
+            values[i][0] = 0;
+            if (metadata ? metadata->knob[page * 8 + i].count != 0 : !descriptor && page == 1 && i < 3)
+                value_labels |= 1u << i;
+            if (id) {
+                u8 flag;
+                ((void (*)(int, char *))(*(void **)(0x401F7F94u + 60u * id + 0x34u)))(
+                    GET_VALUE(view, id, &flag), values[i]);
+                sc_box_text(values[i]);
+            }
+        }
+        smp_knob_page(view, canvas, ids, labels, texts, value_labels);
+        ((void (*)(void *, void *, int))method(view, 184))(view, canvas, 0);
+        PAGE_DOTS(view, canvas, 2, page, 7);
+        return;
+    }
+
     if (smp) {                                  /* the DT2's SRC pages 1 and 2 (v0.22: the recorder is FUNC + VOICE) */
         extern void smp_page_draw(void *view, void *canvas, int kind, int wave);
         smp_page_draw(view, canvas, kind, page == 1);
@@ -557,13 +619,13 @@ void wr_page_draw(void *view, void *canvas)
     }
     if (mnm) {                                  /* the Monomachine's grid of eight (no MD OS read) */
         extern void smp_knob_page(void *view, void *canvas, const unsigned short *ids,
-                                  const char *const *labels, const char *const *texts);
+                                  const char *const *labels, const char *const *texts, unsigned);
         const char *labels[8], *texts[8];
         for (int i = 0; i < 8; i++) {
             labels[i] = mnm_labels[mi][i];
             texts[i] = mnm_text(view, mi, i);
         }
-        smp_knob_page(view, canvas, perc_param_ids, labels, texts);
+        smp_knob_page(view, canvas, perc_param_ids, labels, texts, 255);
         ((void (*)(void *, void *, int))method(view, 184))(view, canvas, 0);
         int n = PAGE_COUNT(view);
         if (n > 1)

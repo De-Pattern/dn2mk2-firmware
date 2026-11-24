@@ -1,0 +1,30 @@
+{
+  "scope": "Merge proposal; offline evidence only, no hardware or flash clearance",
+  "base": "348622ee462932ce2d146010ea4d7b1323c3b6bd",
+  "code_revision": "404317f7ca529704e14ffe5b60f1db47d7f46006",
+  "companion_code_revision": "857d21aa72a195d701909544555b6348615a0848",
+  "focused_tests": {
+    "passed": 125,
+    "skipped": 0,
+    "seconds": 103.14,
+    "platform": "Windows / Python 3.14 / GCC ColdFire / Unicorn",
+    "command": "python -m pytest -q -p no:cacheprovider -p no:faulthandler test/test_sidecar_pages.py test/test_sidecar_capture.py test/test_sidecar_usb.py test/test_sidecar_ui.py test/test_sidecar_machlist.py test/test_sidecar_native_return.py test/test_sidecar_recovery.py"
+  },
+  "public_demo": "sc.snare (metadata only)",
+  "generated_chunks_match_compiled_source": true,
+  "executable_inputs_unchanged_from_v072_candidate": true,
+  "reused_image_evidence": {
+    "integrity_preflight": "passed",
+    "packaged_native_return_cases": 5
+  },
+  "frozen_wire_events": 14,
+  "saved_eight_part_receiver": "passed",
+  "not_run": [
+    "complete shipping gate",
+    "new image boot on hardware",
+    "project filesystem save/reopen",
+    "physical latency/alignment",
+    "worst-case eight-part playback"
+  ],
+  "revision_note": "Public no-reply author metadata; source tree preserved. This receipt-only update does not change tested code."
+}

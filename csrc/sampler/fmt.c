@@ -12,6 +12,7 @@
  *               names, and put back otherwise.
  */
 #include "wr_gen.h"
+#include "../sidecar/ui.h"
 
 typedef unsigned int u32;
 typedef unsigned short u16;
@@ -525,10 +526,81 @@ static int fmt_saved __attribute__((section(".data"))) = 0;
 
 void smp_fine(int kind);
 
+/* Restore our overrides before the existing machine-specific formatting runs.
+ * Snapshot before any machine mutates the shared records, including smp_fine. */
+static void *sc_stock_fmt[SC_ALL_PARAMS] __attribute__((section(".data")));
+/* The extra five WaveTone records include pitch/table controls. Only Sidecar's
+ * active UI uses ordinary 0..127 controls. Keep their routing/CC identities;
+ * restore range/default/fine flag and runtime knob value type before other
+ * machine-specific overrides run. Snapshot before smp_fine changes anything. */
+#define SC_REC(id) ((int *)(0x401F7F94u + 60u * (id)))
+#define SC_ENTRY(id) ((u32 *)(0x4243325Cu + 68u * (id) + 4u))
+static int sc_stock_range[SC_ALL_PARAMS][4] __attribute__((section(".data")));
+static u32 sc_stock_type[SC_ALL_PARAMS][4] __attribute__((section(".data")));
+static int sc_fmt_saved __attribute__((section(".data"))) = 0;
+static int sc_fmt_on __attribute__((section(".data"))) = 0;
+
+static int sc_knob(int v)
+{
+    v >>= 8;
+    return v < 0 ? 0 : v > 127 ? 127 : v;
+}
+
+static void sc_number(int v, char *buf) { put_num(buf, sc_knob(v)); }
+static int sc_zone(int v, int count)
+{
+    v = v < 0 ? 0 : v > 0x7F00 ? 0x7F00 : v;
+    return 1 + ((v * count) >> 15); /* Pi selectors include fractional modulation. */
+}
+static void sc_voice(int v, char *buf) { put_num(buf, sc_zone(v, 4)); }
+static void sc_three(int v, char *buf) { put_num(buf, sc_zone(v, 3)); }
+static void sc_generic_text(int k, int value, char *buf)
+{
+    const ScUiView *v = sc_ui_sound_view();
+    if (v && v->knob[k].count) {
+        int zone = sc_zone(value, v->knob[k].count) - 1;
+        for (int i = 0; i < 8; i++) buf[i] = v->knob[k].names[zone][i];
+    } else put_num(buf, sc_knob(value) - (v && v->knob[k].kind == 1 ? 64 : 0));
+}
+#define SC_FMT(k) static void sc_f##k(int v, char *b) { sc_generic_text(k, v, b); }
+SC_FMT(0) SC_FMT(1) SC_FMT(2) SC_FMT(3) SC_FMT(4) SC_FMT(5) SC_FMT(6) SC_FMT(7)
+SC_FMT(8) SC_FMT(9) SC_FMT(10) SC_FMT(11) SC_FMT(12) SC_FMT(13) SC_FMT(14) SC_FMT(15)
+static void (*const sc_generic_fmt[16])(int, char *) = {
+    sc_f0, sc_f1, sc_f2, sc_f3, sc_f4, sc_f5, sc_f6, sc_f7,
+    sc_f8, sc_f9, sc_f10, sc_f11, sc_f12, sc_f13, sc_f14, sc_f15
+};
+
+static void sc_format_restore(void)
+{
+    for (int i = 0; i < SC_ALL_PARAMS; i++) {
+        u16 id = sc_all_ids[i];
+        if (!sc_fmt_saved)
+            sc_stock_fmt[i] = RECORD_FMT(id);
+        if (sc_fmt_on)
+            RECORD_FMT(id) = sc_stock_fmt[i];
+        {
+            int j = i;
+            for (int k = 0; k < 4; k++) {
+                if (!sc_fmt_saved) {
+                    sc_stock_range[j][k] = SC_REC(id)[2 + k];
+                    sc_stock_type[j][k] = SC_ENTRY(id)[k];
+                }
+                if (sc_fmt_on) {
+                    SC_REC(id)[2 + k] = sc_stock_range[j][k];
+                    SC_ENTRY(id)[k] = sc_stock_type[j][k];
+                }
+            }
+        }
+    }
+    sc_fmt_saved = 1;
+    sc_fmt_on = 0;
+}
+
 /* from wr_names, when the active track's machine changes: KIND as is_wr answers it
  * (SMP_KIND0.. for the sample machines) */
 void smp_formats(int kind)
 {
+    sc_format_restore();
     if (!fmt_saved) {
         for (int k = 0; k < NFMT; k++)
             stock_fmt[k] = RECORD_FMT(fmt_ids[k]);
@@ -551,6 +623,28 @@ void smp_formats(int kind)
         RECORD_FMT(fmt_ids[k]) = f;
     }
     smp_fine(kind);
+    if (kind == SC_KIND) {
+        for (int i = 0; i < SC_PARAMS; i++)
+            RECORD_FMT(sc_ids[i >> 3][i & 7]) = (void *)(i == 8 ? sc_voice : i > 8 ? sc_three : sc_number);
+        for (int i = SC_PARAMS; i < SC_ALL_PARAMS; i++) {
+            u32 id = sc_all_ids[i];
+            SC_REC(id)[2] = 0; SC_REC(id)[3] = 0x7f00;
+            SC_REC(id)[4] = 0; SC_REC(id)[5] = SC_REC(261)[5];
+            for (int k = 0; k < 4; k++) SC_ENTRY(id)[k] = SC_ENTRY(261)[k];
+            RECORD_FMT(id) = (void *)sc_number;
+        }
+        if (sc_ui_generic()) {
+            const ScUiView *v = sc_ui_sound_view();
+            for (int i = 0; i < SC_ALL_PARAMS; i++) {
+                u32 id = sc_all_ids[i];
+                SC_REC(id)[2] = v ? v->knob[i].min << 8 : 0;
+                SC_REC(id)[3] = v ? v->knob[i].max << 8 : 0x7f00;
+                SC_REC(id)[4] = v ? v->knob[i].def << 8 : 0;
+                RECORD_FMT(id) = (void *)sc_generic_fmt[i];
+            }
+        }
+        sc_fmt_on = 1;
+    }
 }
 
 /* v0.48 (impbox, the owner: "exact dt2"): STRT, LEN and LOOP as the DT2's own controls.

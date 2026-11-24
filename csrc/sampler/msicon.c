@@ -40,6 +40,11 @@ int ms_icon_c(void *screen, void *view)
 
 const char *ms_label_c(void *view)
 {
+    extern const char *sc_list_label(unsigned int);
+    if (*(int *)((char *)view + 424) == 0) {
+        const char *label = sc_list_label(ROW_TYPE(view));
+        if (label) return label;
+    }
     int i = pane_icon(view);
     return i < 0 ? STOCK_LABEL : msi_label[i];
 }

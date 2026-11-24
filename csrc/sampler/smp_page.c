@@ -610,7 +610,7 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
 /* v0.20: RESONATOR's and CZ's first pages (page.c), as the Elektron grid: eight knobs at
  * the DT2's centres, each its label under it; an empty place (id 0) is left empty */
 void smp_knob_page(void *view, void *c, const unsigned short *ids, const char *const *labels,
-                   const char *const *texts)
+                   const char *const *texts, unsigned value_labels)
 {
     for (int i = 0; i < 8; i++) {
         int x = CELL_X(i & 3), y = i < 4 ? TOP_Y : BOT_Y;
@@ -624,7 +624,7 @@ void smp_knob_page(void *view, void *c, const unsigned short *ids, const char *c
             int top, v = value(view, ids[i], &top);
             w_knob_at(c, x, y, v, top, 0);
         }
-        if (shows(i)) {                         /* v0.35: SYN held (v0.48: or just turned): the value (O14) */
+        if ((value_labels & (1u << i)) && shows(i)) { /* enum labels may show the choice; numeric names stay fixed */
             char vb[32];
             vb[0] = 0;
             val_text(view, ids[i], vb);

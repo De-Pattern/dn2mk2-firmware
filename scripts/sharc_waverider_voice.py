@@ -162,9 +162,12 @@ def word_reg(runner, name: str) -> int:
 def run_init(mach: Machine, cache: pathlib.Path, accelerate: bool, validate: int) -> dict:
     """Init to its return, cached. A2 is checked word for word on the first VALIDATE
     entries of each additive loop, emulated beside the native version."""
+    fixups_sha = hashlib.sha256(pathlib.Path(fx.__file__).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
     if cache.exists():
-        runner = fx.sr.load_snapshot(str(cache), mach.memory)
         meta = json.loads(cache.with_suffix(".json").read_text(encoding="utf-8"))
+        if meta.get("fixups_sha256") != fixups_sha or meta.get("image_sha256") != mach.sha:
+            raise ValueError("Initialization cache predates this emulator/image; retain it as old evidence and use a new --init-cache path")
+        runner = fx.sr.load_snapshot(str(cache), mach.memory)
         return {"runner": runner, **meta, "cached": str(cache.relative_to(ROOT))}
     r = mach.runner(INIT)
     f = mach.fixups(accelerate)
@@ -198,7 +201,8 @@ def run_init(mach: Machine, cache: pathlib.Path, accelerate: bool, validate: int
     t0 = time.perf_counter()
     res = fx.run(r, 60_000_000, f)
     ok = res[0] == "halt" and res[1].reason == "return without followed call"
-    meta = {"ok": ok, "instructions": res[2], "wall_s": round(time.perf_counter() - t0, 1),
+    meta = {"ok": ok, "image_sha256": mach.sha, "fixups_sha256": fixups_sha,
+            "instructions": res[2], "wall_s": round(time.perf_counter() - t0, 1),
             "halt": f"{res[1].reason} at {res[1].pc_sw:#x}" if res[0] == "halt" else res[0],
             "fixups": dict(f.counts), "accelerated": accelerate, "additive_checks": checks,
             "additive_entries": {f"{k:#x}": v for k, v in seen.items()}}
