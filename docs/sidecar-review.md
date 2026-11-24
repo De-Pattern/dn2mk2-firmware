@@ -6,10 +6,12 @@ engine identity in saved sounds, and send events to Sidecar. Eight independent
 mono returns enter the assigned voices before native filter/AMP/pan/FX sends.
 New compatible engines require a Pi package, not a new per-engine DN2 patch.
 
-The baseline is the exact dn2mk2 **v0.72** release on Elektron OS 1.11. The clean
-bridge was applied onto that tag and its generated payloads rebuilt. The earlier
-v0.70 extraction remains on `review/dn2-bridge`; current work is on
-`review/dn2-bridge-v072`. This is a review candidate, not a new firmware release.
+The merge proposal is on `propose/sidecar-native`, based on current upstream
+`main`: **v0.72** plus its OS-version documentation update. Executable sources
+and generated payloads are identical to the verified v0.72 candidate. The
+underlying Elektron OS remains **1.11**; documenting 1.12 does not port the bridge.
+The earlier `review/dn2-bridge` and `review/dn2-bridge-v072` branches are retained.
+This is a review candidate, not a new firmware release.
 
 Maintainer-facing description: [proposed contribution](sidecar-proposal.md).
 Release ownership and version boundaries: [maintenance](sidecar-maintenance.md).
@@ -70,6 +72,16 @@ it does not render the plugin's DSP or install anything.
 
 ## Generated files and release boundary
 
+Merge-proposal follow-up (2026-11-24): **125 passed, no skips, in 1 minute
+43 seconds** on Windows/Python 3.14 with the ColdFire compiler and Unicorn.
+This is a fresh complete focused run against the updated Sidecar `dev` companion,
+including public SC Snare. Session-scoped cached compilation avoids rebuilding
+the native client separately for each test module. The fourteen frozen wire
+events and the paired saved eight-part receiver check also pass after the rebase.
+The current test log is `out/sidecar-v072/merge-target-tests.log`.
+The shareable [validation receipt](sidecar-validation.json) records code revisions,
+commands, results and limits without local resource paths or raw device data.
+
 Recorded v0.72 integration checks (2026-11-24):
 
 - The focused suite completed in 4 minutes 36 seconds: 124 passed and one
@@ -111,5 +123,6 @@ an actual release; no release is being offered here.
 
 Offline capture/converter/UI checks are not a project filesystem save/reopen,
 full boot, physical latency or worst-case eight-part playback qualification.
-The paired [Sidecar protocol](../../sidecar-bridge-public/docs/dn2/PROTOCOL.md)
-defines the current event/session boundary and its limits.
+The companion Sidecar repository's `docs/dn2/PROTOCOL.md` defines the current
+event/session boundary and its limits. Its `propose/dn2-native` branch targets
+Sidecar `dev`; include that source/patch series when submitting this proposal.

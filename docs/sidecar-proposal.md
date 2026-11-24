@@ -1,64 +1,68 @@
-# Proposed contribution: native Sidecar parts on DN2MK2 0.72
+# Add eight native Sidecar parts with manifest-driven machine pages
 
-Local maintainer handoff draft. Not sent, published or accepted upstream.
+Draft PR body, prepared locally for `De-Pattern/dn2mk2-firmware:main`.
+No PR or maintainer message has been sent.
 
-## Problem and resulting behavior
+## What changes
 
-External Pi synths currently require a separate custom DN2 firmware branch.
-This contribution adds a generic Sidecar endpoint to dn2mk2 so compatible Pi
-packages can appear by name in native MACHINE SEL, supply their parameter labels
-over up to two SYN pages, receive knobs/locks and saved sound identity, and use
-the assigned track's native filter, AMP, pan and FX sends.
+A Digitone II track can select an engine running on a Sidecar Pi from native
+MACHINE SEL, edit its named controls on up to two SYN pages, and sequence those
+controls with parameter locks. Eight mono returns enter the assigned native
+voices before filter, AMP, pan and FX sends. The eight-part session uses tracks
+1-8; tracks 9-16 remain available for native machines.
 
-For example, install the existing public SC Snare RMP on a compatible Sidecar
-Pi and select SNARE on the DN2. The DN2 stores `sc.snare` and its controls; there
-is no SC Snare entry or DSP implementation compiled into DN2 firmware. Up to
-eight parts have independent saved identities and native processing lanes.
+The DN2 stores the engine's full ID and up to sixteen fractional parameter
+values. Compatible engines supply their names, defaults, ranges and enums from
+Pi metadata. Adding one does not require a DN2 machine definition or reflash.
+The public SC Snare plugin demonstrates this without any external drum library.
 
-## Scope and review order
+This targets current `main` (v0.72 plus the OS-version documentation update),
+using **Elektron OS 1.11**. It does not add OS 1.12 support. All v0.72 native
+synth DSP objects and guard weights are retained; only the shared return tail
+and native control/UI patch data are regenerated.
 
-Based on the exact v0.72 release, using Elektron OS 1.11:
+## Companion and compatibility
 
-1. Portable event encoding and persistent identity/control representation.
-2. Native capture/session/USB, catalog/selection/pages and native audio returns.
-3. Synthetic cross-repository fixtures, public-plugin interoperability and docs.
-4. Generated ColdFire patch data and shared DSP-tail objects for this base.
+The Pi endpoint is a separate Sidecar proposal against its `dev` branch. It is
+required for the feature; upstream Sidecar releases without that endpoint do
+not provide DN2 native parts. The companion source/patch series must accompany
+this proposal. Neither endpoint requires the other's product version number to
+match: the event, session and metadata formats are the compatibility boundary.
 
-The current integration uses existing native record space and preserves the
-legacy eleven-control identity. No private engine implementation, source/resource
-snapshot, private library inventory, firmware image or device configuration is
-part of the contribution. Native v0.72 synth objects and guard weights are kept.
+Without a matching ACK/RESET session the Pi cannot take native return ownership.
+The existing legacy sound identity remains readable. Generic sounds retain full
+IDs rather than catalog positions or cache slots; unavailable engines are not
+silently replaced. No plugin DSP, sample bank, firmware image or device settings
+are included in this contribution.
 
-The Pi-side companion is a separate clean Sidecar branch; it is required for
-the feature but does not need a release number matching dn2mk2. The shared wire
-fixtures and [maintenance contract](sidecar-maintenance.md) describe the boundary.
-The companion and this branch have disabled push destinations until publication
-is explicitly authorized. Replace local checkout references with the final
-companion contribution link when actually submitting.
+## Review order
 
-## What reviewers can reproduce
+1. Portable event encoding and saved identity (`csrc/sidecar/wire.c`, `sound.c`).
+2. Native capture, bounded USB/session handling and catalog/page integration.
+3. Eight-lane ownership and the generated DSP return tail.
+4. Compiled tests, public fixtures and generated patch data.
 
-See [review/build instructions](sidecar-review.md). The focused checks compile
-the actual native client/capture code, run the saved-sound converters, exchange
-metadata with the real Pi server using synthetic fixtures and public SC Snare,
-and execute the packaged return tail against ownership/isolation cases.
-The source generator checks its stock instructions and exact patch replay.
+The firmware-specific bindings remain in the DN2 adapter. Moving those behind a
+single host interface and adding capability negotiation are separate follow-ups;
+neither is necessary for compatible plugins within today's sixteen-control ABI.
 
-An offline combined image is built only as a verification artifact. Preflight
-integrity success is not a release clearance. No v0.72 image from this branch
-has been flashed or booted on hardware, and no physical test result is claimed.
-Full project filesystem recall, worst-case playback and latency remain release
-acceptance items. The complete native binding extraction and capability exchange
-are follow-up work, not features silently promised by this patch.
+## Validation
 
-## Maintainer decisions
+Exact commands, evidence and limitations are in [the review guide](sidecar-review.md).
+The source-integrated image passed integrity preflight and all five packaged
+DSP-tail routing/register-preservation cases. Compiled native UI/capture/storage
+tests, frozen wire events and saved eight-part packets are covered by focused
+checks. The SC Snare package's actual metadata is exchanged with the Pi server
+by the compiled DN2 client; this is not an audio-rendering test.
 
-- Whether to merge the full feature together or review the wire/storage,
-  native UI/control and native-return layers in separate dependent changes.
-- The preferred location/ownership of the OS 1.11 binding and future ports.
-- Whether normal releases include the endpoint directly or select it through an
-  existing build option; avoid a second post-release binary patch for users.
-- The agreed protocol compatibility policy and scope of a later capability query.
+**Not a flash release:** this newly integrated image has not been booted or
+qualified on hardware. Full project filesystem save/reopen, worst-case playback,
+physical latency/alignment and the maintainer's complete shipping gate remain
+release acceptance work. No change to release policy or bypass is proposed.
 
-These are proposal points, not demands to change the maintainer's release gates
-or accept new private plugin dependencies.
+## Requested review
+
+Please review the native binding locations and return ownership/storage contract
+for inclusion in the normal DN2MK2 build. This would let users install ordinary
+DN2MK2 updates without maintaining a separate per-release Sidecar patch. The
+Pi companion can be reviewed separately; it need not be released simultaneously.
