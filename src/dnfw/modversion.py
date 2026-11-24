@@ -29,8 +29,9 @@ def mod_version() -> str:
     except (OSError, UnicodeDecodeError) as e:
         raise VersionError(f"{FILE}: the mod's version file cannot be read ({e}): the build needs it") from None
     v = text.strip()
-    if not re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}", v) or text not in (v, v + "\n"):
-        raise VersionError(f"{FILE}: {text!r} is not a version like 0.39 (one line, digits, a dot, digits)")
+    # a test build's "-tN" too (0.54-t1 on the stereo branch; 0.73-t1, docs/os112-port.md)
+    if not re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}(-t[0-9]{1,2})?", v) or text not in (v, v + "\n"):
+        raise VersionError(f"{FILE}: {text!r} is not a version like 0.39 or 0.54-t1 (one line)")
     return v
 
 

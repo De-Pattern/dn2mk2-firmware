@@ -287,6 +287,19 @@ def port_main_os(build11: bytes, m: AddrMap, rep: Report) -> bytes:
     return bytes(new_base) + port_area(build11[len(base):], m, rep)
 
 
+def assemble(stock12_syx: bytes, main12: bytes, sec7: bytes) -> bytes:
+    """stock 1.12 with MAIN OS and the DSP section replaced, every checksum recomputed and the
+    result verified (dnfw build, in-process: the browser runs this too)"""
+    from ..cli.build import rebuild, replacement
+    from ..firmware.load import load
+    from ..firmware.verify import verify
+    fw = load(stock12_syx)
+    out = rebuild(fw, {3: replacement(fw, 3, main12), 7: replacement(fw, 7, sec7)})
+    if not verify(load(out)).ok:
+        raise PortError("the 1.12 image does not verify")
+    return out
+
+
 def port_syx(build11: Path, out: Path, stock11: Path | None = None, stock12: Path | None = None) -> Report:
     """build11 (.syx, a DN2 mk2 build on stock 1.11) -> out (.syx on stock 1.12), signed; the
     report says every edit, operand and data word. Refuses on any refusal."""
@@ -297,19 +310,74 @@ def port_syx(build11: Path, out: Path, stock11: Path | None = None, stock12: Pat
     stock12 = stock12 or ROOT.parent / "Digitone_II_OS1.12.syx"
     m = AddrMap(main_os(stock11), main_os(stock12))
     rep = Report()
-    fw = load(read_image(build11))
-    secs = {s.id: s for s in fw.container.sections}
+    secs = {s.id: s for s in load(read_image(build11)).container.sections}
     main12 = port_main_os(secs[3].unpack(), m, rep)
     if rep.refused or any(w[3] == "UNREVIEWED" for w in rep.data_words):
         raise PortError(f"{len(rep.refused)} refused: {rep.refused[:5]}")
-    with tempfile.TemporaryDirectory() as d:
-        d = Path(d)
-        (d / "s3.bin").write_bytes(main12)
-        (d / "s7.bin").write_bytes(secs[7].unpack())
-        r = subprocess.run([__import__("sys").executable, "-c", "from dnfw.cli.main import main; main()",
-                            "build", str(stock12), "-s", f"3={d / 's3.bin'}", "-s", f"7={d / 's7.bin'}",
-                            "-o", str(out)], capture_output=True, text=True,
-                           env={**__import__("os").environ, "PYTHONPATH": str(ROOT / "src"), "DN2_OS": "1.11"})
-        if r.returncode != 0:
-            raise PortError(r.stdout[-400:] + r.stderr[-400:])
+    out.write_bytes(assemble(read_image(stock12), main12, secs[7].unpack()))
     return rep
+
+
+# -- the recipe: the port replayed without a disassembler (the browser) ------------------------
+def recipe(build11_main: bytes, m: AddrMap) -> dict:
+    """The port of this MAIN OS as data: the byte runs that move (1.11 offset, 1.12 offset,
+    length: exactly the bytes the build changed, so never Elektron's), and every 32-bit word the
+    port changes (its offset in the 1.12 MAIN OS, the value before, the value after). Offsets and
+    addresses only: `replay` rebuilds `port_main_os`'s result from the build and stock 1.12."""
+    import hashlib
+    from ..mods import platform
+    n11 = platform.SPEC["stock_length"]
+    rep = Report()
+    want = port_main_os(build11_main, m, rep)
+    if rep.refused:
+        raise PortError(f"refused: {rep.refused[:3]}")
+    runs = []
+    for o, n in edit_runs(m.a, build11_main[:n11], gap=0):
+        nva, _ = m.image(BASE + o, span=1)
+        runs.append([o, nva - BASE, n])
+    base = _replay_runs(build11_main, m.b, runs, n11)
+    words = [[k, struct.unpack_from(">I", base, k)[0], struct.unpack_from(">I", want, k)[0]]
+             for k in _changed_words(base, want)]
+    return {"build11_main_sha256": hashlib.sha256(build11_main).hexdigest(),
+            "stock11_length": n11, "stock12_length": len(m.b),
+            "want_sha256": hashlib.sha256(want).hexdigest(), "runs": runs, "words": words}
+
+
+def _replay_runs(build11_main: bytes, stock12_main: bytes, runs, n11: int) -> bytearray:
+    out = bytearray(stock12_main)
+    for o11, o12, n in runs:
+        out[o12:o12 + n] = build11_main[o11:o11 + n]
+    return out + build11_main[n11:]
+
+
+def _changed_words(a: bytes, b: bytes) -> list[int]:
+    """even offsets of 4-byte windows that cover every byte where a and b differ (each window
+    starts at the first differing byte's even offset; `replay`'s sha256 check is the proof)"""
+    if len(a) != len(b):
+        raise PortError("the replayed runs and the port differ in length")
+    out, k = [], 0
+    while k < len(a):
+        if a[k] == b[k]:
+            k += 1
+            continue
+        st = k & ~1
+        out.append(st)
+        k = st + 4
+    return out
+
+
+def replay(recipe: dict, build11_main: bytes, stock12_main: bytes) -> bytes:
+    """the ported MAIN OS from the recipe, the 1.11 build's MAIN OS and stock 1.12's"""
+    import hashlib
+    if hashlib.sha256(build11_main).hexdigest() != recipe["build11_main_sha256"]:
+        raise PortError("this is not the 1.11 build the recipe was made from")
+    if len(stock12_main) != recipe["stock12_length"]:
+        raise PortError("that is not stock Digitone II OS 1.12's MAIN OS")
+    out = _replay_runs(build11_main, stock12_main, recipe["runs"], recipe["stock11_length"])
+    for k, old, new in recipe["words"]:
+        if struct.unpack_from(">I", out, k)[0] != old:
+            raise PortError(f"the word at +{k:#x} is not {old:#x}: not stock 1.12")
+        struct.pack_into(">I", out, k, new)
+    if hashlib.sha256(out).hexdigest() != recipe["want_sha256"]:
+        raise PortError("the replayed port differs from the cleared one")
+    return bytes(out)

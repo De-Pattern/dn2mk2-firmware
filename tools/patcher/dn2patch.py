@@ -6,7 +6,12 @@ is shipped with it: the DN2 OS 1.11 file is patched, the DT2's DSP image (sectio
 OS 1.17), the Machinedrum's OS 1.63 and (v0.26 on) the Monomachine's OS 1.32B are read for
 their tables.
 
-    build(dn2, dt2, md, out, mnm=None) -> the sha256 of OUT
+    build(dn2, dt2, md, out, mnm=None, dn2_112=None) -> the sha256 of OUT
+
+v0.73-t1 (docs/os112-port.md): a version for OS 1.12 also reads the owner's stock 1.12 file. The
+build is made on 1.11 exactly as before, then ported to 1.12 by replaying its recipe
+(`osport_recipe.json` in the bundle: offsets and addresses only, made by `dnfw.osport.port.recipe`
+from the cleared build), and the result is assembled on the 1.12 file.
 """
 
 from __future__ import annotations
@@ -84,7 +89,8 @@ def dt2_section7(data: bytes) -> bytes:
     return body
 
 
-def build(dn2: str, dt2: str, md: str, out: str, mnm: str | None = None) -> str:
+def build(dn2: str, dt2: str, md: str, out: str, mnm: str | None = None,
+          dn2_112: str | None = None) -> str:
     WORK.mkdir(parents=True, exist_ok=True)
     d = WORK / "dn2.syx"
     d.write_bytes(unzip(pathlib.Path(dn2).read_bytes(), (".syx",)))
@@ -112,7 +118,29 @@ def build(dn2: str, dt2: str, md: str, out: str, mnm: str | None = None) -> str:
     else:                                        # (v0.24, v0.25: none)
         os.environ["MNM_OS"] = str(WORK / "no-mnm")
     from dnfw.cli.main import main
-    rc = main(["mods", "apply", dn2, "--mod", "waverider", "-o", out])
-    if rc not in (0, None) or not pathlib.Path(out).is_file():
+    out11 = out if dn2_112 is None else str(WORK / "build_OS1.11.syx")
+    rc = main(["mods", "apply", dn2, "--mod", "waverider", "-o", out11])
+    if rc not in (0, None) or not pathlib.Path(out11).is_file():
         raise PatchError("the build stopped (see the log); is that DN2 OS 1.11?")
+    if dn2_112 is not None:
+        port_to_112(out11, unzip(pathlib.Path(dn2_112).read_bytes(), (".syx",)), out)
     return hashlib.sha256(pathlib.Path(out).read_bytes()).hexdigest()
+
+
+def port_to_112(build11: str, stock12: bytes, out: str) -> None:
+    import json
+    from dnfw.firmware.load import load
+    from dnfw.osport import port
+    rec = json.loads((pathlib.Path(__file__).with_name("osport_recipe.json")).read_text())
+    try:
+        s12 = {x.id: x for x in load(stock12).container.sections}
+    except Exception as e:                       # noqa: BLE001
+        raise PatchError(f"that is not a Digitone II OS file ({e})") from None
+    if s12[3].unpack() is None or len(s12[3].unpack()) != rec["stock12_length"]:
+        raise PatchError("that is not stock Digitone II OS 1.12")
+    b11 = {x.id: x for x in load(pathlib.Path(build11).read_bytes()).container.sections}
+    try:
+        main12 = port.replay(rec, b11[3].unpack(), s12[3].unpack())
+        pathlib.Path(out).write_bytes(port.assemble(stock12, main12, b11[7].unpack()))
+    except port.PortError as e:
+        raise PatchError(f"the port to 1.12 stopped: {e} (is the second file stock DN2 OS 1.12?)") from None
