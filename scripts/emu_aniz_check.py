@@ -32,6 +32,7 @@ sys.path.insert(0, str(DIGIKIT / "tools"))
 sys.path.insert(0, str(DIGIKIT))
 
 from dnfw import bootanim                                     # noqa: E402
+from dnfw.osport.os import A                                  # noqa: E402
 from dnfw.cli.files import read_image                         # noqa: E402
 from dnfw.firmware.load import load                           # noqa: E402
 from dnfw.mods import bootscreen, platform                    # noqa: E402
@@ -52,7 +53,7 @@ def main() -> int:
 
     content = load(read_image(a.build)).container.find(3).unpack()
     spec = bootscreen.SPEC
-    va = spec["intro_va"]
+    va = A(spec["intro_va"])              # v0.73: the intro hook's place on this run's OS
     hook = bytes(content[va - bootscreen.BASE:va - bootscreen.BASE + 8])
     writes = [(va, hook)] + platform.runtime(content)
     expect = bootanim.images()
