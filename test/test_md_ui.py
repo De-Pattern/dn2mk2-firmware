@@ -62,3 +62,5 @@ def test_the_page_renderer_stops_before_the_md_graphics():
     c = spec["c_chunk"]
     assert c["load"] == pages.C_LOAD and c["load"] + len(bytes.fromhex(c["code"])) <= pages.C_LOAD + pages.C_SPAN
     assert pages.C_LOAD + pages.C_SPAN <= pages.MDUI_LOAD and pages.C_LOAD > 0x466B74D0
+    assert len(ui.blob()) <= pages.MDUI_SPAN
+    assert pages.MDUI_LOAD + pages.MDUI_SPAN <= 0x46B00000
