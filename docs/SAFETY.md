@@ -81,9 +81,9 @@ at your own risk, with possible loss of user content. So:
 - Back up first (step 1).
 - Send **stock 1.11**, unmodified, before any mod. That keeps the downgrade
   and the first modified flash as two separate steps.
-- If the 1.12 bootstrap differs from 1.11's, that first flash may rewrite the
-  bootstrap on restart. Give the project the 1.12 `.syx` and `dnfw diff` will
-  say whether it does, before you commit to it.
+- The 1.12 bootstrap and updater are byte-identical to 1.11's (`dnfw diff`,
+  2026-11-24; `docs/os-versions.md`): going back changes MAIN OS only, and the
+  bootstrap is not rewritten.
 
 ---
 

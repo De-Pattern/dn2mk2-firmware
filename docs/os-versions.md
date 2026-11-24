@@ -76,6 +76,33 @@ and why a patch names the build it targets. The compression and signing are
 unchanged, and the limits in `src/dnfw/codec/limits.py` were measured on 1.11,
 so the pipeline itself carries over.
 
+## 1.11 → 1.12: the main outputs through Outbox 8
+
+Measured 2026-11-24 (`dnfw diff Digitone_II_OS1.11.syx Digitone_II_OS1.12.syx --strings`,
+build 40059 → 40062). Elektron's notes: the main outputs can be routed through Outbox 8, and
+[FUNC] + [UP]/[DOWN] moves between channels in Outbox 8's channel menus.
+
+| Section | Change |
+|---|---|
+| meta | the build and timestamp (7 bytes) |
+| bootstrap | **byte-identical** (still at `0x02010000`) |
+| MAIN OS | **+4,096 bytes**; identical up to `+0x48a86`, everything after it shifted |
+| updater | **byte-identical** |
+| blob (the SHARC program) | **byte-identical** |
+| id 8 (the Outbox 8's own firmware) | **byte-identical** |
+
+New text in MAIN OS is RTTI only: a new view `BreakOutBoxOutputRoutingMenuView` (the main-output
+route) and relinked lambdas. So the feature is ColdFire-only: the Outbox's firmware and the DSP did
+not change, and per-track Outbox routing was already in 1.11.
+
+**What it means for this project:**
+- A port to 1.12 is ColdFire work only: every MAIN OS patch site past `+0x48a86` and the C's stock
+  addresses move (ROADMAP: about 385 sites), and the gate's emulator snapshots are rebuilt. The DSP
+  side carries over unchanged. `dnfw mods apply` on 1.12 refuses today (the platform step reads
+  1.12's larger MAIN OS as foreign appended data), so nothing builds on it by accident.
+- A unit on 1.12 that goes back to 1.11 does not get a different bootstrap or updater: only MAIN OS
+  and the metadata differ (docs/SAFETY.md).
+
 ## Reading `dnfw diff`
 
 - **Blocks are densest first.** A relink produces many small blocks; a rewrite
