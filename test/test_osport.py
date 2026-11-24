@@ -74,3 +74,23 @@ def test_immediates_need_stock_evidence(m):
     port.relocate_code(code, 0x46AC1000, m, rep, "t")
     assert struct.unpack(">I", code[2:6])[0] == dnfw
     assert struct.unpack(">I", code[8:12])[0] == 0x42432A6C
+
+
+@need
+def test_hook_sharing_a_byte_with_stock_survives(m):
+    """v0.73-t1's bug: our `jsr 0x46ac022a` over stock's `jsr 0x4011d32a` left the last byte as
+    stock's, so 1.12's relinked 0x4011d60a made it `jsr 0x46ac020a`. The port keeps our word,
+    and verify_calls refuses a port that does not (the negative control)"""
+    at = 0x4002E4CA - BASE                                      # jsr 0x4011d32a in stock 1.11
+    assert m.a[at:at + 6].hex() == "4eb94011d32a"
+    b = bytearray(m.a)
+    b[at + 2:at + 6] = bytes.fromhex("46ac022a")
+    rep = port.Report()
+    out = port.port_edits(m.a, bytes(b), m.b, m, rep)
+    nat = m.image(0x4002E4CA)[0] - BASE
+    assert out[nat:nat + 6].hex() == "4eb946ac022a"
+    bad = bytearray(out)
+    bad[nat + 5] = m.b[nat + 5]                                # the old bug: stock 1.12's last byte
+    rep2 = port.Report()
+    port.verify_calls(bytes(b), bytes(bad), m, len(m.a), rep2)
+    assert rep2.refused

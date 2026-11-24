@@ -199,6 +199,10 @@ def port_edits(stock11: bytes, build11: bytes, stock12: bytes, m: AddrMap, rep: 
     """stock 1.12 MAIN OS with the build's edits moved and their operands translated"""
     out = bytearray(stock12)
     for o, n in edit_runs(stock11, build11):
+        # an edit that touches a word stock relinked between 1.11 and 1.12 (a pointer) takes the
+        # whole word from the build: a byte it left as stock 1.11's is not stock 1.12's there
+        # (v0.73-t1: `jsr 0x46ac022a` over stock's `jsr 0x4011d32a` kept stock's last byte, and
+        # 1.12's relinked 0x4011d60a made it `jsr 0x46ac020a`)
         va = BASE + o
         nva, why = m.image(va, span=1)
         if nva is None:
@@ -223,6 +227,24 @@ def port_edits(stock11: bytes, build11: bytes, stock12: bytes, m: AddrMap, rep: 
                     continue                  # an operand in stock code: stock 1.12 has its own
                 piece[ctx_lo + k - o] = ctx[k]
         out[nb:nb + n] = piece
+        # a word stock relinked between 1.11 and 1.12 that the edit covers only in part
+        for k in range((o - 3) & ~1, o + n + 3, 2):
+            if k + 4 <= o or k >= o + n or k < 0 or (o <= k and k + 4 <= o + n):
+                continue
+            kb = k + (nb - o)
+            if stock11[k:k + 4] == stock12[kb:kb + 4]:
+                continue
+            bw = struct.unpack_from(">I", build11, k)[0]
+            if build11[k:k + 4] == stock11[k:k + 4] or not (_ours(bw) or LO <= bw < HI):
+                continue        # untouched, or not an address word (a window across two instructions)
+            if _ours(bw):
+                w = bw                                                  # ours (a hook's target)
+            else:
+                w, why = m.map(bw)
+                if w is None:
+                    rep.refused.append((f"edit {va:#x}+{n}", f"a relinked word it covers: {bw:#x} {why}"))
+                    continue
+            struct.pack_into(">I", out, kb, w)
         rep.edits.append((va, nva, n))
     return out
 
@@ -290,6 +312,38 @@ def port_area(blob: bytes, m: AddrMap, rep: Report) -> bytes:
     return bytes(out)
 
 
+def verify_calls(build11: bytes, main12: bytes, m: AddrMap, n11: int, rep: Report) -> None:
+    """every absolute call and jump in the edits must reach, on 1.12, the same code it reached on
+    1.11: the target's first bytes in the 1.12 image equal the 1.11 build's (a relinked pointer
+    aside). A misplaced or untranslated target fails here, before any emulator runs"""
+    n12 = len(m.b)
+    for o, n in edit_runs(m.a, build11[:n11]):
+        nva, _ = m.image(BASE + o, span=1)
+        if nva is None:
+            continue
+        d = nva - BASE - o
+        # each jsr/jmp abs.l whose opcode or operand the edit touches (found by its opcode at an
+        # even offset, so a run that starts inside an instruction still finds it)
+        for p in range((o - 6) & ~1, o + n, 2):
+            if build11[p:p + 2] not in (b"\x4e\xb9", b"\x4e\xf9") or p + 6 <= o:
+                continue
+            t1 = struct.unpack_from(">I", build11, p + 2)[0]
+            t2 = struct.unpack_from(">I", main12, p + 2 + d)[0]
+            x = build11[t1 - BASE:t1 - BASE + 6] if BASE <= t1 < BASE + n11 else None
+            y = main12[t2 - BASE:t2 - BASE + 6] if BASE <= t2 < BASE + n12 else None
+            if x is None and y is None:
+                if t1 != t2:
+                    rep.refused.append((f"call {BASE + p + d:#x}", f"to our {t2:#x}, was {t1:#x}"))
+                continue
+            if x is None or y is None or not _same6(x, y):
+                rep.refused.append((f"call {BASE + p + d:#x}",
+                                    f"reaches {t2:#x}, not the code {t1:#x} reached on 1.11"))
+
+
+def _same6(x: bytes, y: bytes) -> bool:
+    return x[:2] == y[:2] and (x == y or (x[2] >> 4 == 4 and y[2] >> 4 == 4))
+
+
 def port_main_os(build11: bytes, m: AddrMap, rep: Report) -> bytes:
     from ..mods import platform
     n11 = platform.SPEC["stock_length"]                # 1.11's, whatever DN2_OS says
@@ -299,7 +353,9 @@ def port_main_os(build11: bytes, m: AddrMap, rep: Report) -> bytes:
         raise PortError("not a DN2 mk2 build on stock 1.11 (no platform loader, or the wrong length)")
     base = build11[:n11]
     new_base = port_edits(m.a, base, m.b, m, rep)
-    return bytes(new_base) + port_area(build11[len(base):], m, rep)
+    out = bytes(new_base) + port_area(build11[len(base):], m, rep)
+    verify_calls(build11, out, m, n11, rep)
+    return out
 
 
 def assemble(stock12_syx: bytes, main12: bytes, sec7: bytes) -> bytes:
