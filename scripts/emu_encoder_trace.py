@@ -159,7 +159,7 @@ def main() -> int:
              uc.hook_add(UC_HOOK_CODE, on_qsend, begin=QSEND, end=QSEND),
              uc.hook_add(UC_HOOK_CODE, on_setter, begin=SETTER, end=SETTER)]
     for h in a.hook:
-        hv = int(h, 0)
+        hv = A(int(h, 0))                    # v0.73: a 1.11 address, on this run's OS
 
         def on_any(uc_, ad, sz, us, hv=hv):
             sp = uc_.reg_read(K.UC_M68K_REG_A7)
@@ -167,7 +167,7 @@ def main() -> int:
             log.append((f"hook {hv:#x}", seqn["n"], now(), hex(ret), [hex(v) for v in args(4)]))
         hooks.append(uc.hook_add(UC_HOOK_CODE, on_any, begin=hv, end=hv))
     for h in a.regs:
-        hv = int(h, 0)
+        hv = A(int(h, 0))                    # v0.73: a 1.11 address, on this run's OS
 
         def on_regs(uc_, ad, sz, us, hv=hv):
             log.append((f"regs {hv:#x}", seqn["n"], now(),
@@ -175,7 +175,7 @@ def main() -> int:
         hooks.append(uc.hook_add(UC_HOOK_CODE, on_regs, begin=hv, end=hv))
     for h in a.dump:
         ad_, reg_, ln_ = h.split(":")
-        hv, ln_ = int(ad_, 0), int(ln_, 0)
+        hv, ln_ = A(int(ad_, 0)), int(ln_, 0)
 
         def on_dump(uc_, ad, sz, us, hv=hv, reg_=reg_, ln_=ln_):
             ptr = uc_.reg_read(getattr(K, f"UC_M68K_REG_{reg_.upper()}"))
