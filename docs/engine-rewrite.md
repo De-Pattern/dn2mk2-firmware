@@ -62,6 +62,10 @@ the model bit for bit.
 | P-I RC, CC, HH | | | -2 % |
 | VO-6 | 33,536 instructions | 28,832 | -14 % (instructions) |
 
+VO-6's guardrail weight: measured 39,404 a voice (46,210 before), but four VO-6 tracks at that
+weight lost a voice once in 16 blocks in the stress test, so it is 41,000 and a kit still takes
+three VO-6 tracks (`docs/guardrail.md`).
+
 ## Next (not in v0.72)
 
 - **P-I's memory**: shorter delay lines for the P-I machines that need little, so they fit L2,

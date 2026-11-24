@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.72 | 2026-11-23 | **Lighter Machinedrum/Monomachine engines**, part one: EFM, TRX and VO-6 use the DSP's float multiply where the 56300's exact arithmetic made no audible difference (EFM-CY -26 %, TRX-S2 -16 %, VO-6 -14 %) | `builds/v0.72-LIGHTER/` | yes |
 | v0.71 | 2026-11-23 | **FLEX levels** to NiKo's measurements: a track's take +6 dB, MAIN/IN takes +4 dB (v0.68's +24 was 18-20 dB too hot) | `builds/v0.71-LEVELS/` | yes |
 | v0.70 | 2026-11-22 | **arp scale lock** (ARP OFS IN SCALE: arp offsets in degrees of the track's scale) and **in-key transpose** ([KEYBOARD] + [FUNC] + [+]/[-] by degrees), w-winter's mods from upstream; **PERFORM fix**: macros move every voice playing their track | `builds/v0.70-INKEY/` | yes |
 | v0.69 | 2026-11-21 | **PERFORM**: eight Analog Four MKII-style macros ([MOD] + [FX]), each offsetting up to five parameters on any tracks, saved per project, PERF MUTE; **DSP limit**: MACHINE SEL refuses a machine that would take the kit past what the DSP can run | `builds/v0.69-PERFORM/` | yes |
@@ -109,6 +110,46 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.72 — LIGHTER (the Machinedrum/Monomachine engines, part one)
+
+`DN2mod_v0.72_LIGHTER_OS1.11.syx`
+sha256 `456b9fc9ba1b45d642d853f0d9a90912c63090097892cd90514440c843f69f69`
+Gate: CLEARED TO FLASH, 2026-11-23 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps incl. guardrail and inkey, the coupled thres/flex/flexplay/mute, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, stress with the guardrail's limits). Source: commit `aa1df0e` (branch `engine`).
+
+Everything in v0.71, plus:
+
+**Lighter machines** (the owner, 2026-11-23: "the md/mm rewrite first ... as to not sacrifice
+the sound and behavior we want to retain"; `docs/engine-rewrite.md`). The machines spent much of
+their DSP time reproducing the 56300's exact 24 x 24-bit products, about 30 instructions each.
+Where that made no audible difference they now use one float multiply and the SHARC's
+`FIX ... BY` (a new DSL instruction):
+- EFM (`xround`): EFM-CY 26 % lighter, EFM-CB 12 %, the other EFM machines 7-9 %. `xfloor` (the
+  phase increments) stays exact, so every EFM pitch is still the Machinedrum's to the LSB.
+- TRX (`wmul`): TRX-S2 16 % lighter, TRX-CB, MA, CY, CH, OH 3-7 %; P-I's RC, CC, HH 2 %. TRX-CP
+  keeps its exact copy.
+- VO-6: its accumulators keep float32's precision instead of the 56300's 24-bit truncation, 14 %
+  fewer instructions. Its guardrail weight is 41,000 (measured 39,404; four tracks at that weight
+  lost a voice in the stress test), so a kit still takes three VO-6 tracks.
+
+Each change is one constant (`efm.EXACT`, `trx2.WMUL_EXACT`, `vo6.FLOOR_EXACT`); `True` puts the
+original arithmetic back bit for bit. The model and the DSP stay one program: the SHARC runner
+holds the DSP to the model bit for bit.
+
+**How the sound is held**: every Machinedrum machine against the Machinedrum's own output at 60 dB
+SNR, except the ones that decorrelate through feedback or resonance (EFM-CB, HH, CY; P-I RC, CC,
+HH; the float TRX machines since v0.51), held by level (1 dB) and every octave band (3 dB), with a
+negative control (EFM-CY 2 dB down is refused). VO-6 by level and spectrum likewise.
+
+**Tests**
+1. Machinedrum and Monomachine sounds from a v0.71 project: the same character (EFM cymbals and cowbell, TRX-S2, VO-6 above all).
+2. A busy kit of EFM and TRX machines: no dropped notes; the load meter lower than on v0.71.
+3. Three VO-6 tracks allowed, a fourth refused with DSP LIMIT.
+4. The regression check (top of this file).
+
+**Known issues**
+- The P-I drums (BD, SD, MT, ML, MA, RS) aren't lighter yet: their delay lines need a new memory layout.
+- Everything listed for v0.71.
 
 ## v0.71 — LEVELS (FLEX take levels)
 
