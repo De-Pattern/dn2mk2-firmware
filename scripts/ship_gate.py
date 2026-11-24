@@ -988,7 +988,7 @@ def main() -> int:
                     heads = [struct.unpack(">i", bytes.fromhex(m[nth(hx, k)]))[0] for k in range(4)] \
                         if "trim_head_x" in lay else None
                     shot = {k: pathlib.Path(r["screens"][k]).read_bytes() for k in ("p0", "p1", "p2", "pr")}
-                    facts = {"kit": m["0x800052a0"] == f"{kit:08x}",
+                    facts = {"kit": m["0x800052a0"] == f"{A(kit):08x}",
                              "phases (v0.54: FILE NAME is the stock NAME screen, phase 5)": phases == [4, 1, 5, 3, 0],
                              "trim": 0 < s0 < e0 < 0x17700,
                              "preview": int(m[pv], 16) == 1 and int(m[nth(pv, 1)], 16) == 0
