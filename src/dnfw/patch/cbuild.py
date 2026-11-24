@@ -27,7 +27,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .assemble import AssemblerMissing, AssemblyError, Toolchain, _clean, _find_native
+from .assemble import AssemblerMissing, AssemblyError, Toolchain, _clean, _find_native, PROCESS_FLAGS
 
 CPU = "5475"                          # ColdFire V4e, the DN2's core
 GCC_NAMES = ("m68k-linux-gnu-gcc", "m68k-elf-gcc", "m68k-none-elf-gcc")
@@ -83,7 +83,8 @@ class CToolchain:
 
     def run(self, argv: tuple[str, ...], arguments: list[str]) -> subprocess.CompletedProcess:
         return subprocess.run([*argv, *arguments], capture_output=True, text=True,
-                              errors="replace", stdin=subprocess.DEVNULL)
+                              errors="replace", stdin=subprocess.DEVNULL,
+                              creationflags=PROCESS_FLAGS)
 
 
 @dataclass(frozen=True)
@@ -130,7 +131,8 @@ def find_toolchain() -> CToolchain | None:
     def in_wsl(names):
         for name in names:
             probe = subprocess.run([wsl, "-e", name, "--version"], capture_output=True,
-                                   text=True, errors="replace", stdin=subprocess.DEVNULL)
+                                   text=True, errors="replace", stdin=subprocess.DEVNULL,
+                                   creationflags=PROCESS_FLAGS)
             if probe.returncode == 0:
                 return name
         return None

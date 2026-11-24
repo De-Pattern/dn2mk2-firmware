@@ -264,6 +264,15 @@ def build() -> str:
     emit("")
     emit(".GLOBAL wr_ping.;")
     emit("wr_ping.:")
+    # Sidecar's descriptor and samples share the existing per-block path. The
+    # removed PING state is already zero-filled and has no remaining consumer.
+    from dnfw.sidecar.native_return import Config, publish_frame, route
+    from dnfw.perc.dsl import Prog
+    sidecar = Prog(prefix="sc_native")
+    cfg = Config(dsp.PING_STATE_DM)
+    publish_frame(sidecar, cfg)
+    route(sidecar, cfg)
+    lines.extend(sidecar.lines)
     # restore what PERC (dnfw.perc.program, SAVE) saved, and rejoin the chain
     regs = [f"R{k}" for k in range(16)] + ["I0", "I1", "I2", "I3", "I4", "I5", "I12",
                                           "M0", "M1", "M2", "M3", "M4"]

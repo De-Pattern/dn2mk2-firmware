@@ -49,10 +49,8 @@ LOAD = 0x4670C000                 # RAM above BSS, clear of every declared range
 # v0.13: the C page renderer is a CODE chunk of its own, well above the others (it outgrew
 # the room after this assembly, LOAD + 0x600 .. PING's chunk)
 C_LOAD = 0x46AC0000                # clear of the emulator harnesses' stack and scratch (0x46a00000..)
-C_SPAN = 0x30000                   # v0.41: up to the MD graphics, now at 0x46af0000 (v0.29..v0.40: 0x20000,
-                                  # to them at 0x46ae0000, and v0.40's renderer was within 2.5 KB of it;
-                                  # REC trigs took it past). 64 KB until v0.28; all unclaimed RAM above
-                                  # BSS (docs/memory-map.md); the pool's mirror starts at 0x46b00000
+C_SPAN = 0x3c000                   # Sidecar UI: reclaim unused graphics reservation; total RAM unchanged.
+                                  # Reader and graphics use MDUI_LOAD below; mirror remains unchanged.
 C_END = 0x46710000                # the platform runtime starts here
 ACTIVE_TRACK = 0x42431A6C         # byte: the UI's active track, 0..15
 KIT_POINTER = 0x800052A0          # the live kit; sound t at + 52 + 1163 t
@@ -60,7 +58,8 @@ SOUND_BASE, SOUND_STRIDE, SOUND_TYPE = 52, 1163, 0xDE
 NEW_TYPE, CLONE = 5, 1
 from ..mnm import machines as _mnm_types
 from ..sampler import machines as _smp
-TYPES_LAST = max(13, *_mnm_types.TYPES, _smp.BOUNCE_TYPE)   # dnfw.waverider.coldfire.TYPES_LAST: 5.. are ours (v0.20: 13,
+from ..sidecar import machines as _sc
+TYPES_LAST = max(13, *_mnm_types.TYPES, _smp.BOUNCE_TYPE, _sc.TYPE)   # dnfw.waverider.coldfire.TYPES_LAST: 5.. are ours (v0.20: 13,
                                   # SLICE, had been left out here: its track got WaveTone's pages;
                                   # v0.26: the Monomachine's from 14 on)
 GET_SHORT_NAME = 0x400372DA
@@ -399,7 +398,7 @@ def c_header() -> str:
     # by kind (is_wr: the type - 4), from 1: PERC, the sample machines at SMP_FIRST_KIND..,
     # the Monomachine's at MNM_KINDS
     # (v0.44: a sample machine's kind is its type - 4: 4..9, and BOUNCE's 13)
-    by_kind = {1: wr, **{_smp.TYPE_OF[n] - 4: m for n, m in zip(_smp.NAMES, smp)},
+    by_kind = {1: wr, _sc.KIND: _sc.named(), **{_smp.TYPE_OF[n] - 4: m for n, m in zip(_smp.NAMES, smp)},
                **{kd: m for kd, m in zip(MNM_KINDS, mnm)}}
     if sorted(by_kind) != list(range(1, len(by_kind) + 1)):
         raise ValueError(f"the kinds are not 1..n: {sorted(by_kind)}")
@@ -415,7 +414,7 @@ def c_header() -> str:
             f"#define WR_KINDS {len(kinds)}\n"
             f"static const char *const wr_named_long[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 0) for m in kinds)}}};\n"
             f"static const char *const wr_named_short[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 1) for m in kinds)}}};\n"
-            + perc_c_header() + smp_c_header() + mnm_c_header())
+            + perc_c_header() + smp_c_header() + mnm_c_header() + _sc.c_header())
 
 
 def smp_c_header() -> str:
@@ -561,9 +560,9 @@ def perc_c_header() -> str:
             + md_c_header())
 
 
-MDUI_LOAD = 0x46AF0000                          # the Machinedrum's screen graphics (dnfw.md.ui; 6.8 KB;
-                                                # v0.41: up 64 KB, past the renderer's larger span)
-assert C_LOAD + C_SPAN <= MDUI_LOAD and MDUI_LOAD + 0x8000 <= 0x46B00000, "renderer, MD graphics, the pool's mirror"
+MDUI_LOAD = 0x46AFC000                          # 6.8 KiB graphics within a separate 16 KiB reservation
+MDUI_SPAN = 0x4000
+assert C_LOAD + C_SPAN <= MDUI_LOAD and MDUI_LOAD + MDUI_SPAN <= 0x46B00000, "renderer, MD graphics, the pool's mirror"
 MD_FX_NIBBLES = 0x31313311                      # AMD-AMF, EQF-EQG, FLTF-FLTW-FLTQ clipped, as the MD's
 TRACK_LEVEL_ID = 10                             # record 10, "Track Level" / LEV, 0..0x7f00 (read from the 1.11 record table)
 
@@ -579,10 +578,18 @@ def md_c_header() -> str:
             f"static const char perc_what_upper[PERC_N][12] = {{{upper}}};\n")
 
 
-def source(page_draw: int, cell: int) -> str:
+def source(page_draw: int, cell: int, sc_page_reader: int = 0, sc_count_reader: int = 0) -> str:
     """The chunk's assembly (GNU as, ColdFire), linked at LOAD. PAGE_DRAW is the C
     renderer's entry, `wr_page_draw(view, canvas)`; CELL its `wr_cell(view, canvas, x,
     y, id)`, run as each cell widget of a stock page finishes (parameter slides' marks)."""
+    sc_dynamic = (f"""    move.l  %d0,%sp@-
+    jsr     0x{sc_page_reader:x}
+    addq.l  #4,%sp
+    tst.l   %d0
+    bne.w   2b
+    move.l  %sp@(16),%d0
+""" if sc_page_reader else "")
+    sc_count = f"    jmp     0x{sc_count_reader:x}" if sc_count_reader else "    moveq   #2,%d0\n    rts"
     table = "\n".join(f"    .long {rid}, lab_{rid}" for rid in LABELS)
     strings = "\n".join(f'lab_{rid}: .asciz "{name}"' for rid, name in LABELS.items())
     pages = []
@@ -591,6 +598,9 @@ def source(page_draw: int, cell: int) -> str:
                      f"    .long {', '.join(str(e) for e in entries)}\n"
                      f"    .long {TAG}")
     page_data = "\n".join(pages)
+    sc_page_data = "\n".join(f"    .long sc_title_{k}, sc_subtitle\n"
+                              f"    .long {', '.join(map(str, entries))}\n"
+                              f"    .long {TAG}" for k, entries in enumerate(_sc.PAGES))
     mtables = "\n".join(f"    .long mnm_labels_{k}" for k in range(len(MNM_LABELS)))
     mtables += "\n" + "\n".join(f"mnm_labels_{k}:\n" + "\n".join(f"    .long {rid}, mlab_{k}_{rid}" for rid in lab)
                                 + "\n    .long 0" for k, lab in enumerate(MNM_LABELS))
@@ -645,6 +655,8 @@ wr_count:
     tst.l   %d0
     beq.s   1f
     addq.l  #4,%sp
+    cmpi.l  #{_sc.KIND},%d0
+    beq.w   sc_count
     subq.l  #1,%d0
     bne.s   3f
     moveq   #{len(PAGES)},%d0
@@ -659,6 +671,8 @@ wr_count:
     rts
 5:  moveq   #2,%d0                         | a sample machine: its two pages (v0.22: the recorder is FUNC + VOICE)
     rts
+sc_count:
+{sc_count}
 1:  move.l  %sp@(8),%d0
     cmpi.l  #{NEW_TYPE},%d0
     blt.s   2f
@@ -676,6 +690,8 @@ wr_page:
     bsr.w   is_wr
     tst.l   %d0
     beq.w   3f
+    cmpi.l  #{_sc.KIND},%d0
+    beq.w   sc_page
     subq.l  #1,%d0
     bne.w   5f
     move.l  %sp@(16),%d0
@@ -729,6 +745,15 @@ wr_page:
 2:  addq.l  #4,%sp
     move.l  %sp@+,%d2
     rts
+sc_page:
+    move.l  %sp@(16),%d0
+    moveq   #2,%d1
+    cmp.l   %d1,%d0
+    bcc.w   6b
+{sc_dynamic}    moveq   #44,%d1
+    mulu.w  %d1,%d0
+    addi.l  #sc_descriptors,%d0
+    bra.w   2b
 3:  move.l  %sp@(12),%d1
     move.l  %sp@(16),%d0
     cmpi.l  #{NEW_TYPE},%d1
@@ -847,6 +872,10 @@ mnm_label_tables:
 {mtables}
 descriptors:
 {page_data}
+sc_descriptors:
+{sc_page_data}
+{_rep("sc_subtitle", "Sidecar Pi")}
+{chr(10).join(_rep(f"sc_title_{k}", t) for k, t in enumerate(_sc.TITLES))}
 mnm_descriptors:
 {mnm_page_data}
 smp_descriptors:

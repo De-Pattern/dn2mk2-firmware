@@ -121,7 +121,10 @@ def _md_ui() -> tuple[int, bytes, str] | None:
     from ..waverider import pages
     if not md_rom.available():
         return None
-    return (pages.MDUI_LOAD, md_ui.blob(),
+    graphics = md_ui.blob()
+    if len(graphics) > pages.MDUI_SPAN:
+        raise ValueError("Machinedrum graphics exceed their RAM reservation")
+    return (pages.MDUI_LOAD, graphics,
             "the Machinedrum's knob, pointers, clip and fonts (read from your MD OS, v0.20)")
 
 

@@ -193,6 +193,14 @@ class Fixups:
     def pre(self, runner, insn):
         t = insn.type_name
         s = runner.state
+        # G12: bare MODIFY uses its literal byte displacement. The runner
+        # treats both bare Type7a/7b as (nw), multiplying it by four. DN2's
+        # engine init consequently initialized every fourth DC-blocker slot.
+        # Only suppress that arithmetic scaling for this instruction; retain
+        # compute, predicates, SIMD and circular handling in the existing runner.
+        if s.assume_nw32 and (t == "7b" or
+                (t == "7a" and not insn.fields.get("w") and not insn.fields.get("l"))):
+            return ("replace", lambda r: self.unscaled_modify(r, insn))
         in_simd = simd(s)
         if t not in WATCH and not in_simd:
             return None
@@ -217,6 +225,27 @@ class Fixups:
         if t in COND_UNSUPPORTED and cond_of(f) not in (COND_NATIVE if t == "7a" else {31}):
             return ("replace", lambda r: self.conditional(r, insn))
         return None
+
+    def unscaled_modify(self, runner, insn):
+        """ADI SHARC+ PRM, Scaled Address Arithmetic: bare MODIFY is unscaled.
+
+        The instruction has no memory transfer, so this local model override
+        cannot change load/store widths. A nested pre() retains other fixups.
+        Explicit (sw)/(nw) forms never enter this workaround.
+        """
+        pc, mode = runner.state.pc_sw, runner.state.assume_nw32
+        runner.state = dataclasses.replace(runner.state, assume_nw32=False)
+        try:
+            action = self.pre(runner, insn)
+            if isinstance(action, tuple):
+                action[1](runner)
+            else:
+                runner.step()
+                if action:
+                    action(runner)
+            self.note("unscaled MODIFY (G12)", pc)
+        finally:
+            runner.state = dataclasses.replace(runner.state, assume_nw32=mode)
 
     @staticmethod
     def _halt(runner, insn, why):

@@ -739,6 +739,8 @@ void ms_frame(void *dst, const void *src, u32 n)
         for (u32 s = 86; s <= 88; s++)
             f[FRAME_SLOT(v, s)] = (u16)((f[FRAME_SLOT(v, s)] * g) >> 8);
     }
+    extern void sc_capture(volatile u16 *, const volatile u32 *, u32, u32);
+    sc_capture(CTL_FRAME, VOICE_TRACK, FRAMES, SEQ_PLAYING);
 }
 
 int rt_q_waiting(void)                          /* a QREC take not started yet */
