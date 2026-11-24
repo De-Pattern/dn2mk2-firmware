@@ -1334,7 +1334,7 @@ def main() -> int:
             # (SAMP 1). v0.29's first form set SAMP 2, the slot just deleted, and counted three)
             # (v0.40: the reference is the voice's target cell, the sound's value or the trig's
             # lock: SAMP 1 there as the sound's, as stock's sync puts it)
-            st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0100", f"poke:{cell - 0x800068E4 + 0x80003AF0:#x}:0100",
+            st += [f"poke:0x800052a8:{A(snd0):08x}", f"poke:{samp0:#x}:0100", f"poke:{cell - 0x800068E4 + 0x80003AF0:#x}:0100",
                    f"onpc:0x400db22c:{cell:#x}:2c00",
                    f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
                    f"onpc:0x400db22c:{cell:#x}:7e00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
