@@ -42,11 +42,30 @@ and its translation on 1.12 (`DN2_OS`), refusing an address it cannot place; a l
 pointer read from 1.12 RAM is already a 1.12 address). Per-OS inputs: the stock image and sections
 (`../sec112`), the snapshots (`digikit/out/snapshots/dn2-1.12`), the boot control's cache.
 
+## What the 1.12 gate found (and the rules it gave)
+
+- **A hook sharing a byte with stock's target.** Our `jsr 0x46ac022a` replaced stock's
+  `jsr 0x4011d32a`: the last byte was the same, so it was not part of the edit, and on 1.12 stock's
+  relinked `0x4011d60a` made it `jsr 0x46ac020a`. Three hooks into our code in MAIN OS's padding
+  (0x402d06xx) kept their 1.11 targets the same way. Rule: an edit takes the whole of any relinked
+  word it covers in part (translated when it is a stock address). `verify_calls` now proves every
+  absolute call and jump in the edits reaches the same code on 1.12 as on 1.11 (it refuses the old
+  port's four); the gate's meter step caught the first through its low-memory read trap.
+- **Immediates are numbers until proven addresses.** BSS moved as one block (its start and end both
+  +4,096, read from the clear loop), and an address operand in it moves with it; but an immediate
+  (`#n`) is translated only on stock code's own evidence: four-character codes ('DNFW', 'DN2T') and
+  bounds (`ram_ok`'s 0x44000000) lie in BSS's numeric range and stay as they are.
+- **One translation, at the parser.** The gate speaks 1.11 everywhere; each harness translates the
+  addresses in its steps and options (results keyed by the 1.11 address asked for). Translating in
+  both put a poke 8 KB off.
+- **The emulator's own hooks** (digikit's instruction patches) come from scanning the image it
+  runs: only hooks our scripts set are audited.
+
 ## Status
 
 - [x] the translator, and the port of v0.72 (no refusals)
 - [x] stock 1.12 boots in the emulator (snapshots to 400M)
-- [ ] the ported build boots from reset (emu_boot_check on 1.12)
-- [ ] the gate's scripts through `A`, the gate's stock/sections/snapshots per OS
+- [x] the ported build boots from reset (emu_boot_check on 1.12)
+- [x] the gate's scripts through `A`, the gate's stock/sections/snapshots per OS (1.12 UI snapshot: v0.14 ported, as `ui800M-v014`)
 - [ ] the full gate on the 1.12 build: CLEARED TO FLASH
 - [ ] test build v0.73-t1 OS112 on `builds` (test/) and the patcher (--test)
