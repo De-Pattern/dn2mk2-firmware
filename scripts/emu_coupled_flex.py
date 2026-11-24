@@ -112,7 +112,7 @@ def main() -> int:
     p.add_argument("--build", required=True)
     p.add_argument("--layout", default=str(HERE.parent / "src/dnfw/mods/waverider_code.json"))
     p.add_argument("--stock", default=str(HERE.parent.parent / f"Digitone_II_OS{_OSV}.syx"))
-    p.add_argument("--snapshot", default=str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
+    p.add_argument("--snapshot", default=str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
     p.add_argument("--break", dest="brk", default=None, choices=("notrig", "nosamp", "wrongbuf", "noclear", "poolsamp", "nohold"))
     p.add_argument("--pool", action="store_true",
                    help="v0.55: after the take (links 0..4), a ONESHOT track on SAMP B1 plays it (links P1..P3)")

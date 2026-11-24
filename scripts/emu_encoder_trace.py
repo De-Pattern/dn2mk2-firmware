@@ -53,7 +53,7 @@ sys.path.insert(0, str(HERE))
 from emulib import bounded                                      # noqa: E402
 _OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
-SNAP = str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap")
+SNAP = str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap")
 TICK = A(0x466758B0)
 ACC, PENDING, LAST = A(0x445A0DC4), A(0x445A0DEC), A(0x445A0D9C)
 DRIVER, QSEND, QRECV, SETTER = A(0x4011FC2C), 0x40001896, 0x40001928, 0x40037B74

@@ -485,7 +485,7 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True, help="the build's .syx")
     p.add_argument("--stock", default=str(ROOT.parent / f"Digitone_II_OS{_OSV}.syx"))
-    p.add_argument("--snapshot", default=str(ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
+    p.add_argument("--snapshot", default=str(ROOT.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
     p.add_argument("--periods", type=int, default=40)
     a = p.parse_args()
     c = Coupled(a.build, a.snapshot, a.stock, verbose=True)

@@ -52,6 +52,7 @@ import random
 import struct
 import subprocess
 import sys
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -237,7 +238,7 @@ def main(argv=None) -> int:
     p.add_argument("seeds", help="a range A-B or a list a,b,c")
     p.add_argument("--steps", type=int, default=60)
     p.add_argument("--venv", default=str(ROOT.parent / "digikit/.venv/bin/python"))
-    p.add_argument("--snapshot", default=str(ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
+    p.add_argument("--snapshot", default=str(ROOT.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
     p.add_argument("--json", type=pathlib.Path)
     p.add_argument("--isr-frame", type=int, default=75_000,
                    help="v0.34: the audio interrupt fires on its own every F instructions of the UI's "

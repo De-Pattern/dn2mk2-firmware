@@ -58,7 +58,7 @@ def main() -> int:
     p.add_argument("--build", required=True)
     p.add_argument("--layout", default=str(HERE.parent / "src/dnfw/mods/waverider_code.json"))
     p.add_argument("--stock", default=str(HERE.parent.parent / f"Digitone_II_OS{_OSV}.syx"))
-    p.add_argument("--snapshot", default=str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
+    p.add_argument("--snapshot", default=str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
     p.add_argument("--break", dest="brk", default=None, choices=("nomute", "notake", "noplay"))
     p.add_argument("--json", default=None)
     a = p.parse_args()

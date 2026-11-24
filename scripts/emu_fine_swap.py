@@ -33,12 +33,13 @@ import os
 import pathlib
 import struct
 import sys
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "src"))
 
-SNAP = str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap")
+SNAP = str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap")
 KIT, STRIDE = 0x800052A0, 1163
 UI_TRACK = A(0x42431A6C)
 REC = lambda i: A(0x401F7F94) + 60 * i            # noqa: E731
