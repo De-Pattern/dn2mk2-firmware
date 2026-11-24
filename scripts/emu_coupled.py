@@ -39,6 +39,7 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "src"))
 from emulib import bounded                                      # noqa: E402
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 CF_FRAME = 0x80005E60                   # the frame as the ColdFire builds it (16-bit BE)
@@ -483,7 +484,7 @@ def main() -> int:
     import argparse
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True, help="the build's .syx")
-    p.add_argument("--stock", default=str(ROOT.parent / "Digitone_II_OS1.11.syx"))
+    p.add_argument("--stock", default=str(ROOT.parent / f"Digitone_II_OS{_OSV}.syx"))
     p.add_argument("--snapshot", default=str(ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
     p.add_argument("--periods", type=int, default=40)
     a = p.parse_args()

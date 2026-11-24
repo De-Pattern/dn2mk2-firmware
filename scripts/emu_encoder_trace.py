@@ -51,6 +51,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from emulib import bounded                                      # noqa: E402
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 SNAP = str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap")
 TICK = A(0x466758B0)
@@ -85,7 +86,7 @@ def main() -> int:
     p.add_argument("--regs", action="append", default=[], help="ADDR: log D0-D7/A0-A6 there")
     p.add_argument("--dump", action="append", default=[], help="ADDR:REG:LEN: at ADDR log LEN bytes at register REG")
     p.add_argument("--build", default=None, help="a .syx: install its ColdFire image over the snapshot first")
-    p.add_argument("--stock-syx", default=str(HERE.parent.parent / "Digitone_II_OS1.11.syx"))
+    p.add_argument("--stock-syx", default=str(HERE.parent.parent / f"Digitone_II_OS{_OSV}.syx"))
     p.add_argument("--machine", type=int, default=None,
                    help="put track 0 on this machine type first (MACHINE SEL's commit, 0x40031880, called "
                         "as smp_assign calls it; e.g. 8 ONESHOT, 10 STRETCH, 12 GRID)")

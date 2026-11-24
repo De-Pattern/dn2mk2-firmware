@@ -35,9 +35,10 @@ from dnfw import bootanim                                     # noqa: E402
 from dnfw.cli.files import read_image                         # noqa: E402
 from dnfw.firmware.load import load                           # noqa: E402
 from dnfw.mods import bootscreen, platform                    # noqa: E402
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 SNAP = DIGIKIT / "out/snapshots/dn2-1.11/boot400M.snap"
-SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
+SYX = ROOT / f"00_Resources/00_Firmware/Digitone_II_OS{_OSV}_dist/Digitone_II_OS{_OSV}.syx"
 if "DT2_SECTIONS" in os.environ:          # the stock MAIN OS the emulator runs (not the .aplib)
     os.environ.setdefault("DT2_MAIN_IMG", os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin"))
 LIMIT = 80_000_000            # the intro's 175 frames come at about four per 1M

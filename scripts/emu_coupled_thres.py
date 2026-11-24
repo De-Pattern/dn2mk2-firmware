@@ -24,6 +24,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from emu_coupled import Coupled                                 # noqa: E402
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 KIT, SOUND_STRIDE = 0x800052A0, 1163
 ONESHOT = 8
@@ -39,7 +40,7 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
     p.add_argument("--layout", default=str(HERE.parent / "src/dnfw/mods/waverider_code.json"))
-    p.add_argument("--stock", default=str(HERE.parent.parent / "Digitone_II_OS1.11.syx"))
+    p.add_argument("--stock", default=str(HERE.parent.parent / f"Digitone_II_OS{_OSV}.syx"))
     p.add_argument("--snapshot", default=str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
     p.add_argument("--json", default=None)
     p.add_argument("--only", default="AB")
