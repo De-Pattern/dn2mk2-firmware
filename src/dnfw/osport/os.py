@@ -61,6 +61,17 @@ def to112(x: int) -> int:
 ISSUED: set[int] = set()
 
 
+def found(va: int, image: bytes) -> int:
+    """an address a signature scan found in IMAGE, which must be this run's own stock MAIN OS:
+    already this OS's address (the audit takes it as A's)"""
+    if current() != "1.11":
+        own = (ROOT.parent / ("sec" + current().replace(".", "")) / "section_3_MAIN_OS.bin").read_bytes()
+        if image != own:
+            raise SystemExit(f"osport: {va:#x} was found in an image that is not stock {current()}'s MAIN OS")
+        ISSUED.add(va)
+    return va
+
+
 def A(x: int) -> int:
     """a 1.11 address on the OS of this run"""
     if current() == "1.11":
