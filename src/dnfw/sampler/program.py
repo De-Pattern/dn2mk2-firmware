@@ -1889,6 +1889,8 @@ def recorder(p: Prog, L: Layout) -> None:
 
     def settings():
         p.ld(4, cmd + 8)                      # source: 0 IN, 1 MAIN, 2 + t a track
+        p.iconst(12, 0xFF)                    # (v0.75: bits 8..15 the source track's LEVEL)
+        p.iop(4, 4, "AND", 12)
         p.iconst(12, 0)
         p.iop(4, 4, "MAX", 12)
         p.iconst(12, 17)
@@ -1917,6 +1919,28 @@ def recorder(p: Prog, L: Layout) -> None:
             p.iop(6, 4, "AND", 12)
             p.ifz(6, "NE", lambda bit=bit: (p.fconst(12, 10.0 ** ((1 << bit) / 20.0)), p.fop(5, 5, "*", 12)))
         p.st(SM.REC_GAIN + 4, 5)
+        # v0.75 (NiKo, 2026-11-25: "FLEX is recording pre-level of the track"): a track's
+        # buffer (TRK_BUF) is the track before its LEVEL, which stock applies after it as
+        # (LEVEL / 127)^2 (measured on the SHARC runner, 2026-11-25: LEVEL 127, 100, 64, 20
+        # leave TRK_BUF the same and scale the track's stereo buffer by the square). A FLEX
+        # take of a track is scaled by (LEVEL / 100)^2, LEVEL the source track's as the
+        # ColdFire's frame had it before MUTE SRC (src word bits 8..14, bit 15 set): at 100,
+        # GAIN 0 is as before (the unity NiKo set TRK_HW_DB by); a quieter track's take is
+        # as much quieter as the track sounds. Without bit 15 (the RECORDER, IN, MAIN) x 1.
+        p.ld(4, cmd + 8)
+        p.lsh(6, 4, -8)
+        p.iconst(12, 0x80)
+        p.iop(7, 6, "AND", 12)
+        p.iconst(12, 0x7F)
+        p.iop(6, 6, "AND", 12)
+
+        def level():
+            tofloat(p, 9, 6, 1.0 / SM.TRK_LEVEL_UNITY)
+            p.fop(9, 9, "*", 9)
+            p.ld(5, SM.REC_GAIN + 4)
+            p.fop(5, 5, "*", 9)
+            p.st(SM.REC_GAIN + 4, 5)
+        p.ifz(7, "NE", level)
         # v0.59 MON: bit MON_BIT of the channel word (the RECORDER's C; FLEX REC sends 0)
         p.ld(4, cmd + 12)
         p.lsh(4, 4, -SM.MON_BIT)

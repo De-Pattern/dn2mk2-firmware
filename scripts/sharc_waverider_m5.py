@@ -2595,13 +2595,13 @@ def step_flexlevel(init, sound, machines) -> dict:
     def rms(x):
         return _m.sqrt(sum(v * v for v in x) / max(1, len(x)))
 
-    def run(gidx):
+    def run(gidx, src=2):
         state = {"b": 0}
 
         def at_dispatch(r):
             b = state["b"]
             if b == 0:
-                command(r, 1, SM.CMD_NOW, src=2, chan=gidx << 24, dest=0)
+                command(r, 1, SM.CMD_NOW, src=src, chan=gidx << 24, dest=0)
             if b == n:
                 command(r, 2, SM.CMD_STOP)
             state["b"] += 1
@@ -2642,13 +2642,19 @@ def step_flexlevel(init, sound, machines) -> dict:
     low = SM.GAIN_ZERO - SM.TRK_HW_DB
     unity, recorder, zero = run(low), run(0), run(SM.GAIN_ZERO)
     want = 10.0 ** (SM.TRK_HW_DB / 20.0)
+    # v0.75: the source track's LEVEL in the source word (bits 8..14, bit 15 set), as rectrig.c
+    # sends it: x (LEVEL / 100)^2, stock's law after the track buffer; 100 as before
+    def lv(level):
+        return 2 | 0x8000 | level << 8
+    l100, l20, l127, rec20 = run(low, lv(100)), run(low, lv(20)), run(low, lv(127)), run(0, lv(20))
 
     def ratio_ok(a, b, k):
         """b's unclipped frames are a's x k within 1 % (at least 200 of them, a's at 0.01 or more:
         an int16 frame's step, 1 / 32768, is 0.3 % of that)"""
         if a is None or b is None:
             return False
-        pairs = [(x, y) for x, y in zip(a["take"], b["take"]) if abs(y) < 0.99 and abs(x) >= 0.01]
+        pairs = [(x, y) for x, y in zip(a["take"], b["take"])       # (v0.75: and b's at 0.01 or more)
+                 if abs(y) < 0.99 and abs(x) >= max(0.01, 0.01 / k)]
         return len(pairs) >= 200 and all(abs(y / x - k) <= 0.01 * k for x, y in pairs)
     checks = {
         "v0.50: a FLEX take of a track at v0.50's unity (GAIN -24 since v0.63) reaches its track's chain "
@@ -2668,12 +2674,21 @@ def step_flexlevel(init, sound, machines) -> dict:
             zero is not None and zero["render_db"] > SM.TRK_HW_DB / 2.0,
         "v0.63 negative control: the frame-for-frame comparison at 0 dB is refused":
             not ratio_ok(unity, zero, 1.0),
+        "v0.75: the source track at LEVEL 100 records the take as before, frame for frame (within 1 %)":
+            ratio_ok(unity, l100, 1.0),
+        "v0.75: at LEVEL 20, x (20/100)^2 = 0.04 frame for frame; at 127, x (127/100)^2 = 1.613":
+            ratio_ok(l100, l20, 0.04) and ratio_ok(l100, l127, (127 / 100) ** 2),
+        "v0.75: the RECORDER's command (no GAIN) ignores the LEVEL bits: the same take as without them":
+            rec20 is not None and recorder is not None and rec20["take"] == recorder["take"],
+        "v0.75 negative control: LEVEL 20's take is not LEVEL 100's":
+            not ratio_ok(l100, l20, 1.0),
     }
-    for r in (unity, recorder, zero):
+    for r in (unity, recorder, zero, l100, l20, l127, rec20):
         if r:
             r.pop("take", None)
     return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"unity": unity, "recorder": recorder, "zero": zero}}
+            "numbers": {"unity": unity, "recorder": recorder, "zero": zero, "level100": l100,
+                        "level20": l20, "level127": l127}}
 
 
 def step_mainmark(init, sound, machines) -> dict:

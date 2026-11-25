@@ -222,6 +222,10 @@ TRK_UNITY = 0.1696 / 0.0725                # 2.339 (+7.4 dB): x the 1 / TRK_GAIN
 # needed GAIN -6 on a track's take to peak at -24 too. So 12 - 6 = 6. (Applied when the take is
 # made: takes recorded on v0.68..v0.70 stay 18 dB hot; GAIN -18 brings one back)
 TRK_HW_DB = 6
+# v0.75: a FLEX take of a track follows the source track's LEVEL, (LEVEL / TRK_LEVEL_UNITY)^2
+# (stock's own law after the track buffer; NiKo: "a src track at level 100 will be at unity
+# gain when recording with gain 0"): TRK_HW_DB holds at LEVEL 100
+TRK_LEVEL_UNITY = 100
 # v0.66 (owner, 2026-11-20; Error Kit): a FLEX take of MAIN or IN played far too quiet, and
 # GAIN raised to make up for it clipped (the gain is applied before the recorder's int16
 # clamp). Now such a take is recorded as it is, marked (bit 15 of its buffer entry's steps

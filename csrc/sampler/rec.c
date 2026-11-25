@@ -305,6 +305,9 @@ static void send(int cmd)
         /* v0.50: FLEX REC's monitoring carries GAIN, so H's meter is the take's level */
         extern int bn_active(void);
         u32 g = cmd == CMD_MONITOR && bn_active() ? rec_gain_bits() : 0u;
+        extern u32 rt_lvl_bits(u32 src);
+        if (g)
+            src |= rt_lvl_bits(src);            /* v0.75: and the source track's LEVEL, as its takes */
         u32 m = rec_mon && !bn_active() ? MON_BIT : 0u;   /* v0.59 MON */
         rec_sent_chan = chan | (place / 512u) << 8 | g | m;
         sent_seq = smp_command((u32)cmd, src, rec_sent_chan, thr, (u32)rec_dest << 24 | len);
