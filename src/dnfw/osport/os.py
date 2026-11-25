@@ -86,7 +86,10 @@ def audit_unicorn() -> None:
 
     def hook_add(self, htype, callback, user_data=None, begin=1, end=0, *a, **k):
         import sys as _sys
-        caller = _sys._getframe(1).f_code.co_filename
+        f = _sys._getframe(1)
+        while f is not None and f.f_code.co_name == "hook_add":     # a pass-through wrapper
+            f = f.f_back                                            # (emulib/quickboot): its caller
+        caller = f.f_code.co_filename if f is not None else ""
         ours = "/scripts/" in caller.replace("\\", "/") or "/src/dnfw/" in caller.replace("\\", "/")
         if (ours and htype & unicorn.UC_HOOK_CODE and begin == end
                 and base <= begin < base + len(main12)):
