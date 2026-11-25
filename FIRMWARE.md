@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.74 | 2026-11-25 | **Live recording no longer drags the sequencer** (REC + PLAY with 6-7 keys: each recorded key cleared its step's slide locks in three passes; now one) | `builds/v0.74-LIVEREC/` | yes |
 | v0.73-t1 (TEST) | 2026-11-25 | **TEST build: the mod on OS 1.12**, for Outbox 8 (main outputs through it, FUNC + UP/DOWN in its menus); v0.72 otherwise unchanged | `builds/test/v0.73-t1-OS112/` | yes |
 | v0.72 | 2026-11-23 | **Lighter Machinedrum/Monomachine engines**, part one: EFM, TRX and VO-6 use the DSP's float multiply where the 56300's exact arithmetic made no audible difference (EFM-CY -26 %, TRX-S2 -16 %, VO-6 -14 %) | `builds/v0.72-LIGHTER/` | yes |
 | v0.71 | 2026-11-23 | **FLEX levels** to NiKo's measurements: a track's take +6 dB, MAIN/IN takes +4 dB (v0.68's +24 was 18-20 dB too hot) | `builds/v0.71-LEVELS/` | yes |
@@ -111,6 +112,34 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.74 — LIVEREC (live recording without lag)
+
+`DN2mod_v0.74_LIVEREC_OS1.11.syx`
+sha256 `7f7ef0ca8d5880b608c00ddb8613550607339c93d5fbed496e45aecb746df641`
+Gate: CLEARED TO FLASH, 2026-11-25 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps, the coupled thres/flex/flexplay/mute, boot from reset, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `afe2bec` (branch `livelag`; the fix is `8a00762`).
+
+v0.72 LIGHTER, plus:
+
+**Live recording no longer drags the sequencer** (oksami: REC + PLAY, with or without the
+sequencer running, 6-7 trig keys at once). Live recording clears the step's slide locks for
+each key it records (`sl_clear`, `csrc/slides/slide.c`). Since v0.40 that took three passes
+over the 80 lock records, one per lock, about 3,400 instructions a key. It is now one pass that
+checks the track's tag byte first, with the same result: each of our records on the track loses
+the step's lock, and a record left with none is freed. On the same live-recording run, the
+ColdFire's busy instructions: stock 807k, v0.72 1.11M, v0.74 842k.
+
+**Tests**
+1. REC + PLAY with the sequencer stopped, entering notes step by step with 6-7 keys at once:
+   it keeps up.
+2. Live recording with the sequencer running, chords of 4-7 notes: no lag.
+3. Slides on a track, then a live recording over some of its steps: the recorded steps lose
+   their slide as before, the others keep theirs.
+4. The regression check (top of this file).
+
+**Known issues**
+- A 1.11 build. Outbox 8 users: the 1.12 build is still v0.73-t1 (TEST).
+- Everything listed for v0.72.
 
 ## v0.73-t1 — OS112 (TEST build: the mod on OS 1.12, for Outbox 8)
 
