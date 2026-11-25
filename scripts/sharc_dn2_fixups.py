@@ -192,6 +192,54 @@ class Fixups:
 
     # -- dispatch ------------------------------------------------------------------
     def pre(self, runner, insn):
+        act = self._pre0(runner, insn)
+        fix = self.raw_modify(runner, insn)
+        if fix is None:
+            return act
+        if act is None:
+            return fix
+        if callable(act):
+            return lambda r: (act(r), fix(r))
+        kind, fn = act
+        return (kind, lambda r: (fn(r), fix(r)))
+
+    # -- G12 -----------------------------------------------------------------------------
+    def raw_modify(self, runner, insn):
+        """MODIFY with no width suffix (Type 7a with w = 0 and l = 0, and Type 7b, which has no
+        width bits) adds M as it stands; only "(nw)" (w = 1) scales it by 4. The runner scales
+        both. Stock's pan stage (sw 0x1c9ae7..0x1c9b30) is where it shows: each voice's block x
+        its L and R gain ramps goes to its stereo buffer through `I0 = MODIFY(I1, M4)`, M4 the
+        buffer's byte address from the table at 0x258ee8 (w = 0), while the same loop steps the
+        block-pointer table with `MODIFY(I3, M6) (nw)`, M6 = 1 (w = 1). Scaled, the stores went
+        to 4 x the address and the stereo buffers (0x257ee8 + 0x100 v: what the sends and the
+        main bus read, sw 0x1c179d, 0x1c1fb0) stayed zero in every run (docs/stereo-assessment.md).
+        -> a post step that puts the destination at source + M, or None."""
+        t = insn.type_name
+        if t not in ("7a", "7b"):
+            return None
+        f = insn.fields
+        if t == "7a" and (F(f, "w") or F(f, "l")):
+            return None
+        s = runner.state
+        if not getattr(s, "assume_nw32", False):
+            return None                             # (the runner scales by 1 already)
+        bank = 8 if F(f, "g") else 0
+        src_low = F(f, "is[2:2]") << 2 | F(f, "is[1:0]")
+        src, dst, m = src_low + bank, (src_low ^ F(f, "idis")) + bank, F(f, "m") + bank
+        length = s.uregs[UREG_CODES["L%d" % src]]
+        i0, m0 = s.uregs[16 + src], s.uregs[32 + m]
+        if not (isinstance(length, Const) and length.value == 0 and isinstance(i0, Const) and isinstance(m0, Const)):
+            return None                             # (a circular buffer, or not known: left as it runs)
+        want, scaled, pc = (i0.value + m0.value) & 0xFFFFFFFF, (i0.value + 4 * m0.value) & 0xFFFFFFFF, s.pc_sw
+
+        def post(r):
+            now = r.state.uregs[16 + dst]
+            if isinstance(now, Const) and now.value == scaled and scaled != want:
+                r.state.uregs[16 + dst] = Const(want)       # (not taken, or run otherwise: left)
+                self.note("MODIFY without a width: M unscaled (G12)", pc)
+        return post
+
+    def _pre0(self, runner, insn):
         t = insn.type_name
         s = runner.state
         in_simd = simd(s)
