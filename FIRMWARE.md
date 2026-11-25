@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.73-t1 (TEST) | 2026-11-25 | **TEST build: the mod on OS 1.12**, for Outbox 8 (main outputs through it, FUNC + UP/DOWN in its menus); v0.72 otherwise unchanged | `builds/test/v0.73-t1-OS112/` | yes |
 | v0.72 | 2026-11-23 | **Lighter Machinedrum/Monomachine engines**, part one: EFM, TRX and VO-6 use the DSP's float multiply where the 56300's exact arithmetic made no audible difference (EFM-CY -26 %, TRX-S2 -16 %, VO-6 -14 %) | `builds/v0.72-LIGHTER/` | yes |
 | v0.71 | 2026-11-23 | **FLEX levels** to NiKo's measurements: a track's take +6 dB, MAIN/IN takes +4 dB (v0.68's +24 was 18-20 dB too hot) | `builds/v0.71-LEVELS/` | yes |
 | v0.70 | 2026-11-22 | **arp scale lock** (ARP OFS IN SCALE: arp offsets in degrees of the track's scale) and **in-key transpose** ([KEYBOARD] + [FUNC] + [+]/[-] by degrees), w-winter's mods from upstream; **PERFORM fix**: macros move every voice playing their track | `builds/v0.70-INKEY/` | yes |
@@ -110,6 +111,41 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.73-t1 — OS112 (TEST build: the mod on OS 1.12, for Outbox 8)
+
+`DN2mod_v0.73-t1_OS112_OS1.12.syx` (on `builds` under `test/v0.73-t1-OS112/`)
+sha256 `487111672c0dffcc59e544a3992269e62e8412d44431c170ce4a28eea8b5d235`
+Gate: CLEARED TO FLASH, 2026-11-25, on stock **OS 1.12** (`DN2_OS=1.12`: every step, incl. the ColdFire emulator steps on new 1.12 snapshots, the coupled thres/flex/flexplay/mute, boot from reset, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `6494874` (branch `os112`).
+
+**A test build.** v0.72 LIGHTER, nothing removed, on Elektron's OS 1.12 instead of 1.11. 1.12
+routes the main outputs through Outbox 8 and adds [FUNC] + [UP]/[DOWN] in its channel menus.
+
+**How** (`docs/os112-port.md`): only the main ColdFire program differs between 1.11 and 1.12
+(+4,096 bytes, about 25 functions moved); bootstrap, updater, the DSP program and the Outbox 8's
+firmware are byte for byte the same. The mod is built on 1.11 as always, then the built image is
+moved onto 1.12 (`scripts/port112.py`): every edit to its 1.12 place, every address operand,
+pointer and RAM address translated on evidence from stock's own references, every call checked to
+reach the same code; any constant derived from a moved address is refused. The patcher does the
+same move in the browser from both stock files and checks the result byte for byte.
+
+The gate on 1.12 found and fixed, before this build: a hook sharing its last byte with stock's
+(the porter), a constant GCC folded from two addresses (DIRECT JUMP's per-track jump repeated a
+step), and, in the gate's own harnesses, addresses read back as 1.11's.
+
+**Tests**
+1. Outbox 8: the main outputs through it (1.12's routing), a kit with mod machines (PERC, MD/MM,
+   sample tracks): comes out where routed.
+2. Per-track Outbox outputs with mod machines on them: each on its own output, at the right level.
+3. [FUNC] + [UP]/[DOWN] in Outbox 8's channel menus.
+4. A v0.72 project loads and plays as before: MACHINE SEL, the sample pages, FLEX recording,
+   PERFORM, the arp in key, DIRECT JUMP.
+5. The regression check (top of this file).
+
+**Known issues**
+- First build on 1.12; untested on hardware. Back up the +Drive and projects first.
+- The emulator has no Outbox 8: the routing itself is Elektron's, tested by them on stock 1.12.
+- Everything listed for v0.72.
 
 ## v0.72 — LIGHTER (the Machinedrum/Monomachine engines, part one)
 
