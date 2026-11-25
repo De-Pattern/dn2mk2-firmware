@@ -33748,7 +33748,7 @@ wr_pk_next_498.:
       R12 = 0x10;
       COMP(R0, R12);
       IF LT JUMP 0xbe1a01;                   // -> wr_pk_slot_497.
-      JUMP 0xbf2000;                    // smp.asm's wr_smp, then PING (which restores)
+      JUMP 0xbd8000;                    // smp.asm's wr_smp, then PING (which restores)
 .GLOBAL wr_pk_sub_trx_coefs.;
 wr_pk_sub_trx_coefs.:
       R12 = 0x0;
