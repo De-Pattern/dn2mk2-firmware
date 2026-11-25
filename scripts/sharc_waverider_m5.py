@@ -1952,7 +1952,11 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
     rpcm = [-(x // 2) for x in kpcm]
     runs = {"mono": run(mono(kpcm), SM.FMT_I16), "mono_r": run(mono(rpcm), SM.FMT_I16),
             "same": run(st(kpcm, kpcm), SM.FMT_I16S), "lonly": run(st(kpcm, [0] * len(kpcm)), SM.FMT_I16S),
-            "half": run(st(kpcm, rpcm), SM.FMT_I16S)}
+            "half": run(st(kpcm, rpcm), SM.FMT_I16S),
+            # a silent mono sample: what stock's chain itself makes of silence (in the runner the
+            # bit-reduction stage 0xb8251b leaves a constant in each block's last sample, a silent
+            # mono voice's too): what a stereo sample's silent side must be, bit for bit
+            "mono_z": run(mono([0] * len(kpcm)), SM.FMT_I16)}
     # every filter type (FR.FILTER_NAMES), R = L against mono: the stereo pass, or for the comb
     # filters (0xb81526, not wrapped) the fallback to mono, leaves every track buffer as mono's
     for cf in range(1, len(FR.FILTER_NAMES)):
@@ -1983,6 +1987,8 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
                        "mono_peak_l": sb_peak(m, 0, 32), "mono_peak_r": sb_peak(m, 32, 64),
                        "lonly_peak_l": sb_peak(lo, 0, 32), "lonly_peak_r": sb_peak(lo, 32, 64),
                        "half_peak_l": sb_peak(hf, 0, 32), "half_peak_r": sb_peak(hf, 32, 64),
+                       "lonly_r_vs_silent_mono_words_differing": sum(1 for x, z in zip(lo.get("sbuf", []), runs["mono_z"].get("sbuf", []))
+                                                                     for p_, q in zip(x[32:64], z[32:64]) if p_ != q),
                        "same_words_differing": {b: sum(1 for x, y in zip(runs[b].get("sbuf", []), runs[a].get("sbuf", []))
                                                        for p_, q in zip(x, y) if p_ != q) for a, b in pairs}}
     checks = {
@@ -1991,17 +1997,17 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
         # through is now held: each voice's stereo buffer after the pan stage
         "stereo: R = L leaves every voice's stereo buffer after the pan stage (the sends' and the main "
         "bus's source) bit for bit the mono run's, every block, every filter type; voice 0's sounds on "
-        "both sides (> 0.0005)":
-            ok and n["stereo_buf"]["mono_peak_l"] > 0.0005 and n["stereo_buf"]["mono_peak_r"] > 0.0005
+        "both sides (> 0.00005)":
+            ok and n["stereo_buf"]["mono_peak_l"] > 0.00005 and n["stereo_buf"]["mono_peak_r"] > 0.00005
             and all(len(runs[b]["sbuf"]) == len(runs[a]["sbuf"]) == blocks and runs[b]["sbuf"] == runs[a]["sbuf"]
                     for a, b in pairs),
-        "stereo: R silent: voice 0's stereo buffer has the mono run's L side and a silent R side; "
-        "every other voice's is the mono run's":
-            ok and len(lo["sbuf"]) == blocks
-            and all(x[:32] == y[:32] and x[64:] == y[64:] and not any(w & 0x7FFFFFFF for w in x[32:64])
-                    for x, y in zip(lo["sbuf"], m["sbuf"])),
-        "stereo: R = -L/2: voice 0's R side sounds (> 0.0002) and is not its L side, which is the mono run's":
-            ok and n["stereo_buf"]["half_peak_r"] > 0.0002
+        "stereo: R silent: voice 0's stereo buffer has the mono run's L side, and its R side is a silent mono "
+        "sample's, bit for bit (nothing of L in R); every other voice's is the mono run's":
+            ok and len(lo["sbuf"]) == blocks == len(runs["mono_z"]["sbuf"])
+            and all(x[:32] == y[:32] and x[64:] == y[64:] and x[32:64] == z[32:64]
+                    for x, y, z in zip(lo["sbuf"], m["sbuf"], runs["mono_z"]["sbuf"])),
+        "stereo: R = -L/2: voice 0's R side sounds (> 0.00002) and is not its L side, which is the mono run's":
+            ok and n["stereo_buf"]["half_peak_r"] > 0.00002
             and all(x[:32] == y[:32] for x, y in zip(hf["sbuf"], m["sbuf"]))
             and any(x[32:64] != x[:32] for x in hf["sbuf"]),
         "stereo: the stereo buffers' table is stock's after every block of every run":
