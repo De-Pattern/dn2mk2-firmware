@@ -137,6 +137,16 @@ LPOST = RST + SLOTS * SLOT_STRIDE   # [slot]: what L's last call left
 # with 1.0 again; the hook before the sum makes L = r2 x (r1 x LAMP) and R = r2 x (r1 x R), stock's
 # own multiplies in its order.
 SUM_PRE_SITE, SUM_PRE_STOCK = 0x1C2512, "R4 = 0x413a068e;"     # the instruction before the sum
+# the pan stage (sw 0x1c9ae7..0x1c9b30, measured 2026-11-25 with the runner's G12): for each voice
+# its block x an L gain ramp to STEREO_BUF + 0x100 v and x an R gain ramp to that + 0x80, through
+# the table STEREO_PTR (voice v: its L address, its R address). The R gain is the voice's word
+# at PAN_GR0 + PAN_STRIDE v, its step a sample at PAN_STEP_R + PAN_STRIDE v (first sample: the
+# gain as it stands). The hook is on the instruction that leaves SIMD after the loop before it.
+PAN_SITE, PAN_STOCK = 0x1C9AD2, "BIT CLR MODE1 0x200000;"
+PAN_GR0, PAN_STEP_R, PAN_STRIDE = 0x254F90, 0x254F98, 0x38
+STEREO_PTR, STEREO_BUF = 0x258EE8, 0x257EE8
+PANRED = DATA_L2 + 0x4C          # 1: the pan hook sent an R side to PANTMP this block
+PANTMP = DATA_L2 + 0x80          # 32 words: stock's own R side of a stereo voice (L x the R gain), dropped
 SUM_POST_SITE, SUM_POST_STOCK = 0x1C2557, "I2 = 0x25b768;"     # the instruction after it
 TRACK_BUF = 0x259F68             # 16 tracks x 64 words
 VOICE_TRACK = 0x257898           # each voice's track word
@@ -529,6 +539,7 @@ def program() -> str:
     a.e("I6 = DM(0, I6);")
     a.lines.append("")
     _mid_hook(a)
+    _pan_hook(a)
     _pre_hook(a)
     _sum_hooks(a)
     a.lines += [".wr_stereo..end:"]
@@ -591,25 +602,40 @@ def _mid_hook(a: _Asm) -> None:
     a.lines.append("")
 
 
-def _pre_hook(a: _Asm) -> None:
-    """wr_st_spre, at SUM_PRE_SITE: for each stereo slot in use, its voice's block holds the
-    post-amp ramps (from 1.0): L = ramp x LAMP, R = ramp x R."""
-    a.label("wr_st_spre")
+def _pan_hook(a: _Asm) -> None:
+    """wr_st_span, at PAN_SITE: after the second post-amp ramp loop, before stock's pan stage
+    (sw 0x1c9ae7..0x1c9b30), which writes each voice's block x its L gain ramp and x its R gain
+    ramp to its stereo buffer (STEREO_BUF: what the sends and the main bus read). v0.54-t1 left
+    the block holding the ramps (from 1.0) until the hook before the sum, so the pan stage sent
+    the ramps, not the sample, to the outputs: a level instead of sound (its silent track, its
+    clicks, and the level it put on the main bus). Here, for each stereo slot in use: its
+    voice's block holds the second ramp r2 (from 1.0); L = r2 x (r1 x LAMP) into the block and
+    R = r2 x (r1 x R) into the slot's R block, stock's multiplies in its order; then the R
+    side of its stereo buffer is written here, R x the R gain ramp as stock computes it (the
+    gain PAN_GR0, plus PAN_STEP_R a sample from the second sample on), and the pan stage's own
+    write of that side (L x the R gain) is sent to PANTMP for this block (the table's entry;
+    the hook before the sum puts every entry back). Stock's pan stage then writes the L side
+    from the block as it does for any voice. With R == L every word is stock's, bit for bit.
+    The displaced instruction leaves SIMD (the loop before this runs in it): it runs first,
+    with its NOP, as stock's order has it."""
+    a.label("wr_st_span")
+    a.e(PAN_STOCK, "the displaced instruction")
+    a.e("NOP;")
     a.save(SAVE_SUM)
     a.e(f"R0 = DM({ANY:#x});")
     a.e("R0 = PASS R0;")
-    a.jump("EQ", "wr_st_spre_out")
+    a.jump("EQ", "wr_st_span_out")
     for sl in range(SLOTS):
         a.e(f"R0 = DM({laddr(sl, 0):#x});")
         a.e("R0 = PASS R0;")
-        a.jump("EQ", f"wr_st_pr_next{sl}")
+        a.jump("EQ", f"wr_st_pn_next{sl}")
         a.e(f"R14 = DM({VOICE + 4 * sl:#x});", "the voice")
         a.e("R12 = LSHIFT R14 BY 2;")
         a.e(f"R13 = {VOICE_BLOCK:#x};")
         a.e("R13 = R13 + R12;")
         a.e("I4 = R13;")
         a.e("R0 = DM(0, I4);")
-        a.e("I4 = R0;", "the voice's block: the ramps")
+        a.e("I4 = R0;", "the voice's block: the second ramp")
         a.e(f"R0 = {LAMP + 4 * BLOCK * sl:#x};")
         a.e("I1 = R0;", "L as the amp left it")
         a.e(f"R0 = {RBLK + 4 * BLOCK * sl:#x};")
@@ -628,10 +654,68 @@ def _pre_hook(a: _Asm) -> None:
             a.e("F0 = F1 * F0;")
             a.e("F0 = F2 * F0;")
             a.e("DM(I3, M6) = F0;")
-        _loop(a, f"wr_st_pr_s{sl}", BLOCK, one)
-        a.label(f"wr_st_pr_next{sl}")
-    a.label("wr_st_spre_out")
+        _loop(a, f"wr_st_pn_s{sl}", BLOCK, one)
+        # the R gain and its step: the voice's words (PAN_STRIDE apart: 64 v - 8 v)
+        a.e("R12 = LSHIFT R14 BY 6;")
+        a.e("R13 = LSHIFT R14 BY 3;")
+        a.e("R12 = R12 - R13;")
+        a.e(f"R13 = {PAN_GR0:#x};")
+        a.e("R13 = R13 + R12;")
+        a.e("I3 = R13;")
+        a.e("R5 = DM(0, I3);", "F5: the R gain")
+        a.e(f"R13 = {PAN_STEP_R:#x};")
+        a.e("R13 = R13 + R12;")
+        a.e("I3 = R13;")
+        a.e("R6 = DM(0, I3);", "F6: its step a sample")
+        a.e(f"R0 = {RBLK + 4 * BLOCK * sl:#x};")
+        a.e("I1 = R0;", "R, as it goes on")
+        a.e("R12 = LSHIFT R14 BY 8;")
+        a.e(f"R13 = {STEREO_BUF + 4 * BLOCK:#x};")
+        a.e("R13 = R13 + R12;")
+        a.e("I4 = R13;", "the voice's stereo buffer, R side")
+        a.e("F0 = DM(I1, M6);")
+        a.e("F0 = F5 * F0;", "the first sample: the gain as it stands")
+        a.e("DM(I4, M6) = F0;")
+
+        def rest():
+            a.e("F5 = F5 + F6;")
+            a.e("F0 = DM(I1, M6);")
+            a.e("F0 = F5 * F0;")
+            a.e("DM(I4, M6) = F0;")
+        _loop(a, f"wr_st_pn_g{sl}", BLOCK - 1, rest)
+        # stock's own write of that side, for this block, to PANTMP
+        a.e("R12 = LSHIFT R14 BY 3;")
+        a.e(f"R13 = {STEREO_PTR + 4:#x};")
+        a.e("R13 = R13 + R12;")
+        a.e("I3 = R13;")
+        a.e(f"R0 = {PANTMP:#x};")
+        a.e("DM(0, I3) = R0;")
+        a.e("R0 = 1;")
+        a.e(f"DM({PANRED:#x}) = R0;")
+        a.label(f"wr_st_pn_next{sl}")
+    a.label("wr_st_span_out")
     a.restore(SAVE_SUM)
+    a.jump_abs("", PAN_SITE + 3, "on (stock's NOP, then the pan stage)")
+    a.lines.append("")
+
+
+def _pre_hook(a: _Asm) -> None:
+    """wr_st_spre, at SUM_PRE_SITE (after the pan stage, before the sum): the stereo buffers'
+    table as stock built it, if the pan hook sent an R side elsewhere this block (every
+    voice's entry, whatever the slots hold now). The blocks are already L and R (the pan
+    hook; v0.54-t1 made them here, after the pan stage had read them)."""
+    a.label("wr_st_spre")
+    a.e(f"DM({SAVE_SUM:#x}) = R0;")
+    a.e(f"R0 = DM({PANRED:#x});")
+    a.e("R0 = PASS R0;")
+    a.jump("EQ", "wr_st_spre_out")
+    for v in range(16):
+        a.e(f"R0 = {STEREO_BUF + 0x100 * v + 4 * BLOCK:#x};")
+        a.e(f"DM({STEREO_PTR + 8 * v + 4:#x}) = R0;")
+    a.e("R0 = 0;")
+    a.e(f"DM({PANRED:#x}) = R0;")
+    a.label("wr_st_spre_out")
+    a.e(f"R0 = DM({SAVE_SUM:#x});")
     a.e(SUM_PRE_STOCK, "the displaced instruction")
     a.jump_abs("", SUM_PRE_SITE + 3, "on to the sum, as stock")
     a.lines.append("")

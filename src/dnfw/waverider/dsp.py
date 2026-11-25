@@ -419,7 +419,7 @@ def stereo_jumps() -> list[tuple[int, bytes, bytes]]:
     spec = _code()
     out = []
     jumps = spec["stereo_jumps"]
-    if len(jumps) != len(ST.SITES) + 3:
+    if len(jumps) != len(ST.SITES) + 4:
         raise DspError("the stereo jumps are not the stage calls and the three hooks")
     for (site, k), j in zip(ST.SITES, jumps, strict=False):
         target = ST.STAGES[k][1]
@@ -430,7 +430,7 @@ def stereo_jumps() -> list[tuple[int, bytes, bytes]]:
         out.append((site, stock, ours))
     # stage 4: the sum hook displaces one 48-bit load (the hook performs it)
     for (site, stock_hex), j in zip(((ST.MID_SITE, "010f804f0000"), (ST.SUM_PRE_SITE, "040f3a418e06"),
-                                     (ST.SUM_POST_SITE, "120f250068b7")),
+                                     (ST.SUM_POST_SITE, "120f250068b7"), (ST.PAN_SITE, "221420000000")),
                                     jumps[len(ST.SITES):], strict=True):
         ours = sharc_object.load_bytes(bytes.fromhex(j["object_parcels_be"]))
         if int(j["at_sw"], 16) != site or len(ours) != 6:

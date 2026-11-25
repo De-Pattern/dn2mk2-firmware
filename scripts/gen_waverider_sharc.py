@@ -93,7 +93,7 @@ def main(argv=None) -> int:
                                site, work) for site, k in ST.SITES]
             sjumps += [one_jump(f"JUMP {ST.CODE_SW + stereo['instruction_offsets'][lab[name]] // 2:#x};", site, work)
                        for name, site in (("wr_st_smid", ST.MID_SITE), ("wr_st_spre", ST.SUM_PRE_SITE),
-                                          ("wr_st_spost", ST.SUM_POST_SITE))]
+                                          ("wr_st_spost", ST.SUM_POST_SITE), ("wr_st_span", ST.PAN_SITE))]
             pjump = one_jump(PVMIX_LINE, dsp.PVMIX_SITE_SW, work)
             ejump = one_jump(EMARK_LINE, dsp.CALL_SITE_SW, work)
             lptr = one_jump(LOOKUP_LINE, dsp.LOOKUP_SITE_SW, work)

@@ -1932,10 +1932,19 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
                 done.append(1)
             for k, w in enumerate((at, len(kpcm), rate_w, fmt)):
                 m2.poke(r.state, dsp.SMP_POOL_DDR + 8 + 4 * k, w)
+        sbuf, ptrs = [], []
+
+        def after_sum(r):
+            tb.append([m2.word(r.state, ST.TRACK_BUF + 4 * i) or 0 for i in range(16 * 64)])
+            ptrs.append([m2.word(r.state, ST.STEREO_PTR + 4 * i) or 0 for i in range(32)])
         hooks = {dsp.PERC_SW: poke,
-                 ST.SUM_POST_SITE + 3: lambda r: tb.append([m2.word(r.state, ST.TRACK_BUF + 4 * i) or 0
-                                                            for i in range(16 * 64)])}
+                 # the pan stage's end (sw 0x1c9b33): each voice's stereo buffer, what the sends and
+                 # the main bus read (the runner writes them since G12, sharc_dn2_fixups)
+                 0x1C9B33: lambda r: sbuf.append([m2.word(r.state, ST.STEREO_BUF + 4 * i) or 0
+                                                  for i in range(16 * 64)]),
+                 ST.SUM_POST_SITE + 3: after_sum}
         r = run_blocks(init, fb, blocks, extra_hooks=hooks)
+        r["sbuf"], r["ptrs"] = sbuf, ptrs
         r["odd"] = (m2.word(r["state"].state, ST.ODD) or 0) if r.get("state") is not None else None
         r.pop("state", None)
         r["tb"] = tb
@@ -1967,7 +1976,36 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
                                              if x == x and abs(x) < 1e6), default=0.0) for k, r in runs.items()},
          "filters_tb_words_differing": {b: sum(1 for x, y in zip(runs[b].get("tb", []), runs[a].get("tb", []))
                                                for p_, q in zip(x, y) if p_ != q) for a, b in pairs}}
+    flt = lambda w: struct.unpack("<f", struct.pack("<I", w))[0]                             # noqa: E731
+    sb_peak = lambda r, lo_, hi_: max((abs(flt(w[i])) for w in r.get("sbuf", []) for i in range(lo_, hi_)), default=0.0)   # noqa: E731
+    canon = [ST.STEREO_BUF + 0x100 * (i // 2) + 0x80 * (i % 2) for i in range(32)]
+    n["stereo_buf"] = {"blocks": {k: len(r.get("sbuf", [])) for k, r in runs.items()},
+                       "mono_peak_l": sb_peak(m, 0, 32), "mono_peak_r": sb_peak(m, 32, 64),
+                       "lonly_peak_l": sb_peak(lo, 0, 32), "lonly_peak_r": sb_peak(lo, 32, 64),
+                       "half_peak_l": sb_peak(hf, 0, 32), "half_peak_r": sb_peak(hf, 32, 64),
+                       "same_words_differing": {b: sum(1 for x, y in zip(runs[b].get("sbuf", []), runs[a].get("sbuf", []))
+                                                       for p_, q in zip(x, y) if p_ != q) for a, b in pairs}}
     checks = {
+        # 2026-11-25, v0.54-t1's field reports (a silent track, clicks, then no sound at all): the pan
+        # stage sent the post-amp ramps, not the sample, to the stereo buffers. What a note is heard
+        # through is now held: each voice's stereo buffer after the pan stage
+        "stereo: R = L leaves every voice's stereo buffer after the pan stage (the sends' and the main "
+        "bus's source) bit for bit the mono run's, every block, every filter type; voice 0's sounds on "
+        "both sides (> 0.0005)":
+            ok and n["stereo_buf"]["mono_peak_l"] > 0.0005 and n["stereo_buf"]["mono_peak_r"] > 0.0005
+            and all(len(runs[b]["sbuf"]) == len(runs[a]["sbuf"]) == blocks and runs[b]["sbuf"] == runs[a]["sbuf"]
+                    for a, b in pairs),
+        "stereo: R silent: voice 0's stereo buffer has the mono run's L side and a silent R side; "
+        "every other voice's is the mono run's":
+            ok and len(lo["sbuf"]) == blocks
+            and all(x[:32] == y[:32] and x[64:] == y[64:] and not any(w & 0x7FFFFFFF for w in x[32:64])
+                    for x, y in zip(lo["sbuf"], m["sbuf"])),
+        "stereo: R = -L/2: voice 0's R side sounds (> 0.0002) and is not its L side, which is the mono run's":
+            ok and n["stereo_buf"]["half_peak_r"] > 0.0002
+            and all(x[:32] == y[:32] for x, y in zip(hf["sbuf"], m["sbuf"]))
+            and any(x[32:64] != x[:32] for x in hf["sbuf"]),
+        "stereo: the stereo buffers' table is stock's after every block of every run":
+            ok and all(pt == canon for r in runs.values() for pt in r["ptrs"]) and all(len(r["ptrs"]) == blocks for r in runs.values()),
         "stereo: every run returns every block, every sample track bit-exact to the model (R's block included)":
             ok and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for v in exact.values()),
         "stereo: R = L renders L and R each bit for bit the mono sample, which sounds (peak > 0.05)":
