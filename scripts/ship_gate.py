@@ -2572,7 +2572,7 @@ def main() -> int:
                     fr[f] = struct.unpack(">2H", b[0x22:0x26])            # (trig, release)
                 shots = {n: pathlib.Path(r["screens"][n]).read_bytes() if n in r["screens"] else b""
                          for n in ("before", "holdon", "holdoff")}
-                ptn = "402008c4"
+                ptn = f"{A(0x402008C4):08x}"     # v0.73: a walk reads this OS's return addresses
                 t1, t5, tq = fr["p1"][0], fr["p5"][0], fr["q1"][0]
                 facts = {
                     "PTN + KEYBOARD: the PTN view up while PTN is held, closed at its release, both times":
