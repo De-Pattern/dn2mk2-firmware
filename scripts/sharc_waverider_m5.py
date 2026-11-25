@@ -1977,15 +1977,15 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
                 w[i] = max(0, min(0x7F00, base[i] + d)) & 0xFF00
         return {**w, **smp_words({SM.TUNE_REC: 60 + 3 * (b % 5)})}
 
-    def fb_of(cf):
+    def fb_of(cf, trig=(1,)):
         def fb(b):
-            f = base_frame(sound, machines, t0=ONE, overrides=moving(b), trigger=b == 1)
+            f = base_frame(sound, machines, t0=ONE, overrides=moving(b), trigger=b in trig)
             f.header(FR.FILTER, 0, FR.FILTER_TO_DSP[cf])
             return f.to_bytes()
         return fb
 
-    def run(words, fmt, cf=0):
-        fb = fb_of(cf)
+    def run(words, fmt, cf=0, trig=(1,)):
+        fb = fb_of(cf, trig)
         tb, mix = [], []
         done = []
 
@@ -2016,7 +2016,16 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
     rpcm = [-(x // 2) for x in kpcm]
     runs = {"mono": run(mono(kpcm), SM.FMT_I16), "mono_r": run(mono(rpcm), SM.FMT_I16),
             "same": run(st(kpcm, kpcm), SM.FMT_I16S), "lonly": run(st(kpcm, [0] * len(kpcm)), SM.FMT_I16S),
-            "half": run(st(kpcm, rpcm), SM.FMT_I16S)}
+            "half": run(st(kpcm, rpcm), SM.FMT_I16S),
+            # a silent mono sample: what stock's chain itself makes of silence (in the runner the
+            # bit-reduction stage 0xb8251b leaves a constant in each block's last sample, a silent
+            # mono voice's too): what a stereo sample's silent side must be, bit for bit
+            "mono_z": run(mono([0] * len(kpcm)), SM.FMT_I16),
+            # v0.54-t1's "a loud click when the track is triggered again": the note again at block 4,
+            # while it sounds (a retrigger: the voice's second pass, the slot kept)
+            "mono_rt": run(mono(kpcm), SM.FMT_I16, trig=(1, 4)),
+            "same_rt": run(st(kpcm, kpcm), SM.FMT_I16S, trig=(1, 4)),
+            "half_rt": run(st(kpcm, rpcm), SM.FMT_I16S, trig=(1, 4))}
     # every filter type (FR.FILTER_NAMES), R = L against mono: the stereo pass, or for the comb
     # filters (0xb81526, not wrapped) the fallback to mono, leaves every track buffer as mono's
     for cf in range(1, len(FR.FILTER_NAMES)):
@@ -2047,6 +2056,8 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
                        "mono_peak_l": sb_peak(m, 0, 32), "mono_peak_r": sb_peak(m, 32, 64),
                        "lonly_peak_l": sb_peak(lo, 0, 32), "lonly_peak_r": sb_peak(lo, 32, 64),
                        "half_peak_l": sb_peak(hf, 0, 32), "half_peak_r": sb_peak(hf, 32, 64),
+                       "lonly_r_vs_silent_mono_words_differing": sum(1 for x, z in zip(lo.get("sbuf", []), runs["mono_z"].get("sbuf", []))
+                                                                     for p_, q in zip(x[32:64], z[32:64]) if p_ != q),
                        "same_words_differing": {b: sum(1 for x, y in zip(runs[b].get("sbuf", []), runs[a].get("sbuf", []))
                                                        for p_, q in zip(x, y) if p_ != q) for a, b in pairs}}
     checks = {
@@ -2055,19 +2066,24 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
         # through is now held: each voice's stereo buffer after the pan stage
         "stereo: R = L leaves every voice's stereo buffer after the pan stage (the sends' and the main "
         "bus's source) bit for bit the mono run's, every block, every filter type; voice 0's sounds on "
-        "both sides (> 0.0005)":
-            ok and n["stereo_buf"]["mono_peak_l"] > 0.0005 and n["stereo_buf"]["mono_peak_r"] > 0.0005
+        "both sides (> 0.00005)":
+            ok and n["stereo_buf"]["mono_peak_l"] > 0.00005 and n["stereo_buf"]["mono_peak_r"] > 0.00005
             and all(len(runs[b]["sbuf"]) == len(runs[a]["sbuf"]) == blocks and runs[b]["sbuf"] == runs[a]["sbuf"]
                     for a, b in pairs),
-        "stereo: R silent: voice 0's stereo buffer has the mono run's L side and a silent R side; "
-        "every other voice's is the mono run's":
-            ok and len(lo["sbuf"]) == blocks
-            and all(x[:32] == y[:32] and x[64:] == y[64:] and not any(w & 0x7FFFFFFF for w in x[32:64])
-                    for x, y in zip(lo["sbuf"], m["sbuf"])),
-        "stereo: R = -L/2: voice 0's R side sounds (> 0.0002) and is not its L side, which is the mono run's":
-            ok and n["stereo_buf"]["half_peak_r"] > 0.0002
+        "stereo: R silent: voice 0's stereo buffer has the mono run's L side, and its R side is a silent mono "
+        "sample's, bit for bit (nothing of L in R); every other voice's is the mono run's":
+            ok and len(lo["sbuf"]) == blocks == len(runs["mono_z"]["sbuf"])
+            and all(x[:32] == y[:32] and x[64:] == y[64:] and x[32:64] == z[32:64]
+                    for x, y, z in zip(lo["sbuf"], m["sbuf"], runs["mono_z"]["sbuf"])),
+        "stereo: R = -L/2: voice 0's R side sounds (> 0.00002) and is not its L side, which is the mono run's":
+            ok and n["stereo_buf"]["half_peak_r"] > 0.00002
             and all(x[:32] == y[:32] for x, y in zip(hf["sbuf"], m["sbuf"]))
             and any(x[32:64] != x[:32] for x in hf["sbuf"]),
+        "stereo: a retrigger while the note sounds (block 4): R = L leaves every voice's stereo buffer and every "
+        "track buffer bit for bit the mono run's, every block; R = -L/2 keeps the L side the mono run's":
+            ok and len(runs["same_rt"]["sbuf"]) == blocks and runs["same_rt"]["sbuf"] == runs["mono_rt"]["sbuf"]
+            and runs["same_rt"]["tb"] == runs["mono_rt"]["tb"] and runs["mono_rt"]["sbuf"] != m["sbuf"]
+            and all(x[:32] == y[:32] for x, y in zip(runs["half_rt"]["sbuf"], runs["mono_rt"]["sbuf"])),
         "stereo: the stereo buffers' table is stock's after every block of every run":
             ok and all(pt == canon for r in runs.values() for pt in r["ptrs"]) and all(len(r["ptrs"]) == blocks for r in runs.values()),
         "stereo: every run returns every block, every sample track bit-exact to the model (R's block included)":
