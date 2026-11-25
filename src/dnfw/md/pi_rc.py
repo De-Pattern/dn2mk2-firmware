@@ -73,7 +73,7 @@ SB = XB + 0x40                   # the mix's 32 outputs
 
 def _xb(p: Prog, L: K.Layout, d: int, k: int = 0) -> None:
     """Rd = the address of XB word k. Clobbers R12."""
-    p.ld(d, L.C["k"])
+    p.iconst(d, L.pi - 4 * XB)                # v0.75: XB and NZ in the shared block scratch
     p.iconst(12, 4 * (XB + k))
     p.iop(d, 12, "+", d)
 
@@ -391,7 +391,7 @@ class _Cym:
     def _noise(cls, p: Prog, L: K.Layout) -> None:
         """NZ[0..] = the additive Fibonacci words (as 24-bit signed << 8): b1 += x1; a1 =
         x1 + b1, twice a step, mod 2^24."""
-        p.ld(0, L.C["k"])
+        p.iconst(0, L.pi - 4 * XB)
         p.iconst(12, 4 * NZ)
         p.iop(0, 12, "+", 0)
         p.seti(5, 0)
@@ -421,7 +421,7 @@ class _Cym:
         if cls.KIND != "HH":
             s(p, 0, YS20)
             p.lsh(0, 0, 8)
-            p.ld(1, L.C["k"])
+            p.iconst(1, L.pi - 4 * XB)
             p.iconst(12, 4 * (NZ + 32))
             p.iop(1, 12, "+", 1)
             p.seti(1, 1)
@@ -472,7 +472,7 @@ class _Cym:
             _sat(p, 0)
             ss(p, YS20, 0)
             p.lsh(0, 0, 8)
-            p.ld(1, L.C["k"])
+            p.iconst(1, L.pi - 4 * XB)
             p.iconst(12, 4 * (NZ + 32))
             p.iop(1, 12, "+", 1)
             p.seti(1, 1)
@@ -520,7 +520,7 @@ class _Cym:
         s(p, 0, E17)
         _fw(p, 1, 0)
         p.st(L.C["d"], 1)                       # F: the decay
-        p.ld(0, L.C["k"])
+        p.iconst(0, L.pi - 4 * XB)
         p.iconst(12, 4 * (NZ + 32))
         p.iop(1, 12, "+", 0)
         p.seti(2, 1)

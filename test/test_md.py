@@ -118,3 +118,40 @@ def test_efm_feedback_likeness_has_teeth():
     ours, theirs = B.run_case(MM.BY_NAME["EFM-CY"], case)
     assert _likeness(ours, theirs)["ok"]
     assert not _likeness([v * 0.79 for v in ours], theirs)["ok"]
+
+
+PI_SCRATCH = ("PI-BD", "PI-MT", "PI-SD", "PI-RS", "PI-RC", "PI-CC", "PI-HH")
+
+
+@pytest.mark.parametrize("name", PI_SCRATCH)
+def test_pi_block_scratch_is_not_kept(name):
+    """v0.75: the P-I machines' block scratch is one area for all voices (core.Layout.pi, L1 on
+    the unit). That is right only if a voice never reads a scratch word it did not write in the
+    same render: with garbage put there before every render, every sample of every golden case
+    is the clean run's, bit for bit."""
+    import random
+    if not B.golden_available():
+        pytest.fail("no reference: see test_the_reference_is_there")
+    M = MM.BY_NAME[name]
+    for case in B.golden(name)["cases"]:
+        if case.get("reads_unloaded_memory"):
+            continue
+        clean, _ = B.run_case(M, case)
+        dirty, _ = B.run_case(M, case, poison=random.Random(75))
+        assert clean == dirty, f"{name} {case['name']}: a scratch word outlives its render"
+
+
+def test_pi_block_scratch_check_sees_a_kept_word():
+    """negative control: garbage in a delay LINE (which is kept) before every render changes the
+    output, so the comparison above can fail"""
+    import random
+    M = MM.BY_NAME["PI-SD"]
+    case = B.golden("PI-SD")["cases"][0]
+    clean, _ = B.run_case(M, case)
+    ev = {b: (i, t) for b, i, t in case["events"]}
+    b, rnd, out = B.Bench(M), random.Random(75), []
+    for k in range(case["nblocks"]):
+        for wd in range(0, 64):
+            b.mem.put(b.L.delay + 4 * wd, rnd.getrandbits(32) & 0x3EFFFFFF)
+        out += b.block(*ev[k]) if k in ev else b.block()
+    assert out != clean

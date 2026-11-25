@@ -76,6 +76,7 @@ class Bench:
         tm = table_mem(self.L)
         self.mem = Mem(lambda a: tm.get(a, 0))
         self.first = True
+        self.poison = None                     # a random.Random: garbage in the P-I scratch before each render
 
     def _prog(self) -> Prog:
         p = Prog("run", mem=self.mem)
@@ -97,16 +98,21 @@ class Bench:
             self.first = False
         if trig:
             self.M.trig(p, self.L)
+        if self.poison is not None:            # v0.75: the P-I block scratch is nobody's between renders
+            for k in range(K.PI_SCRATCH_WORDS):
+                self.mem.put(self.L.pi + 4 * k, self.poison.getrandbits(32))
         self.M.render(p, self.L)
         self.steps = p.steps
         return [struct.unpack("<f", struct.pack("<I", self.mem.get(self.L.state + 4 * (K.OUT0 + k))))[0]
                 for k in range(32)]
 
 
-def run_case(M, case: dict) -> tuple[list[float], list[float]]:
-    """-> (ours, the Machinedrum's), every sample of the case."""
+def run_case(M, case: dict, poison=None) -> tuple[list[float], list[float]]:
+    """-> (ours, the Machinedrum's), every sample of the case. POISON (a random.Random): the
+    P-I block scratch is filled with garbage before every render."""
     ev = {b: (inputs, trig) for b, inputs, trig in case["events"]}
     b = Bench(M)
+    b.poison = poison
     ours = []
     for k in range(case["nblocks"]):
         if k in ev:

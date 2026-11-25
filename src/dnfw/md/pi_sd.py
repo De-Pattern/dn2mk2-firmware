@@ -327,8 +327,7 @@ class _PI:
         C, rs = L.C, cls.RS
         K.delay_base(p, L, 0)
         p.st(C["g"], 0)
-        p.iconst(12, 4 * SCRW)
-        p.iop(0, 12, "+", 0)
+        p.iconst(0, L.pi)                          # v0.75: the scratch arrays, shared, in L1
         p.st(C["h"], 0)
 
         # the strike's envelopes and pitch

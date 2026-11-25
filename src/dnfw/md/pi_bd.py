@@ -125,7 +125,11 @@ def _clamp(p: Prog, x: int, top: int, bot: int) -> None:
 
 
 def _dbase(p: Prog, L: K.Layout, d: int, word: int) -> None:
-    """Rd = the delay area's word WORD (an address), from C['c'] (the area's base)."""
+    """Rd = the delay area's word WORD (an address), from C['c'] (the area's base); v0.75: a
+    scratch word (SCR_H on) is in the shared block scratch (L.pi), a constant address."""
+    if word >= SCR_H:
+        p.iconst(d, L.pi + 4 * (word - SCR_H))
+        return
     p.ld(d, L.C["c"])
     if word:
         p.iconst(12, 4 * word)
@@ -487,7 +491,7 @@ def _render(p: Prog, L: K.Layout) -> None:
                 _q(p, 4, 11)
                 p.ld(0, C["k"])
                 p.lsh(0, 0, 2)
-                p.ld(12, C["c"])
+                p.iconst(12, L.pi - 4 * SCR_H)        # v0.75: the scratch, less the old offset
                 p.iop(0, 12, "+", 0)
                 p.seti(2, 0)
                 p.sti(SCR_MUL + 8 * arr, 2, 4)
@@ -551,7 +555,7 @@ def _render(p: Prog, L: K.Layout) -> None:
         p.lsh(0, 0, 2)
         p.ipass(12, 1)
         p.iop(0, 12, "+", 0)                        # 12 k (bytes of three words)
-        p.ld(12, C["c"])
+        p.iconst(12, L.pi - 4 * SCR_H)
         p.iop(0, 12, "+", 0)
         p.seti(2, 0)
         p.sti(SCR_CO, 2, 14)
@@ -578,7 +582,7 @@ def _render(p: Prog, L: K.Layout) -> None:
         p.lsh(0, 0, 2)
         p.ipass(12, 1)
         p.iop(0, 12, "+", 0)
-        p.ld(12, C["c"])
+        p.iconst(12, L.pi - 4 * SCR_H)
         p.iop(0, 12, "+", 0)
         p.iconst(12, 4 * SCR_CO)
         p.iop(0, 12, "+", 0)
