@@ -2650,12 +2650,13 @@ def step_flexlevel(init, sound, machines) -> dict:
 
     def ratio_ok(a, b, k):
         """b's unclipped frames are a's x k within 1 % (at least 200 of them, a's at 0.01 or more:
-        an int16 frame's step, 1 / 32768, is 0.3 % of that)"""
+        an int16 frame's step, 1 / 32768, is 0.3 % of that). v0.75: plus two int16 steps, for a k
+        well under 1 (b's frames then sit a few steps from zero, where one step is many %)"""
         if a is None or b is None:
             return False
-        pairs = [(x, y) for x, y in zip(a["take"], b["take"])       # (v0.75: and b's at 0.01 or more)
-                 if abs(y) < 0.99 and abs(x) >= max(0.01, 0.01 / k)]
-        return len(pairs) >= 200 and all(abs(y / x - k) <= 0.01 * k for x, y in pairs)
+        pairs = [(x, y) for x, y in zip(a["take"], b["take"]) if abs(y) < 0.99 and abs(x) >= 0.01]
+        return len(pairs) >= 200 and all(abs(y - k * x) <= 0.01 * k * abs(x) + 2.0 / 32768
+                                         for x, y in pairs)
     checks = {
         "v0.50: a FLEX take of a track at v0.50's unity (GAIN -24 since v0.63) reaches its track's chain "
         "at its source's level: the take's render against the source's, within 0.5 dB (RMS)":
@@ -2683,10 +2684,14 @@ def step_flexlevel(init, sound, machines) -> dict:
         "v0.75 negative control: LEVEL 20's take is not LEVEL 100's":
             not ratio_ok(l100, l20, 1.0),
     }
+    ratios = {name: (sum(y * x for x, y in zip(l100["take"], r["take"]))       # least squares
+                     / max(1e-30, sum(x * x for x in l100["take"])))
+              for name, r in (("level20", l20), ("level127", l127)) if r and l100}
     for r in (unity, recorder, zero, l100, l20, l127, rec20):
         if r:
             r.pop("take", None)
     return {"ok": all(checks.values()), "checks": checks,
+            "ratios": ratios,
             "numbers": {"unity": unity, "recorder": recorder, "zero": zero, "level100": l100,
                         "level20": l20, "level127": l127}}
 
