@@ -75,7 +75,7 @@ STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_l
 # 0x200fa000..0x200fdfff; the I-cache (enabled by the startup, docs/waverider-dsp-silence.md)
 # serves it. Its voices' state and scratch stay in L1, its tables in DDR.
 PERC_L2_LOAD = 0x200C0000
-PERC_L2_SPAN = 0x23000                       # 140 KB (v0.24: with P-I, about 132 KB; 80 KB v0.17..v0.23)
+PERC_L2_SPAN = 0x24000                       # 144 KB (v0.59: FM+; 140 KB v0.24..v0.58, with P-I; 80 KB v0.17..v0.23)
 PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbe0000
 L2_IMAGE_END = 0x2008823C                    # the stock stream's last L2 byte
 L2_NOCACHE = 0x200FA000                      # the startup's non-cacheable L2 window starts here
@@ -106,9 +106,13 @@ MAIN_TAP_BYTES = 0x200
 MD_DELAY_DDR = 0x82200000                    # 16 slots x core.PI_DELAY_STRIDE
 # the sample machines (v0.13, docs/sampler.md): code in L2 after PERC's span, voices and
 # scratch in L1 (Waverider's former loop room), the sample pool in DDR from 64 MB in
-SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200e3000 (v0.24; 0x200d4000 v0.17..v0.23, 0x200d0000 until v0.16)
-SMP_L2_SPAN = 0x7000                         # stereo: 28 KB, to the L2 window's end (0x200ea000, _check_l2); 24 KB v0.28..v0.53
-SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbf1800 (v0.24; 0xbea000 v0.17..v0.23)
+# stereo: the sample program is 27 KB with the L and R render (24 KB held it until v0.73), so it
+# moves below PERC, to 0x200b0000 (32 KB): L2 between the room proven on units (to 0x200b0000)
+# and PERC (from 0x200c0000, on units since v0.11), 64 KB clear of the stock image as _check_l2
+# asks. 0x200e4000..0x200ea000, where it was, is free. ON THE UNIT: the first build with code there.
+SMP_L2_LOAD = 0x200B0000                     # (PERC_L2_LOAD + PERC_L2_SPAN = 0x200e4000 v0.59..v0.73)
+SMP_L2_SPAN = 0x8000                         # stereo: 32 KB (24 KB v0.28..v0.73)
+SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbf2000 (v0.59; 0xbf1800 v0.24..v0.58; 0xbea000 v0.17..v0.23)
 PVMIX_L2_LOAD = SMP_L2_LOAD + SMP_L2_SPAN - 0x400           # v0.25: pvmix.asm (wr_pvmix)
 PVMIX_SW = 0xB80000 + (PVMIX_L2_LOAD - 0x20000000) // 2
 SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 128  # 16 voices x 128 bytes (v0.15)

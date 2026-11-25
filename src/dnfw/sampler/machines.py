@@ -149,7 +149,30 @@ TABLE_AREA = SLICE_AREA - TABLE_ROOM
 TABLE_READY = SLICE_AREA - 512
 TABLE_MAGIC = 0x4D4E5442                   # "BTNM" in memory
 TABLE_LOAD = 0x47000000                    # their bytes in the ColdFire's RAM (a CODE chunk): magic, length, data
-REC_BYTES = TABLE_AREA - REC_OFFSET        # v0.23: the recordings' area ends at the slice area (v0.26: the tables)
+# v0.65 PROJECT RAM banks (docs/banks.md): banks B..D's directory pages, each one of bank A's own
+# format (magic BANK_MAGIC, count, POOL_SLOTS entries, names, library ids) with its meta block at
+# + BANK_META and its slice area at + BANK_SLICES, in the recordings' area below the tables. SAMP's
+# value carries its bank in the low byte: BANK_TAGS[b], read back as (low + 0x20) >> 6 (at most 3)
+BANK_N = 4
+BANK_PAGE = 0x20000                         # 128 KB a bank
+BANK_AREA = TABLE_AREA - (BANK_N - 1) * BANK_PAGE
+BANK_MAGIC = 0x42504D53                     # 'SMPB'
+BANK_META = 0x1000
+BANK_SLICES = 0x3000
+BANK_TAGS = (0x00, 0x40, 0x80, 0xC0)
+BANK_SLOTS = 127                            # SAMP 1..127 in each bank (bank A's 124..127 the recorder's)
+BANK_RAM = 0x47100000                       # the ColdFire's copies of banks B..D's pages (3 x BANK_PAGE), then
+                                            # their slots' overviews, slice columns and sums (link.c, banks.h)
+BANK_RAM_BYTES = 0x210000                   # link.c's 0x80000, then pools.c's (the bank lists' staging,
+                                            # the sums a load must meet, each list's bank entries, the reserved extents)
+assert TABLE_LOAD + TABLE_ROOM <= BANK_RAM and BANK_RAM + BANK_RAM_BYTES <= 0x47800000   # below the stack's 8 MB
+assert BANK_SLICES + POOL_SLOTS * SLICE_TABLE_BYTES <= BANK_PAGE and BANK_META + 0x2000 <= BANK_SLICES
+REC_BYTES = BANK_AREA - REC_OFFSET         # v0.23: the recordings' area ends at the slice area (v0.26: the tables; v0.65: the banks)
+
+
+def bank_of(word: int) -> int:
+    """the bank (0 A .. 3 D) of a SAMP value's whole word, as the DSP reads it"""
+    return min(3, ((word & 0xFF) + 0x20) >> 6)
 USER_HOLE = (REC_OFFSET, REC_END)           # yours: 0..96 MB, then 128..400 MB (dn2samples.py skips the hole)
 HOLE_BYTES = REC_END - REC_OFFSET              # what a send skips: the recordings and the slice area
 USER_BYTES = POOL_BYTES - HOLE_BYTES - DATA_OFFSET
@@ -169,6 +192,11 @@ TRK_ROUTE = 0x257898                       # k = the s16 at TRK_ROUTE + 2t (the 
 TRK_GAIN = 11.627                          # 0x1c244d's gain into that buffer, between triggers
 REC_STAGE = 0x2DF800                       # 32 floats of the block being recorded (dnfw.waverider.dsp)
 REC_GAIN = 0x2E0080                        # v0.50: a FLEX take's GAIN index (0 none) and factor (dnfw.waverider.dsp)
+# v0.59 MON (the RECORDER's C): the command's channel word's bit MON_BIT, kept here by every
+# recorder command (REC_GAIN's gap); with it, SRC IN and the recorder armed or recording, pvmix
+# adds the input (IN_BUF, L and R) to the main mix at unity, after the MAIN tap
+REC_MON = REC_GAIN + 8
+MON_BIT = 30
 # v0.50 (impbox: FLEX takes far quieter than their source): measured on the SHARC runner
 # (2026-11-12, step 3f flexlevel: track 0 ONESHOT looping at its defaults, each track routed to
 # its own slot, RMS past the amp envelope's attack). A take of TRK1 made with the RECORDER's
@@ -180,6 +208,32 @@ REC_GAIN = 0x2E0080                        # v0.50: a FLEX take's GAIN index (0 
 # measured on hardware: the runner does not model everything after the per-track buffer; GAIN's
 # range (-24..+38 dB) covers either way
 TRK_UNITY = 0.1696 / 0.0725                # 2.339 (+7.4 dB): x the 1 / TRK_GAIN the RECORDER keeps
+# v0.63 (the owner, measured on his unit 2026-11-19: "the number for flex gain is +24"): on the
+# DN2 itself a v0.62 take of a single track at GAIN 0 played 24 dB under its source; GAIN +24 made
+# it match by ear. The loss is in stages the SHARC runner does not model (on the runner the same
+# take came out at its source's level, and a synth track's 7 dB over: scratch probe, bench STATE
+# 2026-11-19 09:30), so it is the unit's number, not the runner's. A FLEX take of a track is made
+# TRK_HW_DB louder on top of TRK_UNITY: GAIN 0 is what was +24; GAIN -24 is v0.50..v0.62's unity
+# v0.65 (NiKo, measured on v0.63 itself through Ableton over USB, every level at 127: a FLEX take
+# of a track matched its source at GAIN -12; the owner: his +24 was read on another firmware):
+# 12 dB, not 24. GAIN 0 is now v0.62's +12
+# v0.68 (the owner, on v0.67 itself, pattern volume 100, compressor off, 2026-11-21: a track's
+# take needs +12 more, as his own +24 of v0.63 said; he does not trust the v0.65 numbers): 24 again
+# v0.71 (the owner, 2026-11-22: "the last flex gain adjustment we did was wrong", NiKo's numbers
+# instead): NiKo on v0.67 (TRK_HW_DB 12), a slate tone peaking at -24 dBFS over USB into Ableton,
+# needed GAIN -6 on a track's take to peak at -24 too. So 12 - 6 = 6. (Applied when the take is
+# made: takes recorded on v0.68..v0.70 stay 18 dB hot; GAIN -18 brings one back)
+TRK_HW_DB = 6
+# v0.66 (owner, 2026-11-20; Error Kit): a FLEX take of MAIN or IN played far too quiet, and
+# GAIN raised to make up for it clipped (the gain is applied before the recorder's int16
+# clamp). Now such a take is recorded as it is, marked (bit 15 of its buffer entry's steps
+# word), and a voice playing a marked take adds MAIN_PLAY_DB. One constant: raise it if MAIN
+# is still short on the unit (the owner heard close to +24). TRK takes are unchanged.
+# v0.68 (the owner, on v0.67, the same setup): MAIN and IN need +12 more: 24
+# v0.71 (NiKo's numbers, as TRK_HW_DB's): on v0.67 (12) a MAIN take needed GAIN -8 to peak at its
+# source's -24 dBFS: 12 - 8 = 4. (Applied when a marked take plays: v0.68..v0.70's takes follow)
+MAIN_PLAY_DB = 4
+MAIN_MARK = 0x8000
 GAIN_ZERO = 25                             # the index of 0 dB: 1..63 is -24..+38 dB
 CMD_OFFSET = 0xF00                         # the command block in the pool's directory page:
 CMD_WORDS = 6                              #   seq, cmd, src, chan, thres (0..32767), dest << 24 | frames

@@ -27,8 +27,14 @@ EXT_OFFSET = 1600                       # in a lock list (20 + 202 x 8 = 1636 by
 
 # SLEN: the slide's length, in 1/24 of a track step (the track's own scale followed).
 SLEN_UNITS = (3, 6, 12, 18, 24, 36, 48, 72, 96, 144, 192, 288, 384, 768, 1536)
-SLEN_TEXT = ("1/8", "1/4", "1/2", "3/4", "1", "1.5", "2", "3", "4", "6", "8", "12", "16", "32", "64")
-SLEN_DEFAULT = 4                        # 1 step: a slide trig with no SLEN lock
+SLEN_TEXT = ("1/8", "1/4", "1/2", "3/4", "1", "1.5", "2", "3", "4", "6", "8", "12", "16", "32", "64", "NXT")
+# v0.66 (the owner, 2026-11-20, the Analog Four's rule: "the slide is completed when the next
+# trig is reached"): NXT, the slide lasts until the track's next trig (note or lock trig; the
+# track's length wrapped; no other trig: the whole length). It is the value with no SLEN lock,
+# and the knob's first choice; 0..14 keep their lengths (a project's explicit SLENs unchanged).
+SLEN_NXT = len(SLEN_UNITS)              # 15: stored as a lock value too (old firmware: 1 step)
+SLEN_DEFAULT = SLEN_NXT                 # a slide trig with no SLEN lock (v0.41..v0.65: 1 step)
+NXT_MAX_STEPS = 128                     # the longest NXT slide: a track's whole length
 
 # Hooked stock sites (Digitone II 1.11), each with the bytes it replaces.
 PRE_SITE, PRE_STOCK = 0x40026BAC, "284220280040"            # a note's voice: movea.l %d2,%a4 ; move.l 64(%a0),%d0
@@ -168,7 +174,7 @@ def c_header(stock: bytes) -> str:
             f"#define SL_RAM_SLD {RAM_SLD}\n#define SL_RAM_SLEN {RAM_SLEN}\n#define SL_TAG {RAM_TAG}\n"
             f"#define SL_ID_REC {ID_REC}\n#define SL_RAM_REC {RAM_REC}\n"
             f"#define SL_EXT {EXT_OFFSET}\n#define SL_NLEN {len(SLEN_UNITS)}\n"
-            f"#define SL_LEN_DEFAULT {SLEN_DEFAULT}\n"
+            f"#define SL_LEN_DEFAULT {SLEN_DEFAULT}\n#define SL_NXT {SLEN_NXT}\n"
             f"static const unsigned int sl_shared[4] = {words(shared)};\n"
             f"static const unsigned int sl_machine[4][4] = {{\n {rows}}};\n"
             f"static const unsigned short sl_units[{len(SLEN_UNITS)}] = {{{units}}};\n"

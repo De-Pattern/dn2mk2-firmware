@@ -30,6 +30,10 @@ does the firmware's EXCEPTION reporter, and a page or menu that does not change 
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import os
@@ -47,9 +51,9 @@ FUNC, SRC, FLTR = (2, 0), (0, 1), (0, 2)    # codes 17, 2, 3
 TRK, TRIG1 = (1, 7), 25                     # [TRK] code 16; [TRIG 1..16] codes 25..40
 KIT = 0x800052A0                            # the live kit; sound t at + 52 + 1163 t
 SOUND_TYPE = 0xDE
-ACTIVE = 0x42431A6C                         # the UI's active track (byte)
-REDRAW = 0x4011D32A                         # the UI loop's draw of every view on its screen
-REPORTER = 0x4011EA6A                       # the firmware's EXCEPTION reporter
+ACTIVE = A(0x42431A6C)                         # the UI's active track (byte)
+REDRAW = A(0x4011D32A)                         # the UI loop's draw of every view on its screen
+REPORTER = A(0x4011EA6A)                       # the firmware's EXCEPTION reporter
 LOW_END = 0x3FFFFFFF                        # below DDR: nothing of ours may read here
 
 
@@ -87,7 +91,7 @@ class Run:
         if len(self.low) < 8:
             sp = uc.reg_read(self.K.UC_M68K_REG_A7)
             words = struct.unpack(">32I", bytes(uc.mem_read(sp, 128)))
-            callers = [f"{v:#010x}" for v in words if 0x40000400 <= v < 0x40220000][:6]
+            callers = [f"{v:#010x}" for v in words if 0x40000400 <= v < A(0x40220000)][:6]
             self.low.append({"address": f"{address:#010x}", "pc": f"{pc:#010x}", "callers": callers,
                              "step": self.step})
 
@@ -168,11 +172,67 @@ def tracks(a, stock, mod_types) -> dict:
             "faults": r.faults}
 
 
+def lit(buf) -> set:
+    """the frame's lit pixels, y 0 at the top (digikit emu/panel.py's page order)"""
+    return {(x, y) for x in range(128) for y in range(64)
+            if (buf[(7 - (y // 8)) + 8 * x] >> (y % 8)) & 1}
+
+
+ICON_BOX, LABEL_BOX = (0, 10, 46, 41), (10, 42, 37, 53)     # MACHINE SEL's left pane, x0 y0 x1 y1
+
+
+def region(px: set, box) -> frozenset:
+    x0, y0, x1, y1 = box
+    return frozenset((x, y) for x, y in px if x0 <= x <= x1 and y0 <= y <= y1)
+
+
+def want_icon(t):
+    """v0.68: the pixels dnfw.msicons says type t's icon lights (msicon.c's placement), or None"""
+    sys.path.insert(0, str(HERE.parent / "src"))
+    from dnfw import msicons                     # noqa: PLC0415
+    n = msicons.TYPE_ICON.get(t)
+    if n is None:
+        return None
+    rows = msicons.icon(n)
+    x0, y0 = 25 - len(rows[0]) // 2, 27 - len(rows) // 2
+    return frozenset((x0 + x, y0 + y) for y, r in enumerate(rows) for x, c in enumerate(r) if c == "#"), n
+
+
+def pane_facts(picks) -> dict:
+    """v0.68 (owner): the left pane shows a mod machine's icon and label; stock's keep the wave and SYN"""
+    stock = [p for p in picks if p["icon"] is None]
+    ours = [p for p in picks if p["icon"] is not None]
+    if not stock or not ours:
+        return {"MACHINE SEL's pane: stock and mod rows both seen": False}
+    s0 = stock[0]
+    labels = {}
+    for p in ours:
+        labels.setdefault(p["icon"][1], set()).add(p["label_px"])
+    return {
+        "MACHINE SEL's pane: a stock machine keeps stock's wave and SYN":
+            all(p["icon_px"] == s0["icon_px"] and p["label_px"] == s0["label_px"] for p in stock) and bool(s0["icon_px"]),
+        "MACHINE SEL's pane: a mod machine's icon, exactly as dnfw.msicons draws it":
+            all(p["icon_px"] == p["icon"][0] for p in ours),
+        "MACHINE SEL's pane: a mod machine's label, one per icon, none of them SYN":
+            all(len(v) == 1 and next(iter(v)) and next(iter(v)) != s0["label_px"] for v in labels.values())
+            and len({next(iter(v)) for v in labels.values()}) == len(labels),
+    }
+
+
 def sweep(a, stock, order) -> dict:
     r = Run(a.snapshot, stock, a.png_dir)
     r.step = "settle"
     r.panel.settle(20_000_000)
     track = r.m.read(ACTIVE, 1)[0]
+    # v0.69: the boot put a mod machine on every track (the power-on check, above), a kit far past
+    # the voice/load guardrail's limit, so MACHINE SEL would refuse each heavier pick on the active
+    # track (that refusal is the guardrail step's to check). The other tracks go back to FM TONE
+    # (type 0, weight 0) for the sweep: every pick is then within the limit and must land
+    kit = r.m.long(KIT)
+    for t in range(16):
+        if t != track:
+            r.uc.mem_write(kit + 52 + 1163 * t + SOUND_TYPE, b"\x00")
+    r.panel.settle(2_000_000)
     picks, ok = [], True
     r.step = "MACHINE SEL"
     r.machine_sel()
@@ -194,16 +254,24 @@ def sweep(a, stock, order) -> dict:
         fltr = r.frame()
         r.tap(SRC)
         syn = r.frame()
+        px = lit(menu) if menu else set()
+        icon_px, label_px = region(px, ICON_BOX), region(px, LABEL_BOX)
+        row_icon = want_icon(t)
+        pane = {"icon": row_icon, "icon_px": icon_px, "label_px": label_px}
         row = {"i": i, "want": t, "got": got, "menu_closed": closed != menu,
                "fltr_drawn": fltr != closed, "syn_drawn": syn != fltr, "screen": shot}
         row["ok"] = got == t and row["menu_closed"] and row["fltr_drawn"] and row["syn_drawn"]
         ok = ok and row["ok"]
-        picks.append(row)
+        picks.append({**row, **pane})
         print(f"  {'ok  ' if row['ok'] else 'FAIL'}  pick {i:2d}: type {t:2d} -> track {track + 1} has {got}"
               f"{'' if row['menu_closed'] else '; the menu did not close'}"
               f"{'' if row['fltr_drawn'] and row['syn_drawn'] else '; a page did not draw'}", flush=True)
     facts = {"every row picked, in the list's order": ok and len(picks) == len(order),
-             "no read below 0x40000000 by our code": not r.low, "no EXCEPTION": not r.faults}
+             "no read below 0x40000000 by our code": not r.low, "no EXCEPTION": not r.faults,
+             **pane_facts(picks)}
+    for p in picks:
+        p.pop("icon_px"), p.pop("label_px")
+        p["icon"] = p["icon"][1] if p["icon"] else None
     return {"ok": all(facts.values()), "facts": facts, "track": track, "picks": picks,
             "low": r.low, "low_steps": r.low_steps, "faults": r.faults}
 

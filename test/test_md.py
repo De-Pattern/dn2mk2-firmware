@@ -108,3 +108,13 @@ def test_the_voice_resamples_the_machine_to_48k():
         pos += K.STEP
     r = B.compare(ours, want)
     assert r["snr_db"] > 60, r
+
+
+def test_efm_feedback_likeness_has_teeth():
+    """v0.72's negative control for EFM's float feedback machines: EFM-CY 2 dB down is refused"""
+    if not B.golden_available():
+        pytest.fail("no reference: see test_the_reference_is_there")
+    case = B.golden("EFM-CY")["cases"][0]
+    ours, theirs = B.run_case(MM.BY_NAME["EFM-CY"], case)
+    assert _likeness(ours, theirs)["ok"]
+    assert not _likeness([v * 0.79 for v in ours], theirs)["ok"]

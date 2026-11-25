@@ -1,7 +1,11 @@
 """Bundle the build's Python for dn2mk2's in-browser patcher (tools/patcher).
 
-    python scripts/web_bundle.py BUILD.syx VERSION NAME OUTDIR [--test]
+    python scripts/web_bundle.py BUILD.syx VERSION NAME OUTDIR [--test] [--os112]
 
+--os112 (v0.73-t1, docs/os112-port.md): BUILD.syx is a build ported to stock OS 1.12. The bundle
+builds on 1.11 as always, then replays the port's recipe (shipped in the zip as
+osport_recipe.json: offsets and addresses only) on the owner's stock 1.12 file; the browser asks
+for both Digitone II files.
 --test (owner, 2026-11-14): a test build, from a feature branch (e.g. stereo). Gated like any
 other; the patcher lists it apart, under TEST, never as the latest, with a warning.
 
@@ -19,6 +23,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import sys
 import zipfile
 
@@ -31,7 +36,19 @@ STOCK_FILES = {"dt2": "Digitakt_II_OS1.17.syx", "md": "Elektron_SPS1-1UW_OS1.63.
                "mnm": "Elektron_SFX6-60_OS1.32B.syx"}
 
 
-def isolated_rebuild(zbytes: bytes, version: str) -> str:
+# dn2mk2's patcher-worker.js reads the version from the bundle's name with this pattern and
+# writes it as VERSION (2026-11-15: its X.Y-only pattern missed v0.54-t1's "-tN", so the
+# browser wrote no VERSION and the build stopped; NiKo). The bundle is named and rebuilt here
+# exactly as the worker will see it.
+WORKER_NAME = re.compile(r"dnfw-v([0-9]{1,3}\.[0-9]{1,3}(?:-t[0-9]{1,3})?)\.zip$")
+
+
+def worker_version(zname: str) -> str | None:
+    m = WORKER_NAME.search(zname)
+    return m.group(1) if m else None
+
+
+def isolated_rebuild(zbytes: bytes, version: str, os112: bool = False) -> str:
     """the zip's build, run as the browser runs it -> its sha256 (or an error's text)"""
     import subprocess
     import tempfile
@@ -50,10 +67,15 @@ def isolated_rebuild(zbytes: bytes, version: str) -> str:
             "import dn2patch\n"
             "dn2patch.WORK = pathlib.Path(sys.argv[1] + '/work')\n"
             "print('SHA=' + dn2patch.build(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[1] + '/out.syx',"
-            " mnm=sys.argv[5]))\n")
+            " mnm=sys.argv[5], dn2_112=(sys.argv[6] if len(sys.argv) > 6 else None)))\n")
         r = subprocess.run([sys.executable, "-I", "-c", prog, str(run), str(ROOT.parent / "Digitone_II_OS1.11.syx"),
                             str(STOCK / STOCK_FILES["dt2"]), str(STOCK / STOCK_FILES["md"]),
-                            str(STOCK / STOCK_FILES["mnm"])], cwd=td, capture_output=True, text=True)
+                            str(STOCK / STOCK_FILES["mnm"]),
+                            *([str(ROOT.parent / "Digitone_II_OS1.12.syx")] if os112 else [])],
+                           cwd=td, capture_output=True, text=True,
+                           # v0.65: the packer's planner as the browser runs it, apopt.wasm (here under
+                           # node), not the native library: the zip must rebuild the cleared file so
+                           env={**os.environ, "DNFW_APOPT": "node"})
         for line in r.stdout.splitlines():
             if line.startswith("SHA="):
                 return line[4:]
@@ -62,7 +84,8 @@ def isolated_rebuild(zbytes: bytes, version: str) -> str:
 
 def main() -> int:
     test = "--test" in sys.argv
-    build, version, name, outdir = [a for a in sys.argv[1:] if a != "--test"][:4]
+    os112 = "--os112" in sys.argv
+    build, version, name, outdir = [a for a in sys.argv[1:] if a not in ("--test", "--os112")][:4]
     build = pathlib.Path(build)
     outdir = pathlib.Path(outdir)
     want = hashlib.sha256(build.read_bytes()).hexdigest()
@@ -85,6 +108,17 @@ def main() -> int:
     if rc not in (0, None) or not tmp.is_file():
         print("the rebuild stopped")
         return 1
+    recipe_json = None
+    if os112:                                   # the port, as the browser will replay it
+        from dnfw.firmware.load import load
+        from dnfw.osport import port
+        from dnfw.osport.addrmap import AddrMap, main_os
+        m = AddrMap(main_os(ROOT.parent / "Digitone_II_OS1.11.syx"), main_os(ROOT.parent / "Digitone_II_OS1.12.syx"))
+        b11 = {x.id: x for x in load(tmp.read_bytes()).container.sections}
+        rec = port.recipe(b11[3].unpack(), m)
+        main12 = port.replay(rec, b11[3].unpack(), m.b)
+        tmp.write_bytes(port.assemble((ROOT.parent / "Digitone_II_OS1.12.syx").read_bytes(), main12, b11[7].unpack()))
+        recipe_json = json.dumps(rec, separators=(",", ":"))
     got = hashlib.sha256(tmp.read_bytes()).hexdigest()
     tmp.unlink()
     if got != want:
@@ -98,28 +132,37 @@ def main() -> int:
         for f in sorted(files):
             z.writestr(zipfile.ZipInfo(str(f.relative_to(SRC)), (2026, 1, 1, 0, 0, 0)), f.read_bytes(),
                        compress_type=zipfile.ZIP_DEFLATED)
+        if recipe_json is not None:
+            z.writestr(zipfile.ZipInfo("osport_recipe.json", (2026, 1, 1, 0, 0, 0)), recipe_json,
+                       compress_type=zipfile.ZIP_DEFLATED)
         z.writestr(zipfile.ZipInfo("dn2patch.py", (2026, 1, 1, 0, 0, 0)),
                    (ROOT / "tools" / "patcher" / "dn2patch.py").read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
     # v0.40: rebuild from the zip ALONE, as the browser does (patcher-worker.js: the zip in
     # RUN/code, the version as RUN/VERSION, nothing from this repository), in a clean
     # interpreter. v0.39's bundle passed the in-repo rebuild above but stopped in the
     # browser: the build read VERSION from the repository, which the zip does not carry.
-    iso = isolated_rebuild(zbuf.getvalue(), version)
+    zname = f"dnfw-v{version}.zip"
+    wv = worker_version(zname)
+    if wv != version:
+        print(f"the patcher's worker would read {zname}'s version as {wv!r}, not {version!r}: it would "
+              "write no VERSION and the build would stop in the browser")
+        return 1
+    iso = isolated_rebuild(zbuf.getvalue(), wv, os112)
     if iso != want:
         print(f"the zip alone does not rebuild the cleared file: {iso}")
         return 1
-    zname = f"dnfw-v{version}.zip"
     (outdir / zname).write_bytes(zbuf.getvalue())
     man = outdir / "builds.json"
     rows = json.loads(man.read_text()) if man.exists() else []
     rows = [r for r in rows if r["version"] != version]
-    row_inputs = ["dn2", "dt2", "md"]
+    row_inputs = ["dn2", "dn2_112", "dt2", "md"] if os112 else ["dn2", "dt2", "md"]
     mnm = sys.modules.get("dnfw.mnm.rom")      # v0.26: the build read the Monomachine OS too
     if mnm is not None and str(mnm.path().resolve()) in touched:
         row_inputs.append("mnm")
     rows.insert(0, {"version": version, "name": name, "sha256": want, "zip": zname, "inputs": row_inputs,
                     "zip_sha256": hashlib.sha256(zbuf.getvalue()).hexdigest(),
-                    "file": f"DN2mod_v{version}_{name}_OS1.11.syx", **({"test": True} if test else {})})
+                    "file": f"DN2mod_v{version}_{name}_OS1.1{'2' if os112 else '1'}.syx",
+                    **({"os": "1.12"} if os112 else {}), **({"test": True} if test else {})})
     man.write_text(json.dumps(rows, indent=1) + "\n")
     print(f"{zname}: {len(files)} files, {len(zbuf.getvalue())} bytes; rebuild matches {want[:12]}")
     return 0

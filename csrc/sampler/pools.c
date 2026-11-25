@@ -35,6 +35,7 @@
 typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
+#include "banks.h"                              /* v0.65: global slots, the banks */
 #define D_ __attribute__((section(".data")))
 
 #if !defined(SMP_MIRROR) || !defined(POOL_BYTES) || !defined(META_PTR) || !defined(SLICE_AREA)
@@ -68,6 +69,39 @@ _Static_assert(PL_SB >= POOL_STORE_END, "the lists lie above the pool image");
 _Static_assert(PL_END <= LIB_SECTOR, "the lists lie below the library");
 #define JUMP_SETTINGS 0x6FF000u                                /* Direct Jump's settings sector ('DN2S') */
 _Static_assert(PL_END <= JUMP_SETTINGS, "the lists lie clear of Direct Jump's settings sector");
+/* v0.65 (docs/banks.md): each project's banks B..D, a second list beside its bank A list: two
+ * copies of BL_SPAN sectors (header last, as the lists), in the free range above them. Per bank
+ * its directory page, its meta block and its sums; then the slice tables made on the instrument,
+ * packed (slot, count, the slices), BL_SPAN's rest at most. The legacy list has none (banks came
+ * after it) */
+/* two ranges, around the library's extension (lib.c LIB_X_AT 0x6F0000..0x6F0700): projects
+ * 0..63 above the microtunings (tune.c 0x6E0400..0x6E04FF), 64..127 above the extension */
+#define BL_SPAN 464u
+#define BL_LISTS 0x6E0600u
+#define BL_END (BL_LISTS + 2u * 64u * BL_SPAN)
+#define BL_LISTS2 0x6F0800u
+#define BL_END2 (BL_LISTS2 + 2u * 64u * BL_SPAN)
+_Static_assert(BL_LISTS >= 0x6E0500u && BL_END <= 0x6F0000u, "projects 0..63's bank lists: past the tunings, below the library's extension");
+_Static_assert(BL_LISTS2 >= 0x6F0000u + 1u + 1792u && BL_END2 <= JUMP_SETTINGS, "64..127's: past the extension, below Direct Jump's sector");
+#define BL_MAGIC 0x444E3242u                                   /* 'DN2B' */
+#define BL_BANK (DATA_OFFSET / 512u + 0x2000u / 512u + 1u)    /* a bank's sectors: dir, meta, sums */
+#define BL_PACK (1u + 3u * BL_BANK)                            /* the packed slice tables */
+#define BL_PACK_BYTES ((BL_SPAN - BL_PACK) * 512u)
+/* our RAM for them, past link.c's BANK_RAM: the staging (a list as on the +Drive), the sums and
+ * entries a load must meet for banks B..D's slots, and each list's bank entries (res_build) */
+#define BLR (BANK_RAM + 0x80000u)
+#define BL_W ((u8 *)BLR)                                       /* sectors 1.. of a list */
+#define BL_H ((u32 *)(BLR + 0x40000u))                         /* its header */
+#define EXPECT_B ((u32 *)(BLR + 0x40200u))                     /* 384 sums */
+#define EXPECT_BE(k) ((u8 *)(BLR + 0x40800u + 16u * ((u32)(k) - POOL_SLOTS)))   /* .. their entries */
+#define BLENT(p, b) ((u8 *)(BLR + 0x42000u + 0x800u * (3u * (u32)(p) + (u32)(b) - 1u)))   /* list P's bank B entries */
+#define BLVALID ((u8 *)(BLR + 0x42000u + 0x800u * 384u))      /* 128: list P's entries are there */
+#define RES_BIG 0x10000u                                       /* v0.65: the reserved extents (every bank's) */
+#define RLO_B ((u32 *)(BLR + 0x110000u))
+#define RHI_B ((u32 *)(BLR + 0x150000u))
+_Static_assert(BL_SPAN * 512u <= 0x40000u && 0x40800u + 16u * 384u <= 0x42000u
+               && 0x42000u + 0x800u * 384u + 128u <= 0x110000u, "the bank lists' staging fits");
+_Static_assert(0x80000u + 0x150000u + 4u * RES_BIG <= 0x700000u, "below the stack's 8 MB");
 
 #define DIR_BYTES DATA_OFFSET
 #define META_ROOM 0x2000u
@@ -97,16 +131,15 @@ _Static_assert(META_BYTES <= META_ROOM, "the meta block fits a list");
 #define W_DIR ((u8 *)(W_BASE + 0x200u))
 #define W_META ((u8 *)(W_BASE + 0x200u + DIR_BYTES))
 #define W_AREA ((u8 *)(W_BASE + 0x200u + DIR_BYTES + META_ROOM))
-#define RLO ((u32 *)(PLR + 0xB0000u))                          /* reserved extents: starts */
-#define RHI ((u32 *)(PLR + 0xC1000u))                          /* .. and ends */
-#define RES_MAX 0x4400u
+#define RLO RLO_B                                              /* reserved extents: starts (v0.65: BLR's) */
+#define RHI RHI_B                                              /* .. and ends */
+#define RES_MAX RES_BIG
 #define EXPECT ((u32 *)(PLR + 0xD2000u))                       /* the sums this load must meet */
 #define EXPECT_E(k) ((u8 *)(PLR + 0xD2200u + 16u * (u32)(k)))   /* .. for these entries */
 #define LINFO ((struct linfo *)(PLR + 0xD3000u))
 _Static_assert(0x93000u + 0x200u + DIR_BYTES + META_ROOM + SLAREA_BYTES <= 0xB0000u, "the staging fits");
-_Static_assert(0xB0000u + RES_MAX * 4u <= 0xC1000u && 0xC1000u + RES_MAX * 4u <= 0xD2000u, "the reserved extents fit");
 _Static_assert(0x140000u + 0xD4000u <= 0x220000u, "below link.c's resident spans");
-_Static_assert(RES_MAX >= (u32)PL_N * (POOL_SLOTS + 1u), "every list's extents fit");
+_Static_assert(RES_MAX >= (u32)PL_N * (POOL_SLOTS + 1u) + 128u * 3u * 127u, "every list's extents fit (v0.65: and its banks')");
 
 struct linfo { u8 valid, copy, flags, pad; u32 seq; u32 spare[2]; };   /* 16 B: no 8-byte index (ColdFire) */
 
@@ -187,6 +220,12 @@ static void zero(u8 *d, u32 n) { for (u32 k = 0; k < n; k++) d[k] = 0; }
 static int pl_in(u32 sector, u32 bytes)
 {
     u32 n = bytes / 512u;
+    if (BLK_READY && bytes && !(bytes & 511u) && sector >= BL_LISTS && sector < BL_END
+        && n <= BL_END - sector && BLK_SECTORS >= BL_END2)
+        return 1;                               /* v0.65: the bank lists */
+    if (BLK_READY && bytes && !(bytes & 511u) && sector >= BL_LISTS2 && sector < BL_END2
+        && n <= BL_END2 - sector && BLK_SECTORS >= BL_END2)
+        return 1;
     return BLK_READY && bytes && !(bytes & 511u) && sector >= PL_SB && sector < PL_END
            && n <= PL_END - sector && BLK_SECTORS >= PL_END;
 }
@@ -418,6 +457,182 @@ static int list_write(int p, int fl)
     return 0;
 }
 
+/* -- v0.65: the bank lists ----------------------------------------------------------------- */
+
+extern u8 *smp_pl_bankp(int b);
+extern void smp_pl_bank_blank(int b);
+extern int smp_pl_banks_write(void);
+extern int smp_bank_blocked;
+static u8 bl_valid[128] D_;
+static u8 bl_copy[128] D_;
+static u32 bl_seq[128] D_;
+static u32 bl_sum[128] D_;                      /* each valid list's body's sum (unchanged banks: no write) */
+#define BL_BODY ((BL_SPAN - 1u) * 512u)
+
+static u32 bl_sector(int p, int c)
+{
+    return p < 64 ? BL_LISTS + BL_SPAN * (2u * (u32)p + (u32)c) : BL_LISTS2 + BL_SPAN * (2u * (u32)(p - 64) + (u32)c);
+}
+static u32 bl_check(const u32 *h) { return csum((const u8 *)h, 44) ^ 0x424C4B31u; }
+static int bl_hok(const u32 *h, int p)
+{
+    return h[0] == BL_MAGIC && h[1] == PL_VERSION && h[2] == (u32)p && h[4] == smp_pl_gen
+           && h[11] == bl_check(h);
+}
+static u8 *bl_part(u32 b) { return BL_W + (b - 1u) * BL_BANK * 512u; }   /* bank B's dir, meta, sums */
+
+static void bl_cache(int p)                     /* list P's bank entries, for res_build */
+{
+    for (u32 b = 1; b < BANK_N; b++)
+        copy(BLENT(p, b), bl_part(b) + 8, 16u * POOL_SLOTS);
+    BLVALID[p] = 1;
+    res_rev++;
+}
+
+/* BL_W := banks B..D as the pages are now: each live page's directory, meta block and sums;
+ * then every slice table made on the instrument, packed (as many as BL_PACK_BYTES hold) */
+static void bl_snapshot(void)
+{
+    zero(BL_W, BL_BODY);
+    u8 *pk = BL_W + (BL_PACK - 1u) * 512u;
+    u32 at = 0;
+    for (u32 b = 1; b < BANK_N; b++) {
+        u8 *pg = smp_pl_bankp((int)b), *w = bl_part(b);
+        if (!pg || !smp_bank_live((int)b))
+            continue;                           /* (a page not in use: zeros, restored empty) */
+        copy(w, pg, DIR_BYTES);
+        copy(w + DIR_BYTES, pg + BANK_META, 0x2000u);
+        u32 *sums = (u32 *)(w + DIR_BYTES + 0x2000u);
+        for (u32 s = 0; s < POOL_SLOTS; s++)
+            sums[s] = smp_pl_slot_sum(G_OF(b, s));
+        for (u32 s = 0; s < 127u; s++) {
+            const u8 *e = pg + 8u + 16u * s;
+            u32 n = e[13] > 64u ? 64u : e[13];
+            if (!(e[14] & 1u) || !n || at + 4u + 12u * n + 2u > BL_PACK_BYTES)
+                continue;
+            u32 g = (u32)G_OF(b, s);
+            pk[at] = (u8)g;
+            pk[at + 1] = (u8)(g >> 8);
+            pk[at + 2] = (u8)n;
+            pk[at + 3] = 0;
+            copy(pk + at + 4, pg + BANK_SLICES + 768u * s, 12u * n);
+            at += 4u + 12u * n;
+        }
+    }
+    pk[at] = 0xFF;
+    pk[at + 1] = 0xFF;
+}
+
+/* BL_W as project P's bank list: into its older copy, the body, then the header -> 0 */
+static int bl_write(int p)
+{
+    if (p < 0 || p >= 128)
+        return 0;                               /* (the legacy list has no banks) */
+    u32 body = csum(BL_W, BL_BODY);
+    if (bl_valid[p] && bl_sum[p] == body)
+        return 0;                               /* the banks as that list has them: nothing to write */
+    int c = bl_valid[p] ? 1 - bl_copy[p] : 0;
+    u32 s = bl_sector(p, c), seq = bl_seq[p] + 1u;
+    u32 *h = BL_H;
+    for (int k = 0; k < 128; k++)
+        h[k] = 0;
+    h[0] = BL_MAGIC;
+    h[1] = PL_VERSION;
+    h[2] = (u32)p;
+    h[3] = seq;
+    h[4] = smp_pl_gen;
+    h[5] = body;
+    h[11] = bl_check(h);
+    for (u32 o = 0; o < BL_BODY; o += 0x10000u) {
+        u32 n = BL_BODY - o < 0x10000u ? BL_BODY - o : 0x10000u;
+        if (pl_wr(s + 1u + o / 512u, n, BL_W + o) != 0) {
+            bl_seq[p] = seq;
+            if (bl_valid[p] && bl_copy[p] == (u8)c)
+                bl_valid[p] = 0;
+            return -1;
+        }
+    }
+    if (pl_wr(s, 512u, h) != 0) {
+        bl_seq[p] = seq;
+        if (bl_valid[p] && bl_copy[p] == (u8)c)
+            bl_valid[p] = 0;
+        return -1;
+    }
+    bl_valid[p] = 1;
+    bl_copy[p] = (u8)c;
+    bl_seq[p] = seq;
+    bl_sum[p] = body;
+    bl_cache(p);
+    return 0;
+}
+
+/* the newest whole copy of project P's bank list into BL_W -> 0; -1 none */
+static int bl_read(int p)
+{
+    if (p < 0 || p >= 128)
+        return -1;
+    u32 hs[2] = {0, 0};
+    int ok[2] = {0, 0};
+    for (int c = 0; c < 2; c++)
+        if (pl_rd(bl_sector(p, c), 512u, BL_H) == 0 && bl_hok(BL_H, p)) {
+            ok[c] = 1;
+            hs[c] = BL_H[3];
+        }
+    bl_seq[p] = hs[0] > hs[1] ? hs[0] : hs[1];
+    int first = ok[1] && (!ok[0] || hs[1] > hs[0]) ? 1 : 0;
+    for (int t = 0; t < 2; t++) {
+        int c = t == 0 ? first : 1 - first;
+        if (!ok[c] || pl_rd(bl_sector(p, c), 512u, BL_H) != 0)
+            continue;
+        u32 want = BL_H[5], bad = 0;
+        for (u32 o = 0; o < BL_BODY && !bad; o += 0x10000u) {
+            u32 n = BL_BODY - o < 0x10000u ? BL_BODY - o : 0x10000u;
+            bad = pl_rd(bl_sector(p, c) + 1u + o / 512u, n, BL_W + o) != 0;
+        }
+        if (bad || csum(BL_W, BL_BODY) != want)
+            continue;
+        bl_valid[p] = 1;
+        bl_copy[p] = (u8)c;
+        bl_sum[p] = want;
+        bl_cache(p);
+        return 0;
+    }
+    bl_valid[p] = 0;
+    BLVALID[p] = 0;
+    res_rev++;
+    return -1;
+}
+
+/* the pages := BL_W (OK), or every bank empty; what the loader must find for their slots */
+static void bl_restore(int ok)
+{
+    for (u32 b = 1; b < BANK_N; b++) {
+        u8 *pg = smp_pl_bankp((int)b), *w = bl_part(b);
+        smp_pl_bank_blank((int)b);
+        if (ok && le32(w) == BANK_MAGIC && le32(w + 4) <= POOL_SLOTS) {
+            copy(pg, w, DIR_BYTES);
+            copy(pg + BANK_META, w + DIR_BYTES, 0x2000u);
+        }
+        const u32 *sums = (const u32 *)(w + DIR_BYTES + 0x2000u);
+        for (u32 s = 0; s < POOL_SLOTS; s++) {
+            int g = G_OF(b, s);
+            EXPECT_B[g - POOL_SLOTS] = ok ? sums[s] : 0u;
+            copy(EXPECT_BE(g), pg + 8u + 16u * s, 16);
+        }
+    }
+    if (!ok)
+        return;
+    const u8 *pk = BL_W + (BL_PACK - 1u) * 512u;
+    for (u32 at = 0; at + 4u <= BL_PACK_BYTES;) {
+        u32 g = pk[at] | (u32)pk[at + 1] << 8, n = pk[at + 2];
+        if (g == 0xFFFFu || g < POOL_SLOTS || g >= (u32)SMP_ALL || n > 64u || at + 4u + 12u * n > BL_PACK_BYTES)
+            break;
+        u8 *pg = smp_pl_bankp((int)G_BANK(g));
+        copy(pg + BANK_SLICES + 768u * G_SLOT(g), pk + at + 4, 12u * n);
+        at += 4u + 12u * n;
+    }
+}
+
 /* -- extents no new sample may take ------------------------------------------------------- */
 
 static void res_add(u32 lo, u32 hi)
@@ -454,6 +669,19 @@ static void res_build(void)
             if (mn <= META_ROOM)
                 res_add(mo & ~511u, (mo + mn + 511u) & ~511u);
         }
+        if (p < 128 && BLVALID[p])              /* v0.65: and its banks' */
+            for (u32 b = 1; b < BANK_N; b++)
+                for (u32 k = 0; k < 127u; k++) {
+                    const u8 *e = BLENT(p, b) + 16u * k;
+                    u32 addr = le32(e), fr = le32(e + 4), fmt = e[12];
+                    if (addr < SMP_POOL_DDR + DATA_OFFSET || !fr)
+                        continue;
+                    u32 lo = addr - SMP_POOL_DDR, n = fr * FRAME_BYTES(fmt);
+                    u32 ns = e[13] > 64 ? 64u : e[13];
+                    if (ns && !(e[14] & 1))
+                        n = (((lo + n + 3u) & ~3u) - lo) + 12u * ns;
+                    res_add(lo & ~511u, (lo + n + 511u) & ~511u);
+                }
     }
     /* shell sort by lo, then merge */
     for (u32 gap = res_n / 2u; gap > 0; gap /= 2u)
@@ -526,6 +754,13 @@ u32 smp_pl_res_end(int i) { return i >= 0 && (u32)i < res_n ? RHI[i] : 0; }
  * from recorded for that very entry; 0: none asked (another entry, or not known) */
 u32 smp_pl_expect(int k, const u8 *e)
 {
+    if (smp_pl_on && k >= POOL_SLOTS && k < SMP_ALL && EXPECT_B[k - POOL_SLOTS]) {   /* v0.65: banks B..D */
+        const u8 *x = EXPECT_BE(k);
+        for (int j = 0; j < 16; j++)
+            if (x[j] != e[j])
+                return 0;
+        return EXPECT_B[k - POOL_SLOTS];
+    }
     if (!smp_pl_on || k < 0 || k >= POOL_SLOTS || !EXPECT[k])
         return 0;
     const u8 *x = EXPECT_E(k);
@@ -539,6 +774,8 @@ static void expect_clear(void)
 {
     for (int k = 0; k < POOL_SLOTS; k++)
         EXPECT[k] = 0;
+    for (int k = POOL_SLOTS; k < SMP_ALL; k++)
+        EXPECT_B[k - POOL_SLOTS] = 0;
 }
 
 int smp_pl_busy(void) { return smp_pl_on && smp_pl_state != 0; }
@@ -619,9 +856,18 @@ static int apply(int kind, int slot)
         copy(smp_pl_areap(), W_AREA, SLAREA_BYTES);
         smp_pl_image_write(SLICE_AREA, SLAREA_BYTES, W_AREA);
     }
+    /* v0.65: banks B..D -- the project's own bank list (a NEW project's, the legacy list's: none,
+     * every bank empty), its pages written into the image before the header that checks them */
+    bl_restore(kind == 1 && src == slot && slot >= 0 && bl_read(slot) == 0);
     u32 hi = dir_extent_end(dir);
     if (hi < smp_hi)
         hi = smp_hi;
+    if (!smp_bank_blocked) {
+        if (smp_pl_banks_write() != 0)
+            return -1;
+        if (hi < TABLE_AREA)
+            hi = TABLE_AREA;
+    }
     if (smp_pl_dir_commit(hi) != 0)
         return -1;
     /* a NEW project's empty pool is its own at once (the owner's decision 1): a LOAD of it
@@ -631,6 +877,8 @@ static int apply(int kind, int slot)
         for (int k = 0; k < 128; k++)
             W_SUMS[k] = 0;
         list_write(slot, 0);
+        bl_snapshot();                          /* v0.65: its banks, empty */
+        bl_write(slot);
     }
     smp_pl_owner = slot;
     sb_pend = 0;
@@ -651,6 +899,9 @@ static int write_owner(void)
     if (smp_pl_owner >= 0) {
         int fl = snapshot();
         if (fl < 0 || list_write(smp_pl_owner, fl) != 0)
+            return -1;
+        bl_snapshot();                          /* v0.65: and its banks B..D */
+        if (bl_write(smp_pl_owner) != 0)
             return -1;
     }
     sb_dirsum = smp_dir_ok && smp_hi ? csum(smp_pl_dirp(), DIR_BYTES) : 0;
@@ -680,6 +931,11 @@ int smp_pl_boot(void)
     for (int p = 0; p < PL_N; p++) {
         LINFO[p].valid = 0;
         LINFO[p].seq = 0;
+    }
+    for (int p = 0; p < 128; p++) {             /* v0.65 */
+        bl_valid[p] = 0;
+        bl_seq[p] = 0;
+        BLVALID[p] = 0;
     }
     if (!BLK_READY || BLK_SECTORS < PL_END)
         return 0;                               /* no room for the lists: one pool, as before */
@@ -713,6 +969,8 @@ int smp_pl_boot(void)
     }
     for (int p = 0; p < PL_N; p++)
         list_read(p);
+    for (int p = 0; p < 128; p++)               /* v0.65: and the projects' bank lists */
+        bl_read(p);
     smp_pl_on = 1;
     seen_loads = seen_news = 0;
     if (!LINFO[PL_LEGACY].valid) {              /* after a send from the computer: the new pool */
@@ -795,6 +1053,10 @@ static int fill_list(void)
         if (s && !LSUM(p)[k] && same(LDIR(p) + 8 + 16 * k, dir + 8 + 16 * k, 16))
             return p;
     }
+    if (p == smp_pl_owner && p < 128)           /* v0.65: a bank slot's sum its list lacks */
+        for (int g = POOL_SLOTS; g < SMP_ALL; g++)
+            if (smp_pl_slot_sum(g) && !EXPECT_B[g - POOL_SLOTS])
+                return p;
     return -1;
 }
 
@@ -911,6 +1173,10 @@ void smp_pl_reset(void)                         /* BEGIN or FORGET: every list i
     smp_pl_gen++;
     for (int p = 0; p < PL_N; p++)
         LINFO[p].valid = 0;
+    for (int p = 0; p < 128; p++) {             /* v0.65: the bank lists, as void */
+        bl_valid[p] = 0;
+        BLVALID[p] = 0;
+    }
     smp_pl_owner = active();
     sb_pend = 0;
     sb_pslot = -1;

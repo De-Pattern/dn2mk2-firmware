@@ -46,7 +46,9 @@ SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
             # frames so far, their limit, source, threshold, its frames' base, the track
             "rst", "rent", "rpos", "rmax", "rsrc", "rthr", "rbase", "rchan", "rpk",
             "rseq", "rmode",
-            "tr0", "note", "segnext")                  # v0.18: TUNE's transposition alone; the note; WERP's boundary                           # v0.15: the last command's sequence; armed on 0 THRES, 1 PLAY
+            "tr0", "note", "segnext",
+            "pvw")                                     # stereo: the preview's words a block (16: two frames a word; 32: a stereo slot's, one)                  # v0.18: TUNE's transposition alone; the note; WERP's boundary                           # v0.15: the last command's sequence; armed on 0 THRES, 1 PLAY
+SC_MAIN, SC_OVER = 64, 0x988             # (Layout.C; dsp.REC_GAIN_DM + 8 - dsp.SMP_SCRATCH_DM, 30 words free there)
 GRAIN = 2048                              # STRETCH's grain, output samples (43 ms); two, half apart
 TEMPO_OFFSET = 216                        # the frame's tempo word: BPM x 120 (docs/modulation-display.md)
 
@@ -54,7 +56,11 @@ TEMPO_OFFSET = 216                        # the frame's tempo word: BPM x 120 (d
 class Layout:
     def __init__(self, state: int, scratch: int, pool: int, exp2: int, tables: int = 0, dec: int = 0):
         self.state, self.pool, self.exp2, self.dec = state, pool, exp2, dec
-        self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
+        # the scratch has SC_MAIN words of its own (the recorder's stage follows it). v0.40..v0.73 let
+        # the 65th, WERP's segnext, lie on the stage's first float (harmless: each is written and
+        # read within its own run); stereo's pvw is kept from block to block, so the words past
+        # SC_MAIN go after the recorder's GAIN words (dsp.REC_GAIN_DM + 8: SC_OVER from the scratch)
+        self.C = {w: scratch + (4 * k if k < SC_MAIN else SC_OVER + 4 * (k - SC_MAIN)) for k, w in enumerate(SC_WORDS)}
         # PM.exp2 reads the table through L.T; v0.18: the DT2 reader's tables (tables_bytes)
         self.T = {"exp2": exp2, "poly": tables, "decim": tables + 4 * POLY_ROWS * POLY_TAPS,
                   "gain": tables + 4 * POLY_ROWS * POLY_TAPS + 16}
@@ -378,6 +384,7 @@ def start(p: Prog, L: Layout) -> None:
     p.iconst(12, SM.POOL_MAGIC)
 
     def found():
+        bank_page(p, L)                      # v0.65: C['tmp'], SAMP's bank's page
         p.ld(0, L.pool + 4)                  # count
         p.ld(4, C["samp"])
         p.iconst(12, -1)
@@ -387,6 +394,8 @@ def start(p: Prog, L: Layout) -> None:
         # BOUNCE's buffer halves (slots BUF_SLOT0..: the buffer directory, SM.BUF_DIR)
         p.iconst(12, SM.REC_FIRST)
         p.if_(4, "GE", 12, lambda: p.iconst(0, SM.BUF_SLOT0 + SM.BUF_HALVES), kind="i")
+        bank_count(p, L)                     # v0.65: banks B..D: their page's count
+        p.ld(4, C["samp"])
         p.e("COMP(R4, R0);")
 
         def have():
@@ -397,6 +406,8 @@ def start(p: Prog, L: Layout) -> None:
             def pool_entry():
                 p.lsh(4, 4, 4)               # 16 bytes an entry
                 p.iconst(12, L.pool + 8)
+                p.iop(4, 12, "+", 4)
+                p.ld(12, C["tmp"])           # v0.65: in its bank's page (0: bank A's)
                 p.iop(4, 12, "+", 4)
                 p.seti(1, 4)
                 p.ldi(5, 0, 1)
@@ -417,10 +428,13 @@ def start(p: Prog, L: Layout) -> None:
                 p.ldi(5, 0, 1)
                 p.ldi(6, 1, 1)
                 p.ldi(13, 2, 1)
+                p.iconst(12, SM.MAIN_MARK)
+                p.iop(11, 13, "AND", 12)     # v0.66: a MAIN / IN take's mark, kept apart
                 p.iconst(12, 0x7FFF)
                 p.iop(13, 13, "AND", 12)
                 p.iconst(12, 1)
                 p.iop(13, 13, "MAX", 12)     # 1..32767 steps (0 would divide by it)
+                p.iop(13, 13, "OR", 11)      # the mark back (tempo() masks the steps to 0x7FFF)
                 p.fconst(7, 1.0)
                 p.iconst(8, SM.FMT_I16)
             p.if_(4, "GE", 12, buf_entry, pool_entry, kind="i")
@@ -449,6 +463,9 @@ def start(p: Prog, L: Layout) -> None:
                 p.iop(4, 12, "+", 4)          # slot x 768
                 p.iconst(12, L.pool + SM.SLICE_AREA)
                 p.iop(9, 12, "+", 4)
+                p.ld(4, C["tmp"])             # v0.65: banks B..D: their page's own slice area
+                p.ifz(4, "NE", lambda: (p.iconst(12, SM.BANK_SLICES - SM.SLICE_AREA), p.iop(4, 12, "+", 4),
+                                        p.iop(9, 9, "+", 4)))
             p.ifz(9, "NE", area)
             # v0.44: a BOUNCE take (steps in C['x']) has no slices; its steps go in 'sla',
             # tagged negative (an address never is), for tempo(): STRETCH fits the take to
@@ -466,6 +483,48 @@ def start(p: Prog, L: Layout) -> None:
         p._branch(lambda: s32(p.r[4]) < s32(p.r[0]), "LT", inrange, None)
     p.e("COMP(R0, R12);")
     p._branch(lambda: p.r[0] == p.r[12], "EQ", found, None)
+
+
+def bank_page(p: Prog, L: Layout) -> None:
+    """v0.65 PROJECT RAM banks (docs/banks.md): C['tmp'] = the offset into the pool of the
+    directory page of SAMP's bank: 0 for bank A, SM.BANK_AREA + (b - 1) x SM.BANK_PAGE for
+    B..D. The bank is the word's low byte, (low + 0x20) >> 6 at most 3 (SM.bank_of). R10 the
+    track's frame base, as start() set it. Clobbers R0, R1, R4, R12, I1."""
+    slot, lo, top = SM.RECORDS[SM.SAMP_REC]
+    PP.half(p, 4, PM.frame_offset(slot), 10)
+    p.iconst(12, 0xFF)
+    p.iop(4, 4, "AND", 12)
+    p.iconst(12, 0x20)
+    p.iop(4, 12, "+", 4)
+    p.lsh(4, 4, -6)
+    p.iconst(12, 3)
+    p.iop(4, 4, "MIN", 12)
+    p.iconst(12, 0)
+    p.st(L.C["tmp"], 12)
+
+    def other():
+        p.iconst(12, -1)
+        p.iop(4, 12, "+", 4)
+        p.lsh(4, 4, 17)                         # x 128 KB (SM.BANK_PAGE)
+        p.iconst(12, SM.BANK_AREA)
+        p.iop(4, 12, "+", 4)
+        p.st(L.C["tmp"], 4)
+    p.ifz(4, "NE", other)
+
+
+def bank_count(p: Prog, L: Layout) -> None:
+    """v0.65: for banks B..D (C['tmp'] not 0) R0 = their page's count, or -1 (nothing plays)
+    when the page has not its magic; bank A's R0 is left as it is. Clobbers R4, R12, I1."""
+    def page():
+        p.iconst(12, L.pool)
+        p.iop(4, 12, "+", 4)
+        p.seti(1, 4)
+        p.ldi(0, 0, 1)
+        p.iconst(12, SM.BANK_MAGIC)
+        p.e("COMP(R0, R12);")
+        p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: p.ldi(0, 1, 1), lambda: p.iconst(0, -1))
+    p.ld(4, L.C["tmp"])
+    p.ifz(4, "NE", page)
 
 
 def entry_check(p: Prog, L: Layout) -> None:
@@ -1187,6 +1246,18 @@ def dec_at(p: Prog, L: Layout) -> None:
     p.seti(5, 5)
 
 
+def main_makeup(p: Prog, L: Layout, f: int) -> None:
+    """v0.66: Ff x 10^(MAIN_PLAY_DB / 20) when the voice plays a FLEX take of MAIN or IN ('sla'
+    negative, a take; MAIN_MARK set by the recorder). Clobbers R9, R12, F12."""
+    v(p, 9, "sla")
+
+    def take():
+        p.iconst(12, SM.MAIN_MARK)
+        p.iop(9, 9, "AND", 12)
+        p.ifz(9, "NE", lambda: (p.fconst(12, 10.0 ** (SM.MAIN_PLAY_DB / 20.0)), p.fop(f, f, "*", 12)))
+    p.ifz(9, "LT", take)
+
+
 def render(p: Prog, L: Layout) -> None:
     """ONESHOT, REPITCH and GRID (v0.18): the DT2's reader. Each output sample is two
     96 kHz samples of the six-tap interpolator (`tick`), stepping half the block's rate,
@@ -1209,6 +1280,7 @@ def render(p: Prog, L: Layout) -> None:
     p.ldi(1, 0, 0)
     p.ld(0, C["lev"])
     p.fop(0, 0, "*", 1)
+    main_makeup(p, L, 0)                      # v0.66: a MAIN / IN take's +MAIN_PLAY_DB
     p.st(C["tmp"], 0)                         # LEV with the make-up (C['lev'] stays: a retrigger renders twice)
     dec_at(p, L)
 
@@ -1553,6 +1625,9 @@ def render_stretch(p: Prog, L: Layout) -> None:
     its own start (the DT2's STRETCH has no LOOP)."""
     C = L.C
     buffer(p, L)
+    p.ld(0, C["lev"])                         # v0.66: LEV, a MAIN / IN take's made up (C['lev'] stays)
+    main_makeup(p, L, 0)
+    p.st(C["tmp"], 0)
     # the jump this block: (T - rate) 2048, by the play direction
     p.ld(0, C["sr"])
     p.fconst(12, T_MIN)
@@ -1695,7 +1770,7 @@ def render_stretch(p: Prog, L: Layout) -> None:
             p.fconst(12, 0.0)
             p.fop(0, 0, "MAX", 12)
             vs(p, "gp1", 0)
-            p.ld(3, C["lev"])
+            p.ld(3, C["tmp"])                 # v0.66: LEV with a take's make-up
             p.fop(4, 4, "*", 3)
             faded(p, L, 4)
             out(p, L, 4)
@@ -1905,6 +1980,12 @@ def recorder(p: Prog, L: Layout) -> None:
             p.iop(6, 4, "AND", 12)
             p.ifz(6, "NE", lambda bit=bit: (p.fconst(12, 10.0 ** ((1 << bit) / 20.0)), p.fop(5, 5, "*", 12)))
         p.st(SM.REC_GAIN + 4, 5)
+        # v0.59 MON: bit MON_BIT of the channel word (the RECORDER's C; FLEX REC sends 0)
+        p.ld(4, cmd + 12)
+        p.lsh(4, 4, -SM.MON_BIT)
+        p.iconst(12, 1)
+        p.iop(4, 4, "AND", 12)
+        p.st(SM.REC_MON, 4)
 
     def new_command():
         p.ld(0, cmd)
@@ -1991,6 +2072,13 @@ def recorder(p: Prog, L: Layout) -> None:
                     p.lsh(7, 7, -16)
                     p.iconst(12, 0x7FFF)
                     p.iop(7, 7, "AND", 12)
+
+                    def main_take():          # v0.66: a FLEX take (GAIN set) of IN or MAIN: marked,
+                        p.ld(8, SM.REC_GAIN)  # made up on playback (main_makeup), never before the clamp
+                        p.ifz(8, "NE", lambda: (p.iconst(12, SM.MAIN_MARK), p.iop(7, 7, "OR", 12)))
+                    p.ld(8, C["rsrc"])        # 0 IN, 1 MAIN, 2 + t a track
+                    p.iconst(12, 2)
+                    p.if_(8, "LT", 12, main_take, kind="i")
                     p.sti(2, 1, 7)
                 p.if_(5, "GE", 12, buf_dest, pool_dest, kind="i")
                 p.iconst(7, 0)
@@ -2154,6 +2242,10 @@ def recorder(p: Prog, L: Layout) -> None:
                 p.ldi(7, 1, 1)                # their count
                 p.ld(8, cmd + 12)             # first
                 p.ld(9, cmd + 16)             # end
+                if SM.STEREO:
+                    p.ldi(5, 3, 1)            # stereo: the slot's format (its word's low byte)
+                    p.iconst(12, 0xFF)
+                    p.iop(5, 5, "AND", 12)
 
             def at_offset():                  # v0.33: +DRIVE's preview, sent to a free stretch
                 p.ld(6, cmd + 12)             # of the pool: its offset, its frames; from 0
@@ -2172,6 +2264,8 @@ def recorder(p: Prog, L: Layout) -> None:
                 p.iop(7, 7, "MAX", 12)
                 p.iconst(8, 0)                # the window: [0, count)
                 p.ipass(9, 7)
+                if SM.STEREO:
+                    p.iconst(5, SM.FMT_I16)   # (the ColdFire sends a stereo sample's preview mixed down)
             p.iconst(12, PREVIEW_AT)
             p.if_(5, "EQ", 12, at_offset, of_slot, kind="i")
             p.iconst(12, -2)                  # first, on a word
@@ -2180,8 +2274,21 @@ def recorder(p: Prog, L: Layout) -> None:
             p.iop(9, 9, "-", 8)
             p.iconst(12, 0)
             p.iop(9, 9, "MAX", 12)            # none if end <= first
-            p.lsh(9, 9, -1)                   # words, two frames each
-            p.lsh(8, 8, 1)
+            if SM.STEREO:
+                def mono_words():
+                    p.lsh(9, 9, -1)           # words, two frames each
+                    p.lsh(8, 8, 1)
+                    p.iconst(5, 16)
+
+                def stereo_words():           # a stereo slot: a frame a word (L low, R high)
+                    p.lsh(8, 8, 2)
+                    p.iconst(5, 32)
+                p.iconst(12, SM.FMT_I16S)
+                p.if_(5, "EQ", 12, stereo_words, mono_words, kind="i")
+                p.st(C["pvw"], 5)
+            else:
+                p.lsh(9, 9, -1)               # words, two frames each
+                p.lsh(8, 8, 1)
             p.iop(6, 8, "+", 6)
             p.st(C["pva"], 6)
             p.st(C["pvn"], 9)
@@ -2248,7 +2355,8 @@ def recorder(p: Prog, L: Layout) -> None:
             p.fop(3, 3, "*", 12)              # at its defaults made up
             p.ld(8, C["rsrc"])
             p.iconst(12, 2)
-            p.if_(8, "GE", 12, lambda: (p.fconst(12, SM.TRK_UNITY), p.fop(3, 3, "*", 12)), kind="i")
+            p.if_(8, "GE", 12, lambda: (p.fconst(12, SM.TRK_UNITY * 10.0 ** (SM.TRK_HW_DB / 20.0)),
+                                        p.fop(3, 3, "*", 12)), kind="i")   # v0.63: + TRK_HW_DB (the unit's)
         p.ld(8, SM.REC_GAIN)
         p.ifz(8, "NE", gained)
         p.fconst(12, 0.999969)
@@ -3212,6 +3320,7 @@ def pvmix(p: Prog, L: Layout) -> None:
         p.iop(1, 12, "+", 1)
         p.st(C["pvk"], 1)
     _loop16(p, C, tap_word, 64)
+    mon(p, L)
     p.ld(0, C["pvn"])
     p.iconst(12, 0)
 
@@ -3252,14 +3361,49 @@ def pvmix(p: Prog, L: Layout) -> None:
                     p.fop(0, 0, "+", x)
                     p.sti(k, 1, 0)
                 p.ld(1, C["pvk"])
-            p.if_(1, "LT", 2, one, kind="i")
+
+            def one_st():                     # stereo: a stereo slot's frame, L to the L side, R to the R
+                p.lsh(12, 1, 2)
+                p.ld(13, C["pva"])
+                p.iop(13, 13, "+", 12)
+                p.seti(1, 13)
+                p.ldi(2, 0, 1)                # one frame
+                p.lsh(3, 2, 16)               # L (the low half) on top
+                p.iconst(12, 0xFFFF0000 - (1 << 32))
+                p.iop(2, 2, "AND", 12)        # R, on top
+                p.iconst(12, -33)
+                p.float_(3, 3, 12)            # int16 / 131072, as a mono preview's
+                p.float_(2, 2, 12)
+                p.lsh(12, 1, 2)
+                p.iconst(13, SM.MIX_BUF)
+                p.iop(13, 13, "+", 12)        # frame k: L, and R at + 32 words
+                p.seti(1, 13)
+                for k, x in ((0, 3), (32, 2)):
+                    p.ldi(0, k, 1)
+                    p.fop(0, 0, "+", x)
+                    p.sti(k, 1, 0)
+                p.ld(1, C["pvk"])
+            if SM.STEREO:
+                def pick():
+                    p.ld(0, C["pvw"])
+                    p.iconst(12, 32)
+                    p.if_(0, "EQ", 12, one_st, one, kind="i")
+                p.if_(1, "LT", 2, pick, kind="i")
+            else:
+                p.if_(1, "LT", 2, one, kind="i")
             p.iconst(12, 1)
             p.ipass(13, 1)
             p.iop(1, 13, "+", 12)
             p.st(C["pvk"], 1)
-        _loop16(p, C, word)
-        p.ld(0, C["pvn"])                     # on: 16 words, or what was left
-        p.iconst(12, 16)
+        if SM.STEREO:
+            _loopw(p, C, word)
+        else:
+            _loop16(p, C, word)
+        p.ld(0, C["pvn"])                     # on: 16 words (stereo: 32), or what was left
+        if SM.STEREO:
+            p.ld(12, C["pvw"])
+        else:
+            p.iconst(12, 16)
         p.iop(1, 0, "MIN", 12)
         p.iop(0, 0, "-", 1)
         p.st(C["pvn"], 0)
@@ -3284,6 +3428,62 @@ def pvmix(p: Prog, L: Layout) -> None:
             p.ifz(2, "NE", loop)
         p.ifz(0, "EQ", again)
     p.if_(0, "GT", 12, some, kind="i")
+
+
+def mon(p: Prog, L: Layout) -> None:
+    """v0.59 MON: with REC_MON on, SRC IN (rsrc 0) and the recorder armed or recording (rst 1,
+    2), MIX_BUF[k] += IN_BUF[k] for the block's 32 frames, L and R (both laid out as 32 floats
+    then 32): the input heard at unity, as it is recorded. Uses R0..R3, R12, R13, I1, pvk."""
+    C = L.C
+
+    def live():
+        p.iconst(1, 0)
+        p.st(C["pvk"], 1)
+
+        def word():
+            p.ld(1, C["pvk"])
+            p.lsh(12, 1, 2)
+            p.iconst(13, SM.IN_BUF)
+            p.iop(13, 13, "+", 12)
+            p.seti(1, 13)
+            p.ldi(2, 0, 1)
+            p.iconst(13, SM.MIX_BUF)
+            p.iop(13, 13, "+", 12)
+            p.seti(1, 13)
+            p.ldi(3, 0, 1)
+            p.fop(3, 3, "+", 2)
+            p.sti(0, 1, 3)
+            p.iconst(12, 1)
+            p.iop(1, 12, "+", 1)
+            p.st(C["pvk"], 1)
+        _loop16(p, C, word, 64)
+
+    def armed_or_recording():
+        p.ld(0, C["rst"])
+        p.iconst(12, 1)
+        p.if_(0, "GE", 12, lambda: (p.iconst(12, 2), p.if_(0, "LE", 12, live, kind="i")), kind="i")
+
+    def src_in():
+        p.ld(0, C["rsrc"])
+        p.ifz(0, "EQ", armed_or_recording)
+    p.ld(0, SM.REC_MON)
+    p.ifz(0, "NE", src_in)
+
+
+def _loopw(p: Prog, C, body) -> None:
+    """stereo: as _loop16, for pvw times (the preview's words a block: 16 or 32)"""
+    top = p.label("pv")
+    p.place(top)
+    if p.run:
+        while True:
+            body()
+            if p.mem.get(C["pvk"]) >= p.mem.get(C["pvw"]):
+                return
+    body()
+    p.ld(0, C["pvk"])
+    p.ld(12, C["pvw"])
+    p.e("COMP(R0, R12);")
+    p.jump("LT", top)
 
 
 def _loop16(p: Prog, C, body, n: int = 16) -> None:

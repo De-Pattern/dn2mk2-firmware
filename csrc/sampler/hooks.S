@@ -150,3 +150,51 @@ kb_rec_hook:
         addq.l  #8, %sp
         moveq   #0, %d0                         | stock's answer: off
 1:      rts
+
+| v0.65 PROJECT RAM banks (docs/banks.md): the per-frame driver's jsr 0x40137726 at 0x400272d4 (the
+| LFOs, once a frame for every track, seven arguments on the stack). Here: the caller's return
+| put aside, so the arguments lie where the evaluator expects them; the evaluator; then
+| smp_lfo_fix (link.c) puts each sample voice's bank back from its target (an LFO's raw offset
+| on SAMP's word moves its low byte, the bank); d0 as the evaluator left it, the return back.
+| The caller pops the arguments itself (lea 28(%sp),%sp). The audio interrupt does not nest.
+        .globl  smp_lfo_hook
+smp_lfo_hook:
+        move.l  (%sp)+, smp_lfo_ret
+        jsr     0x40137726
+        lea     -12(%sp), %sp
+        movem.l %d0-%d1/%a0, (%sp)
+        jsr     smp_lfo_fix
+        movem.l (%sp), %d0-%d1/%a0
+        lea     12(%sp), %sp
+        move.l  smp_lfo_ret, -(%sp)
+        rts
+        .data
+        .align  4
+smp_lfo_ret:
+        .long   0
+        .text
+
+| v0.68: MACHINE SEL's left pane (csrc/sampler/msicon.c). At 0x4005b8ac, stock's
+| jsr 0x401157fc(screen, wave, 25, 36, 1): a2 the view. ms_icon_c(screen, view) draws the
+| machine's icon and answers 1, or 0 and stock's bitmap is drawn with its own arguments.
+        .globl  ms_icon_hook
+ms_icon_hook:
+        move.l  %a2, -(%sp)
+        move.l  8(%sp), -(%sp)                  | the screen (stock's first argument)
+        jsr     ms_icon_c
+        addq.l  #8, %sp
+        tst.l   %d0
+        bne.s   1f
+        jmp     0x401157fc
+1:      rts
+
+| At 0x4005b8c8, stock's pea 0x40210800 ("SYN"): the label pushed in its place. a2 the
+| view; d0/d1/a0/a1 are free here (the text call's arguments follow from d2, d3).
+        .globl  ms_label_hook
+ms_label_hook:
+        move.l  %a2, -(%sp)
+        jsr     ms_label_c
+        addq.l  #4, %sp
+        movea.l (%sp)+, %a0
+        move.l  %d0, -(%sp)
+        jmp     (%a0)

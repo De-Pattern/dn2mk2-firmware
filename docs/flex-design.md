@@ -168,3 +168,25 @@ free). v0.47 with BOUNCE was 2,080,802; FASCIA added about 15 KB (not in v0.49 u
   `rectext` (the column with the meter and CLIP, MUTE ON); `engine --fx-roundtrip` (slot 33 through
   SAVE/LOAD).
 - **Hardware only.** The mix and the sends going silent as heard, and no click at ON / OFF.
+
+## v0.66: MAIN and IN takes, made up on playback
+
+The owner and Error Kit, 2026-11-20: a FLEX take of **MAIN** played far too quiet; raising GAIN to
+make up for it clipped the take, because GAIN is applied before the recorder's int16 clamp. A take of
+**IN** (the external input, the mixer's input level at max) was as quiet.
+
+- A take of a **track** is unchanged (TRK_UNITY and TRK_HW_DB, v0.65: 12 dB).
+- A FLEX take (GAIN set, REC_GAIN not 0) of **IN or MAIN** (rsrc 0 / 1) is recorded as it is, and the
+  recorder sets bit 15 (`MAIN_MARK`) of its buffer entry's steps word (`program.recorder`, buf_dest).
+- `start()`'s buf_entry keeps the mark apart, masks the steps to 0x7FFF and MAXes them with 1, then
+  ORs the mark back into the voice's steps, so a take's `sla` (negative: a take) carries it. `tempo()`
+  masks the steps to 0x7FFF: the mark never reaches the step maths.
+- `main_makeup`: a voice whose `sla` is negative and carries the mark plays at +`MAIN_PLAY_DB`
+  (12 dB), on ONESHOT/GRID/REPITCH/FLEX (`render`) and STRETCH (`render_stretch`, which now reads LEV
+  through C['tmp'] as `render` does). A retrigger renders twice: C['lev'] is never changed.
+- One constant (`MAIN_PLAY_DB`): the owner heard MAIN needing close to +24 on the unit; +12 ships
+  first, to be checked on hardware. Raise the constant, never REC GAIN (that clips).
+- Gate: runner part `mainmark` (`sharc_waverider_m5.step_mainmark`): MAIN and IN takes marked, their
+  frames the source's (not boosted), each playing x 3.981 its unmarked self within 0.1 % on both
+  readers; negative controls: a TRK take and a plain recording of MAIN unmarked, as themselves.
+- Known: a MAIN or IN take **saved** as a sample loses the mark, so it plays 12 dB under the live take.

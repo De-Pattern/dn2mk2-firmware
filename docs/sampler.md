@@ -106,6 +106,22 @@ part that plays solid, LOOP's point marked in the loop modes, GRID's slices tick
   the track's AMP envelope, as on the DT2 (its manual: "constrained by the AMP page
   envelope parameters HLD and DEC").
 
+## MON (v0.59)
+
+The RECORDER's knob C (niko_24956: "a monitor switch to choose if input src can be heard or not
+while recording"; the DT2's MON, which is only for SRC IN too). With MON ON and SRC IN, the input
+is heard through the main out while the recorder is armed or recording, at unity, as it is
+recorded (EXT MIX's own input level unchanged and still adding its share). MAIN and the tracks
+are heard anyway, so MON leaves them alone. Not saved; OFF at power-on. FLEX REC has its own page
+and never sets it.
+
+How: `rec_mon` (rec.c) rides on every recorder command as bit 30 of the channel word
+(`SM.MON_BIT`); the DSP keeps it at `SM.REC_MON` (REC_GAIN's gap) from the recorder's own
+commands only (v0.39's rule); `pvmix`, at the master mix call, after the MAIN tap, adds
+`IN_BUF` (32 floats L, then R) to `MIX_BUF` when REC_MON, rsrc 0 and rst 1 or 2.
+Checked by `test_mon`, the SHARC runner's `pvmix` (seven MON cases), the `recorder` step (C on
+and off, the bit in the next command) and `rectext` (the label inside its corner in every state).
+
 ## Page 3: the RECORDER (v0.15..v0.21; v0.22 below)
 
 The third SYN page of every sample machine, laid out as the DT2's RECORDER (its manual
@@ -115,7 +131,7 @@ The third SYN page of every sample machine, laid out as the DT2's RECORDER (its 
 |---|---|---|
 | A | **SRC** | IN, MAIN, TRK1..TRK16, with the channel under it |
 | B | **CHAN** | MONO L+R, MONO L, MONO R (the DN2's tracks are mono: no STEREO) |
-| C | **RECORD NOW** | the dotted box: **YES** records at once; YES again stops |
+| C | **RECORD NOW** / **MON** | the dotted box: **YES** records at once; YES again stops. v0.59: the knob is MON (OFF / ON), "MON" in the box's top right when on |
 | D | **THRES** | 0..120, ticked on the meter |
 | E | **DEST** | SAMP 124..127 (the DT2 has MON here; the DN2 monitors its inputs itself) |
 | F | **R.LEN** | MAX (21.8 s, the slot) or 1..127 sixteenth steps at the tempo |
@@ -782,3 +798,37 @@ Its SYN page: TUNE, PLAY, (empty), **BUF** (1..8; record 244, PERC's slot 35, fr
 sample machines), STRT, LEN, (empty), LEV. One detent a choice on PLAY as on the others
 (`fmt.c` takes a machine's row from `SMP_IDX`, as page.c does: the seven names are no longer
 contiguous types, 8..13 and 17, and every table that was indexed by `type - 8` goes through it).
+
+## v0.62: the SLICE editor (impbox's requests)
+
+impbox (Discord, 2026-11-10) asked for four things in EDIT SLICE POINTS; `slice.c` and `link.c`.
+
+- **Live edits.** A slice's key plays the edit without YES: 0.2 s after the knobs rest
+  (`live_at`, 300 UI ticks), `edit_poll` sends the table with `smp_slices_set`
+  (`slc_live_sends` counts them). YES / NO still close the editor as before.
+- **Playing a slice selects it.** A note on a voice of the editor's track whose SLCE is NOTE
+  (below 2) picks slice `(note - 24) mod n`, the DSP's own pick (`slc_follows`). The note is read
+  from the frame (CTL_FRAME), so the keyboard, the trig keys and the sequencer all count. Limit:
+  the same note again on the same voice is not seen as new, so it does not re-pick.
+- **Finer zoom.** ZOOM now goes down to a view of 128 frames (`zmax()`), past v0.23's 32x. When
+  the view is 8,192 frames or fewer, the frames themselves are read from the +Drive
+  (`smp_frames_read`: int16 only, only while the link is idle, never a recording; the FINE buffer
+  at mirror + 0x79000, below META) and drawn signed, min and max a column (`slc_fv_lo`/`hi`). The
+  read happens in `edit_poll`, never while drawing; until it lands the 1,024-column picture is
+  drawn as before.
+- **Zero crossings.** FUNC + turning E (START) or H (END) moves the point to the nearest frame
+  whose sign differs from the one before it, within 512 frames, inside the slice's neighbours
+  (`snap_zero`, `slc_snaps`). Without FUNC, E and H move as before.
+- **CREATE SLICE GRID, FUNC + E** (Wolljamin, Discord 2026-11-19): SLICES jumps through 2, 4, 8,
+  16, 32, 64, a detent a jump; from a count between two stops, to the next one. E alone still moves
+  one at a time (`slc_grid_jumps` counts the jumps).
+
+**Gate:** `slicefine` (`scripts/emu_slicefine.py`, a link16 scenario with the +Drive played by
+Python: a 100-frame-period tone, 120,000 frames, 4 slices): the editor opens on the four slices;
+a change is not sent while turning, and is sent once 0.2 s after, the DSP's and the +Drive's table
+then the editor's; FUNC + END lands on a zero crossing (the next slice's start with it), END alone
+does not snap; the deepest zoom reads its own frames and each column is the sample's lowest and
+highest there, zoom 0 reads nothing; a note on the track's voice picks `(note - 24) mod 4`, another
+track's note or a fixed SLCE picks nothing; NO closes with the table kept, on the +Drive too;
+in CREATE SLICE GRID, FUNC + E goes 13 → 16 → 32 → 16 → 8 → 4 → 2 → 2 and five detents to 64,
+while E alone moves one (the negative control).

@@ -23,22 +23,27 @@ Usage: emu_fine_swap.py --build out/v048.syx [--json OUT]"""
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import os
 import pathlib
 import struct
 import sys
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "src"))
 
-SNAP = str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap")
+SNAP = str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap")
 KIT, STRIDE = 0x800052A0, 1163
-UI_TRACK = 0x42431A6C
-REC = lambda i: 0x401F7F94 + 60 * i            # noqa: E731
-ENT = lambda i: 0x4243325C + 68 * i            # noqa: E731
+UI_TRACK = A(0x42431A6C)
+REC = lambda i: A(0x401F7F94) + 60 * i            # noqa: E731
+ENT = lambda i: A(0x4243325C) + 68 * i            # noqa: E731
 IDS = (239, 258, 257)                           # STRT, LEN, LOOP
 SLOTS = {239: 26, 258: 45, 257: 44}
 FREQ = 36
@@ -72,7 +77,8 @@ def main() -> int:
     m.apply(differences(stock, sec3))
     for va, blob in platform.runtime(sec3):
         m.write(va, blob)
-    for pg in range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000):
+    for pg in [*range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000),   # (v0.65: and the banks' RAM)
+            *range(SMx.BANK_RAM, SMx.BANK_RAM + SMx.BANK_RAM_BYTES + 0xFFFFF & ~0xFFFFF, 0x100000)]:
         try:
             m.uc.mem_map(pg, 0x100000, UC_PROT_ALL)
         except UcError:
@@ -116,7 +122,7 @@ def main() -> int:
     lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
 
     def commit(t, ty):                               # MACHINE SEL's commit as the UI makes it: through
-        owner = guest(m, 0x4018A97A)                 # its call at 0x4005bba0, which the mod points at
+        owner = guest(m, A(0x4018A97A))                 # its call at 0x4005bba0, which the mod points at
         guest(m, lay["smp_machine_commit"], owner + 0xF4, t, ty, 1, 1)   # smp_machine_commit (rec.c)
         panel.settle(5_000_000)
 

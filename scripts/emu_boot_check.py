@@ -45,10 +45,16 @@ from emulib import quickboot                                  # noqa: E402
 from unicorn import UC_HOOK_CODE                              # noqa: E402
 from unicorn.m68k_const import UC_M68K_REG_A2, UC_M68K_REG_D3  # noqa: E402
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+from dnfw.osport.os import A, audit_unicorn, current as os_current, found  # noqa: E402
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
+
+audit_unicorn()
+
 ROOT = pathlib.Path("/mnt/d/01_Code/Z_Personal/dn2_firmware")
-SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
-CACHE = ROOT / "out/boot-check/control.json"
-REPORTER = 0x4011EA6A
+SYX = ROOT / f"00_Resources/00_Firmware/Digitone_II_OS{_OSV}_dist/Digitone_II_OS{_OSV}.syx"
+CACHE = ROOT / f"out/boot-check/control{'' if os_current() == '1.11' else '-' + os_current()}.json"
+REPORTER = A(0x4011EA6A)          # the firmware's fault reporter (per OS: dnfw.osport)
 ANIZ_LIMIT = 700_000_000                 # v0.37: past the intro's first frame (measured: shown before 700M)
 
 # **The control is only a control while the emulator it was measured on stays
@@ -171,8 +177,9 @@ def main() -> int:
                         "stamp shows is checked against his (s!Rwa²'s), and every frame must show")
     args = p.parse_args()
 
-    profile = symbols.resolve(open(stock_path(), "rb").read())
-    frame_at = profile.panel_diff
+    stock_img = open(stock_path(), "rb").read()
+    profile = symbols.resolve(stock_img)
+    frame_at = found(profile.panel_diff, stock_img)     # v0.73: found in this OS's own image
 
     base = control(args.limit, frame_at, args.refresh_control)
     print(f"  control (stock 1.11): {base['frames']} frame(s) in {base['ran']:,} "

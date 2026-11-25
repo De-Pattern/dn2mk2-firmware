@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from dnfw.mnm import bench, ddrw, dens, rom, sid, vo6, wave
+from dnfw.mnm import bench, ddrw, dens, fm, rom, sid, vo6, wave
 from dnfw.mnm import core as C
 
-MACHINES = {"WAVE": wave, "SID": sid, "DENS": dens, "DDRW": ddrw, "VO6": vo6}
+MACHINES = {"WAVE": wave, "SID": sid, "DENS": dens, "DDRW": ddrw, "VO6": vo6,
+            "FMSTAT": fm.Stat, "FMPAR": fm.Par, "FMDYN": fm.Dyn}       # v0.59: FM+
 pytestmark = pytest.mark.skipif(not (rom.available() and bench.GOLDEN.is_dir()),
                                 reason="needs the owner's Monomachine OS and the golden runs")
 
@@ -43,7 +44,7 @@ def _trimmed(M) -> bool:
     if M in (ddrw, dens):
         return dpro.OS != 2
     if M is vo6:
-        return not vo6.SER_EXACT
+        return not vo6.SER_EXACT or not vo6.FLOOR_EXACT
     return False
 
 
@@ -59,7 +60,32 @@ def test_against_the_monomachine(name, case):
         assert r["ok"], {k: v for k, v in r.items() if k != "ok"}
         return
     r = bench.compare(ours, theirs)
+    if _chaotic(M, g):
+        # v0.59: FM+'s self feedback at 32 and above (dnfw.mnm.fm): within 60 dB, or held by its
+        # level and spectrum as the trimmed machines are
+        assert r["snr_db"] >= 60.0 or bench.likeness(ours, theirs)["ok"], r
+        return
     assert r["snr_db"] >= 60.0 or r["rms_err"] < 2.0 ** -20, r
+
+
+def _chaotic(M, g) -> bool:
+    k = getattr(M, "FB_KNOB", None)
+    return k is not None and any(e[1] and e[1][k] >= 32 for e in g["events"])
+
+
+def test_fm_chaotic_cases_are_only_the_self_feedback_ones():
+    """the negative control for the FM+ rule: the likeness test refuses a chaotic case 6 dB
+    down, and a case without self feedback (FM+ PAR's all; STAT's, DYN's at FB 0) is held to
+    60 dB"""
+    for name in ("FMSTAT", "FMDYN"):
+        M = MACHINES[name]
+        cases = bench.golden(name)["cases"]
+        hot = [c for c in cases if _chaotic(M, c)]
+        cold = [c for c in cases if not _chaotic(M, c)]
+        assert hot and cold
+        ours, theirs = bench.run_case(M, hot[-1])
+        assert not bench.likeness([v * 0.5 for v in ours], theirs)["ok"]
+    assert not any(_chaotic(fm.Par, c) for c in bench.golden("FMPAR")["cases"])
 
 
 @pytest.mark.parametrize("name", [n for n, M in MACHINES.items() if _trimmed(M)])
@@ -110,3 +136,63 @@ def test_digibank_room():
     mnm = K.TABLE_LAYOUT["mnm"][0]
     lo, hi = mnm + C.DIGI_OFF, mnm + C.DIGI_OFF + 4 * C.DIGI_WORDS
     assert lo >= K.TABLE_LAYOUT["_end"][0] and hi <= 0x100000, (hex(lo), hex(hi))
+
+
+# v0.56 (owner: "time in ddrw is not working ... BR1 and BR2 controls are 99% inaudible";
+# docs/ddrw-fix.md): the DN2's host maps DDRW's BR and TIME; the Monomachine's model and its
+# references (above) are untouched (gl 0 there: g = 1.0)
+def _ddrw_host(inputs):
+    import struct
+    from dnfw.md import core as K
+    from dnfw.mnm import machines as MM
+    b = bench.Bench(ddrw)                                   # its memory and tables
+    L = b.L.md                                              # the layout the DSP's host is given
+    p = b._prog()
+    for k, x in enumerate(inputs):
+        p.iconst(0, x)
+        p.sti(K.INP0 + k, 3, 0)
+    MM._host_ddrw(p, L)
+    f = lambda a: struct.unpack("<f", struct.pack("<I", b.mem.get(a) & 0xFFFFFFFF))[0]   # noqa: E731
+    knobs = [round(f(L.state + 4 * (K.W0 + C.P0 + k)) * 128) for k in range(8)]
+    return knobs, f(L.mnm.W["gl"])
+
+
+@pytest.mark.parametrize("br,want", [(0, 0), (1, 64), (64, 95), (127, 127)])
+def test_ddrw_br_mapped(br, want):
+    knobs, _ = _ddrw_host([5 << 7, 64 << 7, 9 << 7, 0, br << 7, 3 << 7, br << 7, 64 << 7])
+    assert knobs == [5, 64, 9, 0, want, 3, want, 64]       # BR1, BR2 mapped; the rest as sent
+
+
+@pytest.mark.parametrize("t", [0, 16, 64, 127])
+def test_ddrw_time_glide(t):
+    from dnfw.mnm import machines as MM
+    _, g = _ddrw_host([0, 0, 0, t << 7, 0, 0, 0, 64 << 7])
+    want = 0.0 if t == 0 else (t + 1) / (MM.DDRW_RATE * (1 + MM.DDRW_FADE * t * t))
+    assert g == pytest.approx(want, rel=1e-4)
+
+
+def test_ddrw_time_fades_for_its_time():
+    """a WAV1 change mid-note at TIME 16 (g as the host gives it) differs from the instant change
+    for about 30 ms (1 + c 16^2 half-renders); the model's own (no host: gl 0) is instant"""
+    import math
+    import struct
+    from dnfw.mnm import machines as MM
+    c = bench.golden("DDRW")["cases"][0]
+
+    def render(t, glide, n=160):
+        b = bench.Bench(ddrw)
+        out = []
+        for blk in range(n):
+            if glide:
+                g = (t + 1) / (MM.DDRW_RATE * (1 + MM.DDRW_FADE * t * t))
+                b.mem.put(b.L.W["gl"], struct.unpack("<I", struct.pack("<f", g))[0])
+            A, F = c["A"][min(blk, 31)], c["F"][min(blk, 31)]
+            knobs = [40 if blk >= 10 else 0, 0, 0, t, 0, 0, 0, 64]
+            out += b.block(A, F, knobs, blk == 0) if blk in (0, 10) else b.block(A, F)
+        return out
+    inst, slow, model = render(0, False), render(16, True), render(16, False)
+    d = [math.sqrt(sum((x - y) ** 2 for x, y in zip(slow[16 * k:16 * k + 16], inst[16 * k:16 * k + 16])) / 16)
+         for k in range(160)]
+    last = max(k for k in range(160) if d[k] > 1e-3)
+    assert 60 <= last - 10 <= 120                           # 1 + 0.372 x 256 = 96 half-renders
+    assert model == inst                                    # the Monomachine's own: TIME inaudible

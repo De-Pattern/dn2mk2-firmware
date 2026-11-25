@@ -55,7 +55,7 @@ static int mnm_kn(int j, int v)
 
 static int mnm_ch(int n, int k)
 {
-    return n == MNM_PCH ? mnm_pch_idx[k > 127 ? 127 : k] : (k * n) >> 7;
+    return mnm_choice(n, k);                    /* v0.60: wr_gen.h's (PCH, FM+'s listed) */
 }
 
 static int mnm_rep(int j, int n, int c)        /* the value (coarse) in the middle of choice C */
@@ -107,6 +107,38 @@ static int mnm_tune_step(int old, int dir)
     return v < 0 ? old : v << 8;                /* at the end already: as it is */
 }
 
+/* v0.66 (owner, 2026-11-20: "i would like it to jump when func is held"): FUNC + turn on FM+
+ * DYN's continuous frequencies jumps to the next whole ratio the knob's way, as TUNE jumps a
+ * semitone; a plain turn stays continuous (the Monomachine's: "set continuously"). The ratio
+ * is the page's (mnm_cont_text): 1FRQ (LIN2) 2 k / 128, 2FRQ (SQR4) 4 (k / 128)^2, so the
+ * whole ratios sit at knob 0, 64, 127 (LIN2) and 0, 64, 91, 111, 127 (SQR4: 2.02 and 3.00,
+ * the nearest the knob's 128 steps reach). */
+static const unsigned char frq_lin2[] = {0, 64, 127};
+static const unsigned char frq_sqr4[] = {0, 64, 91, 111, 127};
+int mnm_frq_target(int n, int k, int dir)       /* the whole ratio's knob past K, or K */
+{
+    const unsigned char *w = n == MNM_LIN2 ? frq_lin2 : frq_sqr4;
+    int c = n == MNM_LIN2 ? (int)sizeof frq_lin2 : (int)sizeof frq_sqr4;
+    if (dir > 0) {
+        for (int i = 0; i < c; i++)
+            if (w[i] > k)
+                return w[i];
+    } else
+        for (int i = c - 1; i >= 0; i--)
+            if (w[i] < k)
+                return w[i];
+    return k;
+}
+
+static int mnm_frq_step(int j, int n, int old, int dir)
+{
+    int k = mnm_kn(j, old >> 8), t = mnm_frq_target(n, k, dir);
+    if (t == k)
+        return old;                             /* at the end already: as it is */
+    int v = mnm_val_for(j, k, t, dir);
+    return v < 0 ? old : v << 8;
+}
+
 static int fq_click __attribute__((section(".data"))) = 0;      /* v0.32: a FUNC click (+1/-1), else 0 */
 
 static int mnm_quant(int mi, int slot, int old, int value)
@@ -114,9 +146,9 @@ static int mnm_quant(int mi, int slot, int old, int value)
     int j = 0;
     while (j < 8 && mnm_slot[j] != slot)
         j++;
-    if (j == 8 || !mnm_choices[mi][j])
-        return value;                           /* not one of the eight, or a knob */
-    int n = mnm_choices[mi][j], count = n == MNM_PCH ? mnm_pch_idx[127] + 1 : n;
+    if (j == 8 || !mnm_choices[mi][j] || mnm_cont(mnm_choices[mi][j]))
+        return value;                           /* not one of the eight, or a knob (v0.60: DYN's FRQs too) */
+    int n = mnm_choices[mi][j], count = mnm_count(n);
     int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
     if (nc == oc)
         return value;
@@ -162,7 +194,7 @@ extern int smp_func_held;
 extern int smp_knob_d;
 extern u32 smp_knob_at;
 #define KNOB_FRESH 150u                         /* 100 ms: the turn this write comes from */
-enum { F_OFF, F_KEEP, F_CHOICE, F_NONE, F_TUNE };
+enum { F_OFF, F_KEEP, F_CHOICE, F_NONE, F_TUNE, F_FRQ };
 #define OWN_REC_FIRST 238u                      /* our records (dnfw.perc / dnfw.sampler machines) */
 #define OWN_REC_LAST 260u
 
@@ -184,6 +216,8 @@ static int func_kind(u8 *s, int slot, u32 id)
             if (mnm_slot[j] == slot) {
                 if (j == MNM_TUNE_J && mnm_labels[mi][j][0] == 'T' && mnm_labels[mi][j][1] == 'U')
                     return F_TUNE;              /* v0.47: by semitones (the owner) */
+                if (mnm_choices[mi][j] && mnm_cont(mnm_choices[mi][j]))
+                    return F_FRQ;               /* v0.66: FM+ DYN's 1FRQ / 2FRQ by whole ratios */
                 return mnm_choices[mi][j] ? F_CHOICE : F_NONE;
             }
         return F_NONE;
@@ -204,14 +238,30 @@ static int func_kind(u8 *s, int slot, u32 id)
 
 /* from the setter's write (hooks.S, smp_quant_hook): S = the sound, SLOT, VALUE the
  * value about to be written (coarse << 8 | fine), ID its record -> the value to write */
+int smp_samp_direct __attribute__((section(".data"))) = 0;   /* v0.55: smp_set_samp's own write */
 int smp_quant(u8 *s, int slot, int value, u32 id)
 {
+    if (smp_samp_direct && slot == SMP_SAMP_SLOT) {     /* v0.55: smp_set_samp's own write */
+        extern u32 smp_samp_turned;
+        smp_samp_turned = *(volatile u32 *)0x4058E8D4u;    /* (as below, for every SAMP write) */
+        if (smp_samp_direct & 0x10000)                     /* v0.65: a whole word (its bank) */
+            return smp_samp_direct & 0xFFFF;
+        return smp_samp_direct > 0 ? smp_samp_direct << 8 : value;
+    }
     int fk = func_kind(s, slot, id);
     int old0 = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
     if (fk == F_NONE)
         return old0;
     if (fk == F_TUNE)
         return mnm_tune_step(old0, smp_knob_d > 0 ? 1 : -1);
+    if (fk == F_FRQ) {                          /* v0.66: FM+ DYN's 1FRQ / 2FRQ */
+        int mi = mnm_index((signed char)s[SOUND_TYPE] - 4), j = 0;
+        while (j < 8 && mnm_slot[j] != slot)
+            j++;
+        if (mi < 0 || j == 8)
+            return old0;
+        return mnm_frq_step(j, mnm_choices[mi][j], old0, smp_knob_d > 0 ? 1 : -1);
+    }
     if (fk == F_CHOICE) {                       /* one choice a click, the knob's way: a */
         fq_click = smp_knob_d > 0 ? 1 : -1;     /* detent's worth past the old value, */
         int oc0 = old0 >> 8;                    /* each table's own step below */
@@ -265,6 +315,19 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
         extern u32 smp_samp_turned;
         smp_samp_turned = *(volatile u32 *)0x4058E8D4u;
     }
+    if (slot == SMP_SAMP_SLOT && type < SMP_N0 && smp_knob_d
+        && *(volatile u32 *)0x4058E8D4u - smp_knob_at <= KNOB_FRESH) {
+        /* v0.55: past SAMP 127 the list goes on to the eight FLEX buffers, turned by the knob's
+         * own steps. v0.65 (docs/banks.md): one run of rows, OFF, A001..A127, B001.., C.., D..,
+         * then the FLEX buffers (smp_page.c smp_row_step: banks not in use skipped); the word
+         * written carries the row's bank in its low byte */
+        extern int smp_word_row(unsigned int w), smp_row_step(int r, int d);
+        extern unsigned int smp_row_word(int r);
+        int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
+        return (int)smp_row_word(smp_row_step(smp_word_row((unsigned int)old), smp_knob_d));
+    }
+    /* (v0.65: any other write -- a MIDI CC, a sound or kit loaded -- is written as it comes: a CC
+     * names a slot of bank A, as before; a loaded sound keeps the bank it was saved with) */
     int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
     int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
     for (int k = 0; k < SMP_NQ; k++) {

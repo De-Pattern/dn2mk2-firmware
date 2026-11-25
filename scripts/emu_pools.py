@@ -40,15 +40,20 @@ What it checks, in order (each a key of the result's "facts"):
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import struct
 
-ACTIVE = 0x405CD899
-PJ_LOAD, PJ_GET_PROJECT = 0x40042E6E, 0x4018A97A
+ACTIVE = A(0x405CD899)
+PJ_LOAD, PJ_GET_PROJECT = 0x40042E6E, A(0x4018A97A)
 SAVE_AS = 0x400402D8                    # interactiveSave's (project, slot, cb)
 STUB_OPEN, STUB_TEMP = 0x40042B92, 0x40040190      # the load's +Drive read, its temp-slot write
 NEW_SITE, NEW_AFTER = 0x40042AF0, 0x40042AFA
 STORE_SECTOR = 0x600000
 PL_SB, PL_LISTS, PL_SPAN, PL_END = 0x6D0000, 0x6D0100, 256, 0x6D0100 + 2 * 129 * 256
+BL_RANGES = ((0x6E0600, 0x6E0600 + 2 * 64 * 464), (0x6F0800, 0x6F0800 + 2 * 64 * 464))   # v0.65: the bank lists
 LIB, LIB_DATA = 0x700000, 0x700000 + 1 + 256 + 4
 
 
@@ -475,7 +480,7 @@ def run(cx):
     first = {}
     case = power_cycle(7)
     notes["7"] = {"case": case, "dsp": dsp_pool()}
-    order = list(m.read(syms["smp_l_order"], 4))
+    order = list(struct.unpack(">2H", m.read(syms["smp_l_order"], 4)))   # (v0.65: u16 global slots)
     r9 = switch(os_load, 9)
     facts["7 a power cycle: 7's pool loads (its kit's sample first); 9's change kept"] = (
         case == 9 and notes["7"]["dsp"] == {0: "KICK", 1: "SNARE", 2: "HAT", 3: "LIBX ON"}
@@ -639,7 +644,8 @@ def run(cx):
     # 12. where everything was written, and the image as v0.37 reads it ------------------------------
     written = sorted(disk)
     outside = [hex(s) for s in written if not (STORE_SECTOR <= s < STORE_SECTOR + 1 + SM.POOL_BYTES // 512
-                                               or PL_SB <= s < PL_END or LIB <= s < LIB_DATA + 64)]
+                                               or PL_SB <= s < PL_END or LIB <= s < LIB_DATA + 64
+                                               or any(a <= s < b for a, b in BL_RANGES))]
     hdr = struct.unpack(">5I", disk[STORE_SECTOR][:20])
     d = image_dir()
     v037 = (hdr[0] == 0x444E3251 and hdr[4] == (~hdr[0] ^ hdr[2] ^ hdr[3]) & 0xFFFFFFFF

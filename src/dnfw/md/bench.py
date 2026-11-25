@@ -134,10 +134,23 @@ def compare(ours: list[float], theirs: list[float]) -> dict:
 LIKE_LEVEL_DB, LIKE_BAND_DB = 1.0, 3.0
 
 
+# v0.72: EFM's operators with feedback (CB, HH, CY) in float (efm.EXACT): the feedback loop turns
+# a one-LSB difference into a different phase within a few hundred samples, so, like the float TRX
+# hats, they are held by level and octave-band shape; EFM's other machines still by 60 dB SNR
+EFM_FEEDBACK = ("EFM-CB", "EFM-HH", "EFM-CY")
+# v0.72: P-I's metal (RC, CC, HH: pi_rc.py), whose resonators run on trx2.wmul, float since v0.72
+PI_METAL = ("PI-RC", "PI-CC", "PI-HH")
+
+
 def float_filters(name: str) -> bool:
-    """a TRX machine whose filters run in float"""
-    from . import trx2
-    return not trx2.EXACT and name.startswith("TRX-") and name != "TRX-CP"
+    """a machine whose arithmetic runs in float and decorrelates sample for sample: a TRX machine
+    with float filters (v0.51), an EFM machine with operator feedback, or P-I's metal (v0.72)"""
+    from . import efm, trx2
+    if name in EFM_FEEDBACK:
+        return not efm.EXACT
+    if name in PI_METAL:
+        return not trx2.WMUL_EXACT
+    return (not trx2.EXACT or not trx2.WMUL_EXACT) and name.startswith("TRX-") and name != "TRX-CP"
 
 
 def likeness(ours, theirs, rate: float = 44100.0) -> dict:

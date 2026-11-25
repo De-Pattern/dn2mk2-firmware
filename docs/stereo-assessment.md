@@ -333,3 +333,55 @@ and 4 at least). Then fix each item until it passes; then the sends and CHAN STE
 
 Also (Error Kit, 2026-11-17, an idea, not for now): an FX machine on the input or another track,
 "like the Analog Heat": FLEX's routing into a track of effects, the source muted or mixed wet/dry.
+
+## The cause of v0.54-t1's silent track (2026-11-25)
+
+**Stock's pan stage ran while a stereo voice's block held ramps, not sound.** After the amp,
+stock's chain runs two gain ramp loops on each voice's block (`0x1c99ed`, `0x1c9a59`), then, at
+`0x1c9ae7..0x1c9b30`, a **pan stage**: each voice's block x an L gain ramp and x an R gain ramp
+into that voice's stereo buffer (`0x257ee8 + 0x100 v`: L 32 floats, R 32 at `+0x80`). The sends
+(`0x1c179d`) and the routing to the main bus (`0x1c1fb0`) read those buffers. v0.54-t1 measured
+the two ramps by leaving 1.0 in the block from the amp until its hook before the sum
+(`0x1c2512`), which is after the pan stage. So a stereo voice sent `gain x ramp`, a level with
+no sound in it, to the main bus and the sends, and its sample only to the per-track outputs
+(the track buffers, which is all the runner's checks looked at). That is the silent track (2),
+the clicks at each retrigger (5, a step in that level), and most likely the main bus driven so
+far by the level that nothing else was heard (4, 6). To be confirmed on the unit.
+
+**Why the runner never showed it (G12).** The pan stage reaches the stereo buffers through
+`I0 = MODIFY(I1, M4)` with the buffer's byte address in M4 and no width suffix (Type 7a, w = 0).
+The runner scaled every MODIFY's M by 4, which is right only for `(nw)` (w = 1: the same loop
+steps a pointer table with `MODIFY(I3, M6) (nw)`, M6 = 1). Its stores went to four times the
+address, so the stereo buffers were zero in every run, for stock's voices too: no run ever
+modelled the path a note is heard through. `sharc_dn2_fixups.py` G12 now adds M unscaled for a
+MODIFY with no width (and Type 7b); the buffers fill, L == R at PAN centre for a mono voice.
+
+**The fix** (`stereo.py`, `_pan_hook` at `0x1c9ad2`, after the second ramp loop and before the
+pan stage): the block becomes L = r2 (r1 LAMP) and the slot's R block R = r2 (r1 R) there, so
+the pan stage and the sum both read sound. The stereo buffer's R side is written by the hook,
+R x the R gain ramp computed as stock does (the voice's gain word at `0x254f90 + 0x38 v`, plus
+its step at `0x254f98 + 0x38 v` a sample from the second sample on), and stock's own write of
+that side (L x the R gain) goes to a scratch block for this block (the table's entry at
+`0x258eec + 8 v`; the hook before the sum puts all sixteen entries back). PAN is stock's own
+gains on each side, so it acts as balance; the sends read both sides.
+
+**Held by the runner's stereo step now:** each voice's stereo buffer after the pan stage: with
+R == L bit for bit the mono run's on every filter type (and sounding on both sides); with R
+silent the L side the mono run's and the R side silent; the table stock's after every block.
+
+**The ColdFire's part** (after the merge with v0.73):
+- **SLICE** (3): the analysis, the fine view and the zero-crossing snap read a stereo slot (the
+  louder side for the envelope and peaks; (L + R) / 2 for the frames the editor draws and snaps to).
+- **PREVIEW** (1): a stereo slot in the pool is previewed in stereo by the DSP (`pvmix`: a frame
+  a word, L to the L side, R to the R); a stereo sample on the +Drive is sent mixed down.
+- The sampler's scratch words past the 64th go after the recorder's GAIN words (`SC_OVER`):
+  the 65th, WERP's `segnext`, had lain on the recorder stage's first float since v0.40
+  (harmless: each is written and read within its own run), and the preview's new word is kept
+  from block to block.
+- **The sample program is 27 KB** with the L and R render, past its 24 KB after PERC: it is at
+  L2 `0x200b0000` (32 KB) on this branch, between the room proven on units and PERC. The first
+  build with code there: a test for the unit (every sample machine runs from it).
+
+**Still to do before a test build:** the coupled field-route step (a stereo WAV through the
+import, the link, the pool and the DSP's load; preview, a note beside an FM Tone track, slice,
+save and load), the sends heard in stereo, CHAN STEREO on the recorder, the gate.

@@ -15,9 +15,21 @@ OFF gives LEVEL and the sends back.
 
 Negative control (--break nomute): H is not turned, MUTE stays OFF: fails at 1 (and 3).
 
-Usage: emu_coupled_mute.py --build out/v052.syx [--break nomute] [--json OUT]"""
+v0.55, link 1b: ON with no take in the track's buffer leaves track 3 heard; the take's bytes then
+poked, ON mutes it (2..6). Negative control (--break notake): no take poked: fails at 1d (nothing plays a take).
+
+v0.57, links 1c..1e: with a take, ON mutes track 3 only while the FLEX track plays: not before
+(1c), while it plays (1d, 2..5; taken as playing through ms_play_force: the playing itself,
+with a real take, is emu_coupled_flex --pool's M1..M3), and not after (1e).
+Negative control (--break noplay): the FLEX track never playing: fails at 1d.
+
+Usage: emu_coupled_mute.py --build out/v052.syx [--break nomute|notake|noplay] [--json OUT]"""
 
 from __future__ import annotations
+
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
 
 import argparse
 import json
@@ -30,12 +42,13 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from emu_coupled import CF_FRAME, Coupled                       # noqa: E402
 from emu_coupled_flex import install_smoother_model             # noqa: E402
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 KIT, STRIDE = 0x800052A0, 1163
 FLEX = 17
 T, S = 1, 2                              # the FLEX track, its SRC's track (TRK3)
 SLOT_TRACK = 0x80005308
-KB_ON = 0x42431A9C
+KB_ON = A(0x42431A9C)
 FX_SRC, FX_MUTE = 0, 6
 SENDS = (86, 87, 88)
 
@@ -44,9 +57,9 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
     p.add_argument("--layout", default=str(HERE.parent / "src/dnfw/mods/waverider_code.json"))
-    p.add_argument("--stock", default=str(HERE.parent.parent / "Digitone_II_OS1.11.syx"))
-    p.add_argument("--snapshot", default=str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
-    p.add_argument("--break", dest="brk", default=None, choices=("nomute",))
+    p.add_argument("--stock", default=str(HERE.parent.parent / f"Digitone_II_OS{_OSV}.syx"))
+    p.add_argument("--snapshot", default=str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
+    p.add_argument("--break", dest="brk", default=None, choices=("nomute", "notake", "noplay"))
     p.add_argument("--json", default=None)
     a = p.parse_args()
     lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
@@ -90,7 +103,7 @@ def main() -> int:
 
     kit = c.long(KIT)
     snd = kit + 52 + STRIDE * T
-    owner = c.call(0x4018A97A)[0]
+    owner = c.call(A(0x4018A97A))[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, T, FLEX, 1, 1)
     c.periods(2)
     c.call(lay["fx_set"], T, FX_SRC, 2 + S)
@@ -123,6 +136,9 @@ def main() -> int:
     def word(fr, off):
         return struct.unpack(">H", fr[off:off + 2])[0]
 
+    def s_voices(g):
+        return [v for v in range(16) if g["voices"][v]["track"] == S]
+
     def note(mute, n=64):
         if a.brk != "nomute" or not mute:
             c.call(lay["fx_set"], T, FX_MUTE, 1 if mute else 0)
@@ -142,10 +158,50 @@ def main() -> int:
         c.periods(30)
         return got
 
-    off1, on, off2 = note(False), note(True), note(False)
-
-    def s_voices(g):
-        return [v for v in range(16) if g["voices"][v]["track"] == S]
+    # v0.55 (owner: muted at once left a gap; "trigger the mute when the rec trig ends"): ON with no
+    # take in the track's buffer leaves track 3 heard; once the buffer holds a take (its bytes
+    # poked: the take itself is emu_coupled_flex's), ON mutes it
+    # v0.57 (NiKo: "shouldn't it wait for the PLEN to cycle"; "you can't simply unmute them"):
+    # with a take, ON mutes track 3 only while track 2 (FLEX) PLAYS it -- a trig on its step 1,
+    # the sequencer running -- and gives it back when the FLEX track stops
+    off1, pre = note(False), note(True)
+    if a.brk != "notake":
+        c.poke(lay["smp_dir_ok"], struct.pack(">i", 1))         # (rt_poll keeps rt_on as the directory says)
+        c.poke(lay["rt_on"], struct.pack(">i", 1))
+        c.poke(lay["rt_rbytes"], struct.pack(">16I", *([4096] * 16)))
+        c.periods(8)
+    idle = note(True)                                            # a take, FLEX not playing
+    idle_l = [(v, g["voices"][v]["level"]) for g in idle[-24:] for v in s_voices(g)]
+    first_l = [(v, g["voices"][v]["level"]) for g in off1[-24:] for v in s_voices(g)]
+    taken = c.long(lay["rt_on"])
+    link("1c. v0.57: MUTE ON with a take (rt_on), the FLEX track not playing: track 3 still heard",
+         (taken == 1 or a.brk == "notake") and all(g["mask"] == 0 for g in idle) and idle_l and first_l
+         and abs(idle_l[-1][1] - first_l[-1][1]) <= 0.03 * first_l[-1][1],
+         f"masks {sorted({g['mask'] for g in idle})}, LEVEL {idle_l[-1:]} (unmuted {first_l[-1:]})")
+    # the FLEX track taken as playing (ms_play_force: the playing itself, with a real take, is
+    # emu_coupled_flex --pool's links M1..M3); then not playing: track 3 back, MUTE still ON
+    if a.brk != "noplay":
+        c.poke(lay["ms_play_force"], struct.pack(">I", 1 << T))
+    on = note(True)
+    plays = c.long(lay["ms_playing_mask"])
+    rep["numbers"]["playing_mask"] = plays
+    link("1d. v0.57: the FLEX track playing: ms_playing_mask names it", plays == 1 << T,
+         f"ms_playing_mask {plays:#x}")
+    c.poke(lay["ms_play_force"], struct.pack(">I", 0))
+    c.periods(400)                                               # MS_HOLD (300) passed
+    stopped = note(True)
+    st_l = [(v, g["voices"][v]["level"]) for g in stopped[-24:] for v in s_voices(g)]
+    link("1e. v0.57: the FLEX track no longer playing (past the hold): track 3 heard again, MUTE still ON",
+         all(g["mask"] == 0 for g in stopped[-24:]) and st_l
+         and abs(st_l[-1][1] - first_l[-1][1]) <= 0.03 * first_l[-1][1],
+         f"masks {sorted({g['mask'] for g in stopped[-24:]})}, LEVEL {st_l[-1:]}")
+    off2 = note(False)
+    pre_l = [(v, g["voices"][v]["level"]) for g in pre[-24:] for v in s_voices(g)]
+    rep["numbers"]["no_take"] = {"masks": sorted({g["mask"] for g in pre}), "levels": pre_l[-3:]}
+    link("1b. v0.55: MUTE ON with no take in the buffer: track 3 still heard (mask 0, its LEVEL as unmuted)",
+         all(g["mask"] == 0 for g in pre) and pre_l and first_l and pre_l[-1][1] > 0
+         and abs(pre_l[-1][1] - first_l[-1][1]) <= 0.03 * first_l[-1][1],
+         f"masks {rep['numbers']['no_take']['masks']}, LEVEL {pre_l[-1:]} (unmuted {first_l[-1:]})")
 
     def peak(run):
         return max((p["voices"][v]["peak"] for p in run for v in s_voices(p)), default=0.0)

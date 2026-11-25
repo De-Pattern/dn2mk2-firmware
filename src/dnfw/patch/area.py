@@ -36,6 +36,8 @@ from dataclasses import dataclass
 MAGIC = b"DNFW"
 CODE = b"CODE"
 AREA_VA = 0x4030B980            # the end of stock 1.11 MAIN OS
+if __import__("os").environ.get("DN2_OS", "1.11") == "1.12":
+    AREA_VA = 0x4030C980        # 1.12's end (docs/os112-port.md): a run that reads a ported build
 RUNTIME_VA = 0x46710000         # where data chunks run, above BSS
 
 

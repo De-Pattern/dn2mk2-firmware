@@ -40,6 +40,10 @@ no longer being delivered, or on more than one frame in twenty overrunning its b
 """
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import os
@@ -48,12 +52,13 @@ import random
 import struct
 import subprocess
 import sys
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-KIT = 0x4210C08C
+KIT = 0x4210C08C   # 1.11: goes into steps, which emu_waverider_menu translates
 SOUND = 1163
 # v0.38 (blskk: "arpeggiator, note edit and sampler make the digitone crash"): the stock arp,
 # KEYBOARD and its chord memories (what NOTE EDIT stores) on the sample machines. The arp's
@@ -63,7 +68,7 @@ SLCE_AT = 0x6C                          # SLCE's value (record 257, slot 44): 0 
 # the snapshot's project settings (the getter at 0x40194212, read in the emulator): +29 the
 # KEYBOARD's scale, +30 its MODE when +33 bit 0 is clear (5: the chord memories), and the
 # chord memories, one a [TRIG] key: 16 notes at +35 + 16 k, ended by -1 (0x4003c17c)
-PROJ = 0x412366CC
+PROJ = 0x412366CC   # 1.11: goes into steps, which emu_waverider_menu translates
 KB_MODE, KB_TRACKWISE, CHORDS = 30, 33, 35
 BIG_CHORD = bytes([0, 3, 7, 10, 12, 15, 19, 22, 24, 27, 31, 34, 0xFF, 0xFF, 0xFF, 0xFF])    # 12 notes
 
@@ -233,7 +238,7 @@ def main(argv=None) -> int:
     p.add_argument("seeds", help="a range A-B or a list a,b,c")
     p.add_argument("--steps", type=int, default=60)
     p.add_argument("--venv", default=str(ROOT.parent / "digikit/.venv/bin/python"))
-    p.add_argument("--snapshot", default=str(ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
+    p.add_argument("--snapshot", default=str(ROOT.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
     p.add_argument("--json", type=pathlib.Path)
     p.add_argument("--isr-frame", type=int, default=75_000,
                    help="v0.34: the audio interrupt fires on its own every F instructions of the UI's "

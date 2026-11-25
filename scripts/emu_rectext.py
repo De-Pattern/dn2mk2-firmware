@@ -7,6 +7,10 @@ their 32-pixel column. v0.51: FLEX REC SETUP's state column inside its 21 pixels
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import os
@@ -24,12 +28,12 @@ from emulib.machine import Machine                             # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 SRC, STATE = 0x80003AF0, 0x8000DE60
-OWNER, FRAMES, TEMPO_AT = 0x80005308, 0x4058E8D4, 0x80005E60 + 216
+OWNER, FRAMES, TEMPO_AT = 0x80005308, A(0x4058E8D4), 0x80005E60 + 216
 KIT, SOUND_STRIDE = 0x800052A0, 1163
-SYNC, UNDO, BITMAP_CLEAR = 0x4002549C, 0x400DAF44, 0x400DB052
-BUILD, APPLY = 0x400D85E8, 0x400DB092
-LOAD, SAVE, CLEAR = 0x400DE51E, 0x400DE718, 0x4003D14E
-SEQ_PLAYING, SEQ_PATTERN, TRACK_CUR = 0x42C5A918, 0x42C5A9A0, 0x42C5A984
+SYNC, UNDO, BITMAP_CLEAR = 0x4002549C, A(0x400DAF44), A(0x400DB052)
+BUILD, APPLY = A(0x400D85E8), A(0x400DB092)
+LOAD, SAVE, CLEAR = A(0x400DE51E), A(0x400DE718), 0x4003D14E
+SEQ_PLAYING, SEQ_PATTERN, TRACK_CUR = A(0x42C5A918), A(0x42C5A9A0), A(0x42C5A984)
 PAT_LENGTH, PAT_MODE = 122196, 122201
 REC, RECS, INDEX, TABLE_BYTES = 258, 80, 20640, 22256 + 2048
 LIST_BYTES = 20 + 202 * 8
@@ -156,6 +160,7 @@ def main() -> int:
     ]
     border0, bad = None, {}
     for name, v in states:
+        v = dict(v)                                       # (v0.59: kept for MON's pass below)
         heard = v.pop("heard", True)
         px = show("rec_" + name, heard, **v)
         border = {p for p in px if on_border(*p)}
@@ -167,6 +172,30 @@ def main() -> int:
             bad[name] = (out[:6], len(border ^ border0))
     check("every centre-box message of the RECORDER stays inside its box (no pixel in the gutters, "
           "the dotted border untouched) in all " + str(len(states)) + " states", not bad, bad)
+
+    # v0.59 MON (C): "MON" in the box's top right corner (x 82..96, y 43..47: screen rows 16..20)
+    # when on, in every state: drawn there and only there, over nothing any state draws there, the
+    # box and the gutters as above; off (every state above) nothing there. (The label's first
+    # column is x 82, inside the box: BX0 29 < 82, the border at 97 untouched.)
+    MX0, MX1, MR0, MR1 = 82, 96, 63 - 47, 63 - 43
+    mon_bad, mon_seen, base = {}, 0, {}
+    for name, v in states:
+        v = dict(v)
+        heard = v.pop("heard", True)
+        off = show("mon0_" + name, heard, rec_mon=0, **v)
+        on = show("mon1_" + name, heard, rec_mon=1, **v)
+        added = on - off
+        corner = {q for q in off if MX0 <= q[0] <= MX1 and MR0 <= q[1] <= MR1}
+        outside = sorted(q for q in added if not (MX0 <= q[0] <= MX1 and MR0 <= q[1] <= MR1))
+        mon_seen += bool(added)
+        border = {q for q in on if on_border(*q)}
+        if not added or outside or corner or (off - on) or border != border0:
+            mon_bad[name] = (len(added), outside[:4], sorted(corner)[:4], len(off - on))
+        base[name] = len(added)
+    put32(lay["rec_mon"], 0)
+    check("v0.59: MON drawn in the box's top right corner in all " + str(len(states)) + " states, over "
+          "nothing else, the border untouched; nothing there with MON off", not mon_bad and mon_seen == len(states),
+          mon_bad or base)
 
     # R.LEN (x 47, its 32-pixel column 31..62): MAX and step counts on one line
     rows, cols = {}, {}

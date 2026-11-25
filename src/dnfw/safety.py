@@ -52,6 +52,19 @@ STOCK_111 = {
 }
 ORDER = (5, 2, 3, 4, 7, 8)
 
+# v0.73 (docs/os112-port.md): stock 1.12 (file sha256 7e5b8a733d4ab1fd...), for a build ported to
+# it; a run is for 1.12 when DN2_OS=1.12. Its bootstrap, updater, DSP and Outbox 8 are 1.11's.
+STOCK_112 = {
+    5: "22d60a9b383a6bbc378afd799e20ecae12b0e57fae970289ec8751de248df1ea",
+    2: "669d8c50e9dd028662538016817d841dfac74cf68b2662e7de41b3927bc3275e",
+    3: "091d3312d704229b0fb2177bd00e07637fcd0f99fc9c29dc26bd1bfb19eaf364",
+    4: "e0020c6b65357c2175d1939952924a010ab943364eade497d80b4c8afa65def4",
+    7: "5ff93df8747bdf9eb28acf50391fb484d6aa6782bfe969b2b3807a8412645660",
+    8: "764f169834ac9ebcdbc1fd883e9f941be1eb43c2d57e4ff02e04685550838b06",
+}
+if __import__("os").environ.get("DN2_OS", "1.11") == "1.12":
+    VERSION, BUILD, STOCK_111 = "1.12", "0062", STOCK_112
+
 MAY_CHANGE = {3: "MAIN OS", 7: "DSP program"}
 NEVER = {2: "bootstrap: runs recovery; a damaged one can brick the instrument",
          4: "updater", 5: "build metadata", 8: "Outbox 8 firmware"}
@@ -101,14 +114,14 @@ def _sha(b: bytes) -> str:
 def stock_checks(stock) -> list[Check]:
     """Rule 1: the input is the stock 1.11 file, section by section."""
     c = stock.container
-    out = [Check("input is Digitone II OS 1.11",
+    out = [Check(f"input is Digitone II OS {VERSION}",
                  c.product == PRODUCT and c.version == VERSION and c.build == BUILD,
                  f"product {c.product}, version {c.version}, build {c.build}")]
     ids = tuple(s.id for s in c.sections)
-    out.append(Check("input has stock 1.11's sections", ids == ORDER, f"{ids}"))
+    out.append(Check(f"input has stock {VERSION}'s sections", ids == ORDER, f"{ids}"))
     for s in c.sections:
         want = STOCK_111.get(s.id)
-        out.append(Check(f"input section {s.id} is stock 1.11's",
+        out.append(Check(f"input section {s.id} is stock {VERSION}'s",
                          want is not None and _sha(s.raw_payload) == want,
                          _sha(s.raw_payload)[:16]))
     return out

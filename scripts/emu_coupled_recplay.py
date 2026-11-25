@@ -26,6 +26,10 @@ Usage: emu_coupled_recplay.py --build out/v048.syx [--break NAME] [--json OUT]""
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import math
@@ -36,6 +40,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from emu_coupled import CF_FRAME, Coupled                       # noqa: E402
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 KIT, STRIDE = 0x800052A0, 1163
 ONESHOT = 8
@@ -73,8 +78,8 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
     p.add_argument("--layout", default=str(HERE.parent / "src/dnfw/mods/waverider_code.json"))
-    p.add_argument("--stock", default=str(HERE.parent.parent / "Digitone_II_OS1.11.syx"))
-    p.add_argument("--snapshot", default=str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
+    p.add_argument("--stock", default=str(HERE.parent.parent / f"Digitone_II_OS{_OSV}.syx"))
+    p.add_argument("--snapshot", default=str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
     p.add_argument("--break", dest="brk", default=None, choices=("noqueue", "nodir", "nosel", "wrongslot"))
     p.add_argument("--strt-counts", type=int, default=24)
     p.add_argument("--json", default=None)
@@ -130,7 +135,7 @@ def main() -> int:
     def word(slot):
         return struct.unpack(">H", c.read(snd + 0x14 + 2 * slot, 2))[0]
 
-    owner = c.call(0x4018A97A)[0]
+    owner = c.call(A(0x4018A97A))[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, 0, ONESHOT, 1, 1)
     setup.append(("track 0 ONESHOT", "direct call of smp_machine_commit (the UI's commit path, not MACHINE SEL's keys)"))
     c.poke(SM.MIRROR + 8, b"\x00" * 16 * SM.POOL_SLOTS)          # an empty pool: room to record
@@ -294,7 +299,7 @@ def main() -> int:
         c.frame_filter = fil
     setup.append(("the note", "UI: KEYBOARD, [TRIG 9] held"))
     kb, trig9 = names.get("KEYBOARD"), 33
-    KB_ON = 0x42431A99                                           # KEYBOARD's state byte (the gate's kbrec step)
+    KB_ON = A(0x42431A99)                                           # KEYBOARD's state byte (the gate's kbrec step)
     kb_was = c.read(KB_ON, 1)[0]
     if kb and not kb_was:                                        # a tap toggles it: only when it is off
         tap(kb)

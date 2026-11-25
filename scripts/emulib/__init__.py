@@ -21,3 +21,17 @@ It imports digikit only inside the functions that need it, so `image` and
 
 from .image import code_chunk, code_chunks, differences, load_build, sites            # noqa: F401
 from .report import check, failures, report                              # noqa: F401
+
+# v0.73 (docs/os112-port.md): on a 1.12 run (DN2_OS=1.12), every code hook a harness sets must be a
+# translated address or the same code in both OSes; dnfw.osport.os.audit_unicorn refuses the rest
+import os as _os
+import pathlib as _pathlib
+import sys as _sys
+
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2] / "src"))
+if _os.environ.get("DN2_OS", "1.11") != "1.11":
+    try:
+        from dnfw.osport.os import audit_unicorn as _audit
+        _audit()
+    except ImportError:                     # no unicorn here (Windows): nothing runs to audit
+        pass

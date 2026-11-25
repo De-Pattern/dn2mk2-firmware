@@ -64,7 +64,11 @@ jobs:
               if gh release view "$TAG" >/dev/null 2>&1; then
                 echo "$TAG: released already"
               else
-                gh release create "$TAG" --target "${{ github.sha }}" --title "$(cat title.txt)" --notes-file body.md
+                case "$TAG" in
+                  *-t[0-9]*) PRE="--prerelease --latest=false" ;;   # a test build: never the latest
+                  *) PRE="" ;;
+                esac
+                gh release create "$TAG" $PRE --target "${{ github.sha }}" --title "$(cat title.txt)" --notes-file body.md
               fi
             fi
             if [ -z "$WEBHOOK" ]; then echo "::warning::DISCORD_WEBHOOK_URL is not set: $TAG not announced"; continue; fi

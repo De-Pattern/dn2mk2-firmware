@@ -16,11 +16,11 @@ F = note x 2048 / 12 + TUNE x 683 / 128 (TUNE 64: in tune), 0..0x5800; A = 2^(F 
 from __future__ import annotations
 
 from . import core as C
-from . import ddrw, dens, sid, vo6, wave
+from . import ddrw, dens, fm, sid, vo6, wave
 from ..md import core as K
 from ..perc.dsl import Prog
 
-MODULES = (sid, wave, ddrw, dens, vo6)      # their types: TYPES below (6, 7, 14, 15, 16)
+MODULES = (sid, wave, ddrw, dens, vo6, fm.Stat, fm.Par, fm.Dyn)   # their types: TYPES below (6, 7, 14..16, 18..20)
 F_TOP = 0x5800
 
 
@@ -31,6 +31,56 @@ def _host(p: Prog, L: K.Layout) -> None:
         p.iconst(12, -7)
         p.float_(0, 0, 12)
         K.ws(p, C.P0 + k, 0)
+
+
+# v0.56 (owner, 2026-11-15: "time in ddrw is not working ... BR1 and BR2 controls are 99%
+# inaudible"; docs/ddrw-fix.md). The Monomachine's DDRW model (ddrw.py) and its references are
+# untouched: the DN2's host maps its knobs on the way in.
+DDRW_BR = (4, 6)                    # BR1, BR2
+DDRW_FADE = 6000.0 / (127 * 127)    # TIME 127: the fade over about 6,000 half-renders (2 s)
+DDRW_RATE = 0x21D10 / 2.0 ** 23 * 2048.0   # ddrw._half's fade rate a half-render at g = 1, x (TIME + 1)
+
+
+def _host_ddrw(p: Prog, L: K.Layout) -> None:
+    """BR 1..127 -> the table's 64..127 (9 bits down to 3: the whole turn heard; 0 stays clean,
+    the Monomachine's 15 bits); TIME -> the glide word g = (TIME + 1) / (RATE (1 + c TIME^2)), so
+    the fade lasts 1 + c TIME^2 half-renders (TIME 16: ~30 ms, 64: ~0.5 s, 127: ~2 s), and 0 is
+    the model's own instant change. Clobbers R0-R3, R12-R15, I12."""
+    from ..perc import machines as PM
+    for k in range(8):
+        K.inp(p, 0, k)
+        p.lsh(0, 0, -7)                         # 0..127
+        if k in DDRW_BR:
+            p.lsh(1, 0, 6)
+            p.iop(1, 1, "-", 0)                 # 63 x
+            p.iconst(12, 63)
+            p.iop(1, 12, "+", 1)
+            p.lsh(1, 1, -7)                     # (63 x + 63) >> 7: 0..63
+            p.iconst(12, 64)
+            p.iop(1, 12, "+", 1)
+            p.ifz(0, "NE", lambda: p.ipass(0, 1))
+        p.iconst(12, -7)
+        p.float_(0, 0, 12)
+        K.ws(p, C.P0 + k, 0)
+    W = L.mnm.W
+    K.inp(p, 0, 3)
+    p.lsh(0, 0, -7)                             # TIME
+    p.iconst(12, 0)
+    p.float_(1, 0, 12)                          # t
+    p.fop(2, 1, "*", 1)
+    p.fconst(12, DDRW_FADE)
+    p.fop(2, 2, "*", 12)
+    p.fconst(12, 1.0)
+    p.fop(2, 2, "+", 12)                        # 1 + c t^2
+    p.fconst(12, DDRW_RATE)
+    p.fop(2, 2, "*", 12)
+    PM.recip(p, 3, 2)
+    p.fconst(12, 1.0)
+    p.fop(1, 1, "+", 12)                        # t + 1
+    p.fop(3, 3, "*", 1)                         # g
+    p.fconst(12, 0.0)
+    p.ifz(0, "EQ", lambda: p.fpass(3, 12))      # TIME 0: the model's own (g unused there)
+    p.st(W["gl"], 3)
 
 
 # v0.26: semitones added to the DN2's note, so each machine's note 60 is 261.6 Hz as the
@@ -120,7 +170,7 @@ def _render(M):
 def _adapter(M):
     return type(M.NAME.replace(" ", "").replace("-", ""), (), {
         "NAME": M.NAME, "ID": M.ID, "PNAMES": M.PNAMES, "MNM": M,
-        "host": staticmethod(_host),
+        "host": staticmethod(_host_ddrw if M is ddrw else _host),
         "init": staticmethod(lambda p, L, M=M: M.init(p, L.mnm)),
         "trig": staticmethod(lambda p, L, M=M: M.trig(p, L.mnm)),
         "render": staticmethod(_render(M)),
@@ -135,9 +185,11 @@ DEFAULTS = {M.NAME: M.DEFAULTS for M in MODULES}
 # RESONATOR's former types, then the ones after the sample machines (8..13). One table for
 # the ColdFire (dnfw.waverider.coldfire, pages), the DSP's lookup (dnfw.waverider.dsp) and
 # PERC's voice (dnfw.perc.program).
-TYPE_SLOTS = (6, 7, 14, 15, 16)
+TYPE_SLOTS = (6, 7, 14, 15, 16, 18, 19, 20)   # v0.59: FM+ after FLEX's 17
 TYPES = TYPE_SLOTS[:len(MACHINES)]
 # MACHINE SEL's names (long, short), as the DN2 lists its own
 LIST_NAMES = {"SID 6581": ("SID 6581", "SID"), "DPRO-WAVE": ("DPRO Wave", "DPW"),
               "DPRO-DDRW": ("DPRO Ddrw", "DDW"), "DPRO-DENS": ("DPRO Dens", "DNS"),
-              "VO-6": ("VO-6", "VO6")}
+              "VO-6": ("VO-6", "VO6"),
+              # v0.59
+              "FM+STAT": ("FM+ Stat", "FMS"), "FM+PAR": ("FM+ Par", "FMP"), "FM+DYN": ("FM+ Dyn", "FMD")}

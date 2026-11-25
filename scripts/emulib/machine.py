@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import struct
 import sys
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 DIGIKIT = "/mnt/d/01_Code/Z_Personal/digikit-up"
 ROOT = "/mnt/d/01_Code/Z_Personal/dn2_firmware"
-SYX = f"{ROOT}/00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
+SYX = f"{ROOT}/00_Resources/00_Firmware/Digitone_II_OS{_OSV}_dist/Digitone_II_OS{_OSV}.syx"
 SNAP = "/root/dn2-snapshots/Digitone_II_OS1.11/ui1200M.snap"
 
 STACK, SCRATCH = 0x46A00000, 0x46A10000

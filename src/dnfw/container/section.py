@@ -20,7 +20,7 @@ so it is written here rather than left to chance. See `docs/flashing.md`.
 
 from dataclasses import dataclass
 
-from ..codec import aplib, aplibpack
+from ..codec import aplib, aplibopt, aplibpack
 
 HEADER = 8
 STORED_ALIGN = 4  # compressed sections are zero-padded to this
@@ -105,8 +105,14 @@ class Section:
 
 
 def compress(section_id: int, dest: int, content: bytes) -> Section:
-    """Build a compressed section from raw content: header, stream, padding."""
-    stream = aplibpack.pack(content)
+    """Build a compressed section from raw content: header, stream, padding.
+
+    v0.65: the optimal parse (codec.aplibopt, docs/packer.md), about 87 KB smaller than
+    aplibpack.pack's on the mod's image; the stream is depacked here and must give `content`
+    back before it is used."""
+    stream = aplibopt.pack(content)
+    if aplib.depack(stream) != content:
+        raise ValueError(f"section {section_id}: the packed stream does not depack to its content")
     header = len(stream).to_bytes(4, "big") + (sum(stream) & 0xFFFFFFFF).to_bytes(4, "big")
     padding = bytes(-(HEADER + len(stream)) % STORED_ALIGN)
     return Section(id=section_id, dest=dest, stored=header + stream + padding)

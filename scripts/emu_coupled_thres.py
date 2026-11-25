@@ -24,6 +24,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from emu_coupled import Coupled                                 # noqa: E402
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 KIT, SOUND_STRIDE = 0x800052A0, 1163
 ONESHOT = 8
@@ -39,8 +40,8 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
     p.add_argument("--layout", default=str(HERE.parent / "src/dnfw/mods/waverider_code.json"))
-    p.add_argument("--stock", default=str(HERE.parent.parent / "Digitone_II_OS1.11.syx"))
-    p.add_argument("--snapshot", default=str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
+    p.add_argument("--stock", default=str(HERE.parent.parent / f"Digitone_II_OS{_OSV}.syx"))
+    p.add_argument("--snapshot", default=str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
     p.add_argument("--json", default=None)
     p.add_argument("--only", default="AB")
     a = p.parse_args()
@@ -60,6 +61,19 @@ def main() -> int:
         c.put32(lay["rec_src"], 0)                              # IN
         if "rec_rstrt" in lay:                                  # (v0.47 did not export it: 0 there)
             c.put32(lay["rec_rstrt"], 0)                        # R.STRT THRES
+        # v0.73: the RECORDER's own MONITOR (sent as it opens, SRC set) is taken by the DSP before
+        # the ARM, as a person's turn comes long after the screen opens. Without this the ARM raced
+        # that MONITOR in one settle: on 1.11 it went first, on 1.12 second, and the DSP takes one
+        # queued command every few periods, so the count after the ARM measured the queue
+        # (the link takes one queued command each 8 periods: the queue is empty once every command
+        # sent has its echo, and stays so for longer than that)
+        quiet = 0
+        for _ in range(60):
+            if not c.period():
+                break
+            quiet = quiet + 1 if c.last_status[1] == (c.long(lay["smp_cmds"]) & 0xFFFF) else 0
+            if quiet >= 10:
+                break
         return c
 
     def state(c):

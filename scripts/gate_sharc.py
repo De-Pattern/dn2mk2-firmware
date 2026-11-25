@@ -37,6 +37,7 @@ def default_steps() -> list[str]:
 GROUPS = (("wipe",), ("stock",), ("garbage",), ("stress",), ("chords",), ("smp",), ("stereo",),
           ("mnm", "frame"), ("decode", "map", "voice", "guard"), ("link", "rec", "mainrec", "pvmix", "tdm"),
           ("flexlevel",),         # v0.50: a FLEX take's level, unity and GAIN
+          ("mainmark",),          # v0.66: FLEX takes of MAIN and IN marked, made up on playback
           ("recwhole",))          # v0.39: whole takes with the link at work (about 70 min)
 
 

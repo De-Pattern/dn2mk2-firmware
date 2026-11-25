@@ -38,6 +38,10 @@ same sequence runs on an older build (v0.39's: it fails, the flattening).
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import os
@@ -100,7 +104,7 @@ def fit(n, w):
 
 
 def steps(lay):
-    kit = 0x4210C08C
+    kit = 0x4210C08C   # 1.11: goes into steps, which emu_waverider_menu translates
     snd0, M = kit + 52, SMx.MIRROR
     samp0 = snd0 + 0x6A
 

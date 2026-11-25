@@ -526,7 +526,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,stereo,link,rec,flexlevel,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,stereo,link,rec,flexlevel,mainmark,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -686,6 +686,12 @@ def main(argv=None):
             results["3f_flexlevel"] = step_flexlevel(init, sound, machines)
             gc.collect()
             show(results["3f_flexlevel"])
+
+        if "mainmark" in steps:
+            print("\nstep 3g: FLEX takes of MAIN and IN marked and made up on playback (v0.66)")
+            results["3g_mainmark"] = step_mainmark(init, sound, machines)
+            gc.collect()
+            show(results["3g_mainmark"])
 
         if "mainrec" in steps:
             print("\nstep 3m: MAIN recorded, previewed and played, in the instrument's order (v0.38)")
@@ -1354,6 +1360,55 @@ def step_stress(init, sound, machines) -> dict:
         return f.to_bytes()
     rg, sg, eg, lg = scenario("G", 16, g_frame, memory_clock=True)
     rg0, _, _, _ = scenario("G0", 16, lambda b: g_frame(b, alone=True), memory_clock=True)
+    # v0.69, the guardrail (dnfw.sampler.guardrail): kits just within its LIMIT must play without
+    # a voice left out, and one well past it must not (so the weights mean something). H: three
+    # VO-6 tracks at two voices each (6 voices, 277,260 of 320,000), every voice sounding, all
+    # controls moving; H2: seven PERC tracks (P-I, the heaviest family, 315,245); H3: eleven
+    # ONESHOTs (318,043); I: sixteen VO-6 voices (739,360). All on the memory clock (F's)
+    from dnfw.sampler import guardrail as GR
+    vo6 = MMx.NAMES.index("VO-6")
+
+    def vo_frame(n):
+        def fr(b):
+            f = base_frame(sound, machines, t0=MMx.TYPES[vo6], trigger=False,
+                           others={t: MMx.TYPES[vo6] for t in range(1, n)})
+            for t in range(n):
+                for slot, w in mnm_words(vo6, [rnd.randrange(128) for _ in range(8)]).items():
+                    f.param(t, slot, w)
+            if b == 1:
+                for t in range(n):
+                    f.trigger(t)
+            return f.to_bytes()
+        return fr
+    n_vo = GR.LIMIT // GR.weight(MMx.TYPES[vo6])          # the VO-6 tracks the limit allows (v0.72: 4)
+    rh, sh, eh, _ = scenario("H", 16, vo_frame(2 * n_vo), memory_clock=True)
+
+    def h2_frame(b):
+        f = base_frame(sound, machines, overrides=perc_words(pi[0]), trigger=False,
+                       others={t: 5 for t in range(1, 7)})
+        for t in range(7):
+            for slot, w in perc_words(pi[t % len(pi)]).items():
+                f.param(t, slot, w)
+        if b == 1:
+            for t in range(7):
+                f.trigger(t)
+        return f.to_bytes()
+
+    def h3_frame(b):
+        f = base_frame(sound, machines, t0=one, trigger=False, others={t: one for t in range(1, 11)})
+        for t in range(11):
+            for slot, w in smp_words({SM.SAMP_REC: 4}).items():
+                f.param(t, slot, w)
+        if b == 1:
+            for t in range(11):
+                f.trigger(t)
+        return f.to_bytes()
+    rh2, sh2, eh2, _ = scenario("H2", 16, h2_frame, memory_clock=True)
+    rh3, sh3, eh3, _ = scenario("H3", 16, h3_frame, memory_clock=True)
+    ri, si, ei, _ = scenario("I", 16, vo_frame(16), memory_clock=True)
+    gr_h = n_vo * GR.weight(MMx.TYPES[vo6])
+    gr_h2 = 7 * GR.weight(5)
+    gr_h3 = 11 * GR.weight(one)
     undo_counts()
 
     def smp_out(rr, t):
@@ -1387,6 +1442,10 @@ def step_stress(init, sound, machines) -> dict:
               "memory_clock_scale": MEM_SCALE})
     n.update({"G": {"skips": sg, "our_end_over_P": eg and round(eg / P, 3), "oneshot_same_as_alone": g_same,
                     "oneshot_blocks_heard": g_heard}})
+    n.update({"guardrail": {"limit": GR.LIMIT, "H": {"weight": gr_h, "skips": sh, "our_end_over_P": eh and round(eh / P, 3)},
+                            "H2": {"weight": gr_h2, "skips": sh2, "our_end_over_P": eh2 and round(eh2 / P, 3)},
+                            "H3": {"weight": gr_h3, "skips": sh3, "our_end_over_P": eh3 and round(eh3 / P, 3)},
+                            "I": {"skips": si, "our_end_over_P": ei and round(ei / P, 3)}}})
     fin_f = rf["ok"] and all(math.isfinite(x) for blk in rf["buffers"] for t in range(16) for x in blk[t])
     checks = {
         "every block of both returns": ra["ok"] and rb["ok"],
@@ -1405,6 +1464,11 @@ def step_stress(init, sound, machines) -> dict:
         "v0.49: G (12 P-I voices and a SID beside an ONESHOT on track 15, the memory clock): every block "
         "returns, voices are left out (PERC's), and the ONESHOT's output is, block for block, its output alone "
         "(G0): never left out": rg["ok"] and rg0["ok"] and bool(sg) and g_same and g_heard >= 10,
+        "v0.69, the guardrail: H (as many VO-6 tracks as the limit allows, two voices each), H2 (seven P-I tracks) and H3 (eleven "
+        "ONESHOTs), kits within its LIMIT, play every block with no voice left out; I (sixteen VO-6 voices, past "
+        "it) does not":
+            rh["ok"] and rh2["ok"] and rh3["ok"] and ri["ok"] and max(gr_h, gr_h2, gr_h3) <= GR.LIMIT
+            and sh == 0 and sh2 == 0 and sh3 == 0 and bool(si),
         "with time short, voices are left out and counted (A)": bool(sa),
         "A: the newest note is heard in most blocks (newest first)": n["newest_heard_A"] >= 0.8,
         "nothing non-finite": fin,
@@ -2726,8 +2790,8 @@ def step_flexlevel(init, sound, machines) -> dict:
     take's playback at the amp's output against the source's there, RMS over the same stretch (the
     take a block late: the bucket is the last block's): within 0.5 dB. Negative control: the same
     with index 0 (the RECORDER's command, v0.49's scaling): 6 dB under, and
-    must fail the 0.5 dB test; and GAIN -6 (index 19) plays 6 dB under, within 0.5 dB (+6 would
-    clip this loud a source: the meter's CLIP).
+    must fail the 0.5 dB test. v0.63: that unity is GAIN -24 now (index 1); GAIN 0 is 24 dB over
+    it (TRK_HW_DB, the owner's number from his unit), frame for frame where it does not clip.
     Measured 2026-11-12 (v0.50's first take on it): v0.49's scaling 0.4991 of the source; a
     x 12.44 first guess clipped (+9.4 dB); x 2.0 (the output's ratio) came out -1.8 dB (the
     chain compresses a little); TRK_UNITY is the render's ratio, 2.339."""
@@ -2786,23 +2850,181 @@ def step_flexlevel(init, sound, machines) -> dict:
         return {"out_db": db(flat[per * (n - w): per * n], flat[per * p0: per * (p0 + w)]),
                 "render_db": db(ren[per * (n - w): per * n], ren[per * p0: per * (p0 + w)]),
                 "take_rms": rms(take[per * (n - w): per * n]), "take_frames": ent[1],
-                "take_peak": max((abs(v) for v in take), default=0.0)}
-    unity, recorder, minus6 = run(SM.GAIN_ZERO), run(0), run(SM.GAIN_ZERO - 6)
+                "take_peak": max((abs(v) for v in take), default=0.0), "take": take[: per * n]}
+    # v0.63: GAIN 0 is TRK_HW_DB (24 dB) over v0.50's unity, the owner's number from his unit, where
+    # the stages the runner lacks take those 24 dB. On the runner v0.50's unity is GAIN -TRK_HW_DB
+    # (index GAIN_ZERO - 24 = 1); GAIN 0's take is the same recording 24 dB up, clipping this loud a
+    # source, so it is compared sample by sample where it does not clip
+    low = SM.GAIN_ZERO - SM.TRK_HW_DB
+    unity, recorder, zero = run(low), run(0), run(SM.GAIN_ZERO)
+    want = 10.0 ** (SM.TRK_HW_DB / 20.0)
+
+    def ratio_ok(a, b, k):
+        """b's unclipped frames are a's x k within 1 % (at least 200 of them, a's at 0.01 or more:
+        an int16 frame's step, 1 / 32768, is 0.3 % of that)"""
+        if a is None or b is None:
+            return False
+        pairs = [(x, y) for x, y in zip(a["take"], b["take"]) if abs(y) < 0.99 and abs(x) >= 0.01]
+        return len(pairs) >= 200 and all(abs(y / x - k) <= 0.01 * k for x, y in pairs)
     checks = {
-        "v0.50: a FLEX take of a track (GAIN 0) reaches its track's chain at its source's level: the "
-        "take's render against the source's, within 0.5 dB (RMS)":
+        "v0.50: a FLEX take of a track at v0.50's unity (GAIN -24 since v0.63) reaches its track's chain "
+        "at its source's level: the take's render against the source's, within 0.5 dB (RMS)":
             unity is not None and abs(unity["render_db"]) <= 0.5,
         "v0.50: .. and comes out of the amp within 1 dB of its source (the chain compresses a little)":
             unity is not None and abs(unity["out_db"]) <= 1.0,
         "v0.50 negative control: the RECORDER's command (no GAIN: v0.49's scaling) renders the same take "
         "over 4 dB under its source":
             recorder is not None and recorder["render_db"] < -4.0,
-        "v0.50: GAIN -6 records the take 6 dB under GAIN 0's (its frames' RMS, within 0.1 dB), unclipped":
-            unity is not None and minus6 is not None and unity["take_peak"] < 1.0
-            and abs(20 * _m.log10((minus6["take_rms"] or 1e-30) / (unity["take_rms"] or 1e-30)) + 6.0) <= 0.1,
+        f"v0.63: GAIN 0 records the same take {SM.TRK_HW_DB} dB over GAIN -{SM.TRK_HW_DB}, frame for frame where unclipped "
+        "(within 1 %), and clipped at full scale, never past it":
+            ratio_ok(unity, zero, want) and zero["take_peak"] <= 1.0,
+        "v0.63 (TRK_HW_DB, the owner's number): GAIN 0's take plays far over its source on the runner "
+        f"(over {SM.TRK_HW_DB / 2:g} dB, half the {SM.TRK_HW_DB} dB the unit loses after the per-track buffer) -- the check "
+        f"above at GAIN -{SM.TRK_HW_DB} holds only because TRK_HW_DB is applied":
+            zero is not None and zero["render_db"] > SM.TRK_HW_DB / 2.0,
+        "v0.63 negative control: the frame-for-frame comparison at 0 dB is refused":
+            not ratio_ok(unity, zero, 1.0),
     }
+    for r in (unity, recorder, zero):
+        if r:
+            r.pop("take", None)
     return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"unity": unity, "recorder": recorder, "minus6": minus6}}
+            "numbers": {"unity": unity, "recorder": recorder, "zero": zero}}
+
+
+def step_mainmark(init, sound, machines) -> dict:
+    """v0.66 (owner and Error Kit, 2026-11-20: a FLEX take of MAIN or IN far too quiet, and GAIN
+    raised to make up for it clipped). Such a take is recorded as it is and marked (bit 15 of its
+    buffer entry's steps word, MAIN_MARK); a voice playing a marked take adds MAIN_PLAY_DB. Each
+    run: RECORD NOW into buffer 0's half 0 (dest BUF_SLOT0), 16 steps, from a known 0.5 sine poked
+    where the recorder reads its source at every block's dispatch (MAIN_TAP for MAIN, IN_BUF for IN:
+    the runner never runs the master mix); STOP; then track 0 plays SAMP BUF_SAMP0 twice, the take
+    as recorded and the same take with the mark cleared, on ONESHOT (render) and STRETCH
+    (render_stretch). Checks: MAIN and IN FLEX takes are marked and their frames are the source's
+    (peak 0.5, not boosted: nothing reaches the int16 clamp); a marked take renders x 10^(12/20)
+    of its unmarked self within 0.1 % (RMS) on both readers; the steps still read 16 (the mark never
+    reaches the step maths). Negative controls: a TRK take (FLEX) and a plain recording of MAIN
+    (GAIN index 0, the RECORDER's) are not marked and render as their unmarked selves."""
+    import math as _m
+    ONE, STR = SM.TYPE_OF["ONESHOT"], SM.TYPE_OF["STRETCH"]
+    cmd_at = dsp.SMP_POOL_DDR + SM.CMD_OFFSET
+    bent = dsp.SMP_POOL_DDR + SM.BUF_DIR
+    n, play, steps, amp = 16, 10, 16, 0.5
+    sig = [amp * _m.sin(2 * _m.pi * 440 * k / 48000) for k in range(32 * (n + 2))]
+    want = 10.0 ** (SM.MAIN_PLAY_DB / 20.0)
+
+    def bits(x):
+        return struct.unpack("<I", struct.pack("<f", x))[0]
+
+    def command(r, seq, cmd, src=0, chan=0, dest=0, frames=SM.REC_FRAMES, place=0, thres=0):
+        for k, w in enumerate((seq, cmd, src, chan | place << 8, thres, (SM.REC_FIRST + dest) << 24 | frames)):
+            m2.poke(r.state, cmd_at + 4 * k, w)
+
+    def rms(x):
+        return _m.sqrt(sum(v * v for v in x) / max(1, len(x)))
+
+    def record(src, gidx):
+        cur = {"b": 0}
+
+        def at_dispatch(r):
+            b = cur["b"]
+            if b == 0:
+                command(r, 31, SM.CMD_NOW, src=src, chan=gidx << 24, dest=SM.BUF_SLOT0 - SM.REC_FIRST,
+                        place=0x5000, thres=steps << 16)
+            if b == n:
+                command(r, 32, SM.CMD_STOP)
+            for k in range(32):
+                x = bits(sig[32 * b + k] if b < n else 0.0)
+                for at in (SM.IN_BUF, SM.MAIN_TAP):
+                    m2.poke(r.state, at + 4 * k, x)
+                    m2.poke(r.state, at + 0x80 + 4 * k, x)
+            cur["b"] += 1
+
+        def fb(b):
+            f = base_frame(sound, machines, t0=ONE, trigger=False, overrides=smp_words({SM.SAMP_REC: 1}))
+            for t in range(16):
+                f.put(0xA5A + 2 * t, t)
+            return f.to_bytes()
+        r = run_blocks(init, fb, n + 2, extra_hooks={m3.DISPATCH: at_dispatch})
+        if not r["ok"]:
+            return None, None
+        st = r["state"]
+        ent = [m2.word(st.state, bent + 4 * k) or 0 for k in range(3)]
+        take = []
+        for k in range(ent[1] // 2):
+            w = m2.word(st.state, ent[0] + 4 * k) or 0
+            take += [((h ^ 0x8000) - 0x8000) / 32768.0 for h in (w & 0xFFFF, w >> 16)]
+        return st, {"entry": ent, "take_peak": max((abs(v) for v in take), default=0.0), "frames": ent[1]}
+
+    def playback(state, ty, clear):
+        if clear:
+            w = m2.word(state.state, bent + 8) or 0
+            m2.poke(state.state, bent + 8, w & 0x7FFF)
+
+        def fb(b):
+            f = base_frame(sound, machines, t0=ty, trigger=(b == 0), overrides=smp_words({SM.SAMP_REC: SM.BUF_SAMP0}))
+            f.put(SP.TEMPO_OFFSET, 120 * 120)
+            return f.to_bytes()
+        r = run_blocks(state, fb, play)
+        if not r["ok"]:
+            return None
+        return smp_series(r, 0)[2 * BLOCK: (play - 1) * BLOCK]
+
+    out, nums = {}, {}
+    for name, src, gidx in (("MAIN", 1, SM.GAIN_ZERO), ("IN", 0, SM.GAIN_ZERO), ("TRK", 2, SM.GAIN_ZERO),
+                            ("MAIN plain", 1, 0)):
+        st, info = record(src, gidx)               # (a run takes its state: the same take is
+        res = {"info": info}                       # recorded again for each playback; it is
+        if st is not None:                         # deterministic, its entry checked below)
+            for ty, tn in ((ONE, "ONESHOT"), (STR, "STRETCH")):
+                a_ = playback(st, ty, False)
+                st, again = record(src, gidx)
+                b_ = playback(st, ty, True) if st is not None and again == info else None
+                res[tn] = (rms(a_) / rms(b_)) if a_ and b_ and rms(b_) > 0 else None
+                res[tn + "_peak"] = max((abs(x) for x in a_ or []), default=0.0)
+                st, again = record(src, gidx)
+                if st is None or again != info:
+                    break
+        out[name] = res
+        nums[name] = {k: (round(v, 5) if isinstance(v, float) else v) for k, v in res.items() if k != "info"}
+        nums[name]["entry_steps_word"] = hex(info["entry"][2]) if info else None
+        nums[name]["take_peak"] = round(info["take_peak"], 4) if info else None
+
+    def marked(nm):
+        i = out[nm]["info"]
+        return bool(i) and bool(i["entry"][2] & SM.MAIN_MARK) and (i["entry"][2] & 0x7FFF) == steps
+
+    def unmarked(nm):
+        i = out[nm]["info"]
+        return bool(i) and not (i["entry"][2] & SM.MAIN_MARK) and (i["entry"][2] & 0x7FFF) == steps
+
+    def ratio(nm, k):
+        r = out[nm].get(k)
+        return r is not None and abs(r - want) <= 0.001 * want
+
+    def same(nm, k):
+        r = out[nm].get(k)
+        return r is not None and abs(r - 1.0) <= 0.001
+
+    def as_source(nm):
+        i = out[nm]["info"]
+        return bool(i) and abs(i["take_peak"] - amp) <= 0.01 * amp
+    checks = {
+        "v0.66: a FLEX take of MAIN is marked (MAIN_MARK) and its steps still read 16": marked("MAIN"),
+        "v0.66: .. its frames are the source's (peak 0.5 within 1 %: recorded as it is, never boosted before the clamp)":
+            as_source("MAIN"),
+        f"v0.66: .. and it plays {SM.MAIN_PLAY_DB} dB over the same take unmarked, within 0.1 %, on ONESHOT (render)":
+            ratio("MAIN", "ONESHOT"),
+        f"v0.66: .. and on STRETCH (render_stretch)": ratio("MAIN", "STRETCH"),
+        "v0.66: .. and its playback is not silence": out["MAIN"].get("ONESHOT_peak", 0) > 0.01,
+        "v0.66: a FLEX take of IN is marked, as it is, and plays the same make-up":
+            marked("IN") and as_source("IN") and ratio("IN", "ONESHOT") and ratio("IN", "STRETCH"),
+        "v0.66 negative control: a FLEX take of a track is not marked and plays as itself":
+            unmarked("TRK") and same("TRK", "ONESHOT") and same("TRK", "STRETCH"),
+        "v0.66 negative control: a plain recording of MAIN (GAIN index 0, the RECORDER's) is not marked":
+            unmarked("MAIN plain") and same("MAIN plain", "ONESHOT"),
+    }
+    return {"ok": all(checks.values()), "checks": checks, "numbers": nums}
 
 
 # -- step 3e: the fast link (v0.16, docs/sampler.md) -------------------------------------------------
@@ -2823,8 +3045,22 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
 
     mix_in = [struct.unpack("<I", struct.pack("<f", 0.01 * k - 0.3))[0] for k in range(64)]
 
-    def run(image, words_left, mix0=mix_in, loop=False):
+    # v0.59 MON: the input block, and (mon, rsrc, rst) as the recorder leaves them
+    in_blk = [struct.unpack("<I", struct.pack("<f", 0.003 * k - 0.07))[0] for k in range(64)]
+
+    def poke_mon(put, mon):
+        if mon is None:
+            return
+        on, src, st = mon
+        put(SM.REC_MON, on)
+        put(C["rsrc"], src)
+        put(C["rst"], st)
+        for k in range(64):
+            put(SM.IN_BUF + 4 * k, in_blk[k])
+
+    def run(image, words_left, mix0=mix_in, loop=False, mon=None):
         r = init_on(snap, m2mach, image).fresh_call(dsp.PVMIX_SITE_SW, regs=regs)
+        poke_mon(lambda a, v: m2.poke(r.state, a, v), mon)
         for k in range(64):
             m2.poke(r.state, SM.MIX_BUF + 4 * k, mix0[k])
         for k, w in enumerate(pairs):
@@ -2850,9 +3086,10 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
     def mix(r):
         return [m2.word(r.state, SM.MIX_BUF + 4 * k) or 0 for k in range(64)]
 
-    def model(words_left, mix0, loop=False):
+    def model(words_left, mix0, loop=False, mon=None):
         from dnfw.perc.dsl import Mem
         mem = Mem(lambda a: 0)
+        poke_mon(mem.put, mon)
         for k in range(64):
             mem.put(SM.MIX_BUF + 4 * k, mix0[k])
         for k, w in enumerate(pairs):
@@ -2869,10 +3106,26 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
                           "pvl0", "pvln")}
     own |= {SM.MAIN_TAP + 4 * k for k in range(64)}     # v0.37: the MAIN tap is the preview's too
     out, checks = {}, {}
-    for name, left, loop in (("none", 0, False), ("full", 40, False), ("tail", 5, False), ("loop", 5, True)):
-        want, pva, pvn = model(left, mix_in, loop)
-        rs, hs, _ = run(stock, 0, want)        # stock, given the mix the preview makes
-        rm, hm, _ = run(m5, left, loop=loop)
+    # v0.59 MON: on, IN, armed (1) / recording (2): the input added; off, MAIN (1), a track (2),
+    # idle (0) or done (3): nothing (each its own case, so a MON that ignored any of them fails)
+    MON_CASES = (("mon armed", 0, False, (1, 0, 1)), ("mon recording", 5, False, (1, 0, 2)),
+                 ("mon off", 0, False, (0, 0, 2)), ("mon MAIN", 0, False, (1, 1, 2)),
+                 ("mon TRK1", 0, False, (1, 2, 2)), ("mon idle", 0, False, (1, 0, 0)),
+                 ("mon done", 0, False, (1, 0, 3)))
+    from dnfw.perc.dsl import f32
+    added = [struct.unpack("<I", struct.pack("<f", f32(struct.unpack("<f", struct.pack("<I", a))[0]
+                                                            + struct.unpack("<f", struct.pack("<I", b))[0])))[0]
+             for a, b in zip(mix_in, in_blk)]
+    for name, left, loop, *mon in (("none", 0, False), ("full", 40, False), ("tail", 5, False), ("loop", 5, True),
+                                   *MON_CASES):
+        mon = mon[0] if mon else None
+        want, pva, pvn = model(left, mix_in, loop, mon)
+        if mon is not None and left == 0:
+            hears = mon[0] == 1 and mon[1] == 0 and mon[2] in (1, 2)
+            checks[f"{name}: the model's mix {'is the mix + the input' if hears else 'untouched'}"] = (
+                want == (added if hears else mix_in))
+        rs, hs, _ = run(stock, 0, want, mon=mon)   # stock, given the mix the preview makes (v0.59: MON's words too)
+        rm, hm, _ = run(m5, left, loop=loop, mon=mon)
         ok = hs[0] == "stop" and hm[0] == "stop"
         same_regs = ok and rm.state.uregs == rs.state.uregs
         diff = sorted(a for a in set(rm.state.overlay) | set(rs.state.overlay)
@@ -2887,7 +3140,7 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         checks[f"{name}: the mix as the model's ({min(left, 16)} words added)"] = ok and got == want
         tap = [m2.word(rm.state, SM.MAIN_TAP + 4 * k) or 0 for k in range(64)]
         checks[f"{name}: v0.37: the MAIN tap holds the mix as it came, before the preview"] = ok and tap == mix_in
-        if left == 0:
+        if left == 0 and mon is None:
             checks["none: the mix untouched"] = ok and got == mix_in
         if loop:                                # v0.30: at its end it starts again
             checks["loop: at its end the preview starts again (pva back at its start, pvn its length)"] = (

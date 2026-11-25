@@ -57,6 +57,10 @@ and the code addresses on the stack: the persistence check. The selection test
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import os
@@ -77,35 +81,35 @@ KEYS = {"up": UP, "down": DOWN, "left": LEFT, "right": RIGHT, "yes": YES, "no": 
 
 # the accessors the build touches, and where each keeps its type argument on entry
 WATCH = {
-    0x400DC02A: ("param_set_slot_to_id(slot, type, filter)", 8),
-    0x400DC19A: ("permission(type, track)", 4),
-    0x400DC15C: ("attribute byte(type)", 4),
-    0x400DC176: ("all-tracks(type)", 4),
-    0x400DC332: ("long name(type)", 4),
-    0x400DC358: ("short name(type)", 4),
-    0x400DC37E: ("name column 3(type)", 4),
+    A(0x400DC02A): ("param_set_slot_to_id(slot, type, filter)", 8),
+    A(0x400DC19A): ("permission(type, track)", 4),
+    A(0x400DC15C): ("attribute byte(type)", 4),
+    A(0x400DC176): ("all-tracks(type)", 4),
+    A(0x400DC332): ("long name(type)", 4),
+    A(0x400DC358): ("short name(type)", 4),
+    A(0x400DC37E): ("name column 3(type)", 4),
     0x40059274: ("MACHINE SEL group(type)", 4),
     0x400394BE: ("the machine's parameter list(out, type)", 4),
     0x4004CC08: ("machine setter(sound, type, flag)", 8),
     0x40031880: ("MACHINE SEL commit(model, track, type)", 12),
     0x4004C30C: ("machine change: reset its parameters(sound, 1, old type, 0)", 12),
-    0x400C24D2: ("SYN page count(type)", 4),
-    0x400C24EE: ("SYN page descriptor(type, page)", 4),
-    0x400C248E: ("per-machine descriptor 0x42432b24(type)", 4),
+    A(0x400C24D2): ("SYN page count(type)", 4),
+    A(0x400C24EE): ("SYN page descriptor(type, page)", 4),
+    A(0x400C248E): ("per-machine descriptor 0x42432b24(type)", 4),
 }
 SETTER_WRITE = 0x4004CC94               # moveb %d2,%a0@(222)
 # every `mvs.b %aN@(222),%dM` in the image (objdump of MAIN OS): site -> N
 TYPE_READS = {0x400254B4: 2, 0x40031BD2: 0, 0x40031C1C: 0, 0x40036478: 0, 0x40036738: 0,
-              0x40036C24: 0, 0x4004B816: 0, 0x4004CC82: 0, 0x4004DE0E: 3, 0x400A801C: 0,
-              0x400B1668: 0}
+              0x40036C24: 0, 0x4004B816: 0, 0x4004CC82: 0, 0x4004DE0E: 3, A(0x400A801C): 0,
+              A(0x400B1668): 0}
 GETTER_RTS = 0x4003647C                 # rts of the machine-type getter 0x40036462
 TRACK_GETTER_EXIT = 0x4004B81E          # getMachineType(track) 0x4004b7f2: the common exit
 ISR = 0x40025E36                        # the audio frame handler: modulation, frame, send
 ISR_RTE = 0x40027BC6                    # its only rte (docs/usbprobe.md)
-SEQ_ISR, SEQ_VECTOR = 0x400D987A, 121   # the sequencer's timer ISR (emu_jump.py)
+SEQ_ISR, SEQ_VECTOR = A(0x400D987A), 121   # the sequencer's timer ISR (emu_jump.py)
 SEQ_CALLS_A_TICK = 4                    # its entries a tick (emu_jump.py, measured)
-HEAP_FREE = 0x40120270                  # the heap's free (operator delete 0x4001a0d2 jumps here)
-SYSEX_ROUTER, SYSEX_SENDER = 0x4012166E, 0x401233F2    # docs/usbprobe.md
+HEAP_FREE = A(0x40120270)                  # the heap's free (operator delete 0x4001a0d2 jumps here)
+SYSEX_ROUTER, SYSEX_SENDER = A(0x4012166E), A(0x401233F2)    # docs/usbprobe.md
 FRAME_BUILT = 0x400275A2                # the builder's sixteen passes are done
 FRAME = 0x80005E60
 FRAME_BYTES = 2688
@@ -116,12 +120,12 @@ TRACK_SYNC, SOUND_STRIDE = 0x4002549C, 1163      # (sound, track) -> the mirror;
 MIRROR_TYPE, MIRROR_STRIDE =0x80003AF0 + 3468, 153   # the builder's per-track type byte
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400   # above BSS (0x466b74d0); Machine.write maps it
 GET_SHORT_NAME = 0x400372DA             # getShortName(this, id): record + 0x30
-SET_PIXEL = 0x40113B90                  # Bitmap::setPixel(bitmap, x, y, on), docs/display-path.md
-PARAM_TABLE, PARAM_RECORDS, PARAM_BYTES = 0x401F7F94, 321, 60
+SET_PIXEL = A(0x40113B90)                  # Bitmap::setPixel(bitmap, x, y, on), docs/display-path.md
+PARAM_TABLE, PARAM_RECORDS, PARAM_BYTES = A(0x401F7F94), 321, 60
 
 
-BLK_READ, BLK_WRITE = 0x4012C59A, 0x4012C780
-BLK_READY, BLK_SECTORS = 0x4461B68C, 0x4461B6B0
+BLK_READ, BLK_WRITE = A(0x4012C59A), A(0x4012C780)
+BLK_READY, BLK_SECTORS = A(0x4461B68C), A(0x4461B6B0)
 STORE_SECTOR = 0x600000
 REPLY_TAIL = 0x80005E40
 ROUTE_OFFSET = 0xA5A                     # the frame's per-track routing words (docs/link-research.md)
@@ -432,8 +436,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                    disk_errors=io.get("errors", [])[:3], routing_changed=route.get("changed", 0),
                    lstate=long("smp_lstate"))
         out["loaded_at"] = done_at
-        if "smp_l_order" in syms:
-            out["order"] = list(machine.read(syms["smp_l_order"], 4))
+        if "smp_l_order" in syms:               # (v0.65: u16 global slots)
+            out["order"] = list(struct.unpack(">2H", machine.read(syms["smp_l_order"], 4)))
         if scenario == "fast":
             out["ok"] = (not wrong and not frames_wrong and periods < limit and out["cmd_packets"] > 0
                          and not route.get("changed"))
@@ -593,9 +597,9 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         booted = long("smp_booted") == 2 and returned_d0() == n0
         # the track: the active one a SLICE track on SAMP 1 (slot 0), its page up
         kit_ = struct.unpack(">I", machine.read(0x800052A0, 4))[0]
-        trk = machine.read(0x42431A6C, 1)[0] & 15
+        trk = machine.read(A(0x42431A6C), 1)[0] & 15
         snd_ = kit_ + 52 + 1163 * trk
-        rec_ = struct.unpack(">3i", machine.read(0x401F7F94 + 60 * SM.SAMP_REC, 12))
+        rec_ = struct.unpack(">3i", machine.read(A(0x401F7F94) + 60 * SM.SAMP_REC, 12))
         machine.write(snd_ + 0xDE, bytes([13]))
         machine.write(snd_ + 20 + 2 * rec_[1], struct.pack(">H", (1 + (rec_[2] >> 8)) << 8))
         item = SENTINEL + 0x3000                # (above the call stack)
@@ -1384,6 +1388,81 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out.update(res)
         out["ok"] = bool(res["ok"]) and not route.get("changed")
         out["routing_changed"] = route.get("changed", 0)
+    elif scenario == "banks":
+        # v0.65: PROJECT RAM banks (docs/banks.md): scripts/emu_banks.py
+        sys.path.insert(0, str(HERE))
+        sys.path.insert(0, str(HERE.parent / "tools"))
+        import emu_banks                        # noqa: PLC0415
+        from dn2probe import pack7, unpack7     # noqa: PLC0415
+        for _ in range(200):                    # the snapshot's own boot first (the RAM check)
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        buf = SENTINEL + 0x1000
+        replies = []
+
+        def at_sender(uc_, address, size, user):
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            b_, n_, _ab, _port = struct.unpack(">4I", bytes(uc.mem_read(sp + 4, 16)))
+            replies.append(bytes(uc.mem_read(b_, n_)))
+        hs = uc.hook_add(UC_HOOK_CODE, at_sender, begin=SYSEX_SENDER, end=SYSEX_SENDER)
+
+        def sx(cmd, payload=b""):
+            msg = bytes([0xF0, 0, 0x20, 0x3C, 0x7D, 1]) + pack7(struct.pack(">HB", 7, cmd) + payload) + b"\xF7"
+            machine.write(buf, msg)
+            replies.clear()
+            call("smp_rx", buf, len(msg), 2)
+            if not replies:
+                return None, b""
+            m = unpack7(replies[-1][6:-1])
+            return m[3], m[4:]
+        res = emu_banks.run({"machine": machine, "call": call, "long": long, "period": period,
+                             "disk": disk, "io": io, "pool": pool, "syms": syms, "SL": SL, "SM": SM,
+                             "base": base, "returned_d0": returned_d0, "sx": sx, "mirror": SM.MIRROR})
+        uc.hook_del(hs)
+        out.update(res)
+        out["ok"] = bool(res["ok"]) and not route.get("changed")
+        out["routing_changed"] = route.get("changed", 0)
+    elif scenario == "slicefine":
+        # v0.62: the slice editor's requests (impbox): scripts/emu_slicefine.py
+        sys.path.insert(0, str(HERE))
+        import emu_slicefine                    # noqa: PLC0415
+        res = emu_slicefine.run({"machine": machine, "call": call, "long": long, "period": period,
+                                 "disk": disk, "syms": syms, "SL": SL, "SM": SM, "base": base, "pool": pool,
+                                 "returned_d0": returned_d0, "item": SENTINEL + 0x3000,
+                                 "scratch": SENTINEL + 0x3400})
+        disk.clear()
+        out.update(res)
+        out["ok"] = bool(res["ok"]) and not route.get("changed")
+        out["routing_changed"] = route.get("changed", 0)
+    elif scenario == "tune":
+        # v0.61: microtuning's record per project (csrc/sampler/tune.c): scripts/emu_tune.py
+        sys.path.insert(0, str(HERE))
+        import emu_tune                         # noqa: PLC0415
+        for _ in range(200):                    # the snapshot's own boot first (the RAM check)
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        res = emu_tune.run({"machine": machine, "call": call, "disk": disk, "io": io, "syms": syms,
+                            "guest_call": guest_call, "scratch": SENTINEL + 0x2000})
+        disk.clear()
+        out.update(res)
+    elif scenario == "perform":
+        # v0.69: PERFORM's macros, their offsets and their record per project (csrc/sampler/perf.c):
+        # scripts/emu_perform.py
+        sys.path.insert(0, str(HERE))
+        import emu_perform                      # noqa: PLC0415
+        for _ in range(200):                    # the snapshot's own boot first (the RAM check)
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        res = emu_perform.run({"machine": machine, "call": call, "disk": disk, "io": io, "syms": syms,
+                               "guest_call": guest_call, "scratch": SENTINEL + 0x2000})
+        disk.clear()
+        out.update(res)
     elif scenario == "live":
         # v0.38 (the testers: "after 10-20 added samples, new ones are silent until a restart";
         # v0.37: "nothing I record plays, though I see its waveform"): a pool of three samples
@@ -1610,14 +1689,22 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         # quiet one by +24 dB at most
         import math as _m
         norms = []
-        for j, pk in enumerate((4000, 32000, 10, 0)):
-            nslot, nplace, nfr = 41 + j, (20 + 4 * j) << 20, 2000
+        # v0.63 (the owner: saving a FLEX buffer normalised the take its buffer still plays): a
+        # fifth take, peak 4,000 as the first, saved as rec.c's bn_save saves one (smp_save_keep
+        # set): kept exactly as it lies on the +Drive, never normalised (no state 3 or 4), and
+        # smp_save_keep cleared by the save. The first take is its negative control
+        for j, pk in enumerate((4000, 32000, 10, 0, 4000)):
+            keep = j == 4
+            nslot, nplace, nfr = 41 + j, (16 if keep else 20 + 4 * j) << 20, 2000   # (inside REC_BYTES)
             noff = SM.REC_OFFSET + nplace
             fr = [int(round(pk * _m.sin(2 * _m.pi * 7 * k / nfr + 0.3))) for k in range(nfr)]
             fr[123] = -pk                        # (its peak, exactly; 0: all zero)
             for k in range(nfr // 2):
                 pool[noff // 4 + k] = (fr[2 * k] & 0xFFFF) | (fr[2 * k + 1] & 0xFFFF) << 16
+            if keep:
+                machine.write(syms["smp_save_keep"], struct.pack(">I", 1))
             call("smp_save_recording", nslot, nplace, nfr)
+            keep_cleared = struct.unpack(">I", machine.read(syms["smp_save_keep"], 4))[0] == 0
             # v0.41 (the owner: NORMALIZING sat, then the RECORDER came back; rec.c gives a save
             # up after 20 s in which smp_save_mark() does not move): the mark, read each period
             # (its bits 28..31 are the save's state), must move while the normalised take goes
@@ -1636,7 +1723,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                 by_state.setdefault(mk >> 28, set()).add(mk)
             raw = b"".join(disk.get(STORE_SECTOR + 1 + noff // 512 + k, bytes(512)) for k in range((nfr * 2 + 511) // 512))
             back = list(struct.unpack_from(f"<{nfr}h", raw))
-            g = (32767 << 16) // pk if 0 < pk < 32767 else 1 << 16
+            g = (32767 << 16) // pk if 0 < pk < 32767 and not keep else 1 << 16
             gi, gf = g >> 16, g & 0xFFFF
 
             def scale(v):
@@ -1648,12 +1735,16 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                           "clipped": any(not -32768 <= v * gi + ((v * gf) >> 16) <= 32767 for v in fr),
                           "saved": struct.unpack(">i", machine.read(syms["smp_saved"], 4))[0],
                           "mark_states": {str(k): len(v) for k, v in sorted(by_state.items())},
-                          "mark_moves_in_reload": len(by_state.get(4, ())) >= 2})
+                          "mark_moves_in_reload": len(by_state.get(4, ())) >= 2,
+                          "normalising_states": sorted(k for k in by_state if k in (3, 4)),
+                          "keep": keep, "keep_cleared": keep_cleared})
         out["norm"] = norms
         ok_norm = (all(n["exact"] and n["saved"] == 1 for n in norms)
                    and all(n["peak_out"] in (32767, 32768) and not n["clipped"] for n in norms[:3])
                    and norms[3]["peak_out"] == 0
-                   and all(n["mark_moves_in_reload"] for n in norms[:3]))     # (the zero take is not normalised)
+                   and all(n["mark_moves_in_reload"] for n in norms[:3])      # (the zero take is not normalised)
+                   and norms[4]["peak_out"] == 4000 and norms[4]["normalising_states"] == []
+                   and norms[4]["keep_cleared"] and norms[0]["peak_out"] != 4000)   # v0.63: a FLEX save kept as it lies
         out["ok"] = bool(ok_norm)
     out["log"] = log[-8:]
     return out
@@ -1726,14 +1817,14 @@ def main() -> int:
         # pending normal channel-50 callback, which forces vector 191, the audio ISR). The
         # emulator has no DSP to send the marker, so do what its success path does: the
         # pending callbacks into vectors 168 and 170, cleared, and the aligned flag set
-        pend170, pend168 = machine.long(0x42C4BAF4), machine.long(0x42C4BAF8)
-        if machine.long(0x400002A8) == 0x400D5470 and pend170:
+        pend170, pend168 = machine.long(A(0x42C4BAF4)), machine.long(A(0x42C4BAF8))
+        if machine.long(0x400002A8) == A(0x400D5470) and pend170:
             machine.write(0x400002A8, struct.pack(">I", pend170))
-            machine.write(0x42C4BAF4, b"\0\0\0\0")
+            machine.write(A(0x42C4BAF4), b"\0\0\0\0")
             if pend168:
                 machine.write(0x400002A0, struct.pack(">I", pend168))
-                machine.write(0x42C4BAF8, b"\0\0\0\0")
-            machine.write(0x42C4BAFC, b"\x01")
+                machine.write(A(0x42C4BAF8), b"\0\0\0\0")
+            machine.write(A(0x42C4BAFC), b"\x01")
             print(f"  audio ISR at its real rate: one frame every {a.isr_frame:,} instructions; "
                   f"vector 170 -> {pend170:#010x} (the alignment's pending callback), vector 191 -> {machine.long(0x400002FC):#010x}")
     stock = open(os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin"), "rb").read()
@@ -1848,12 +1939,13 @@ def main() -> int:
     for spec in a.access:
         from unicorn import UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE, UC_MEM_WRITE
         va, n = (int(v, 0) for v in spec.split(":"))
+        va = A(va)                              # v0.73: a 1.11 address, on this run's OS
 
         def touched(uc_, kind, address, size, value, user, va=va):
             pc = uc.reg_read(K.UC_M68K_REG_PC)
             sp = uc.reg_read(K.UC_M68K_REG_A7)
             stack = struct.unpack(">24I", bytes(uc.mem_read(sp, 96)))
-            chain = " ".join(f"{v:08x}" for v in stack if 0x40000400 <= v < 0x40220000)[:44]
+            chain = " ".join(f"{v:08x}" for v in stack if 0x40000400 <= v < A(0x40220000))[:44]
             what = "w" if kind == UC_MEM_WRITE else "r"
             key = f"{what} +{address - va:#x} pc {pc:#010x} <- {chain}"
             access[key] = access.get(key, 0) + 1
@@ -1863,10 +1955,10 @@ def main() -> int:
     counts: dict[str, int] = {}
     frames_at_reset = [0]
     for va in a.count:
-        def counted(uc_, address, size, user):
-            key = f"{address:#010x}"
+        def count_hit(uc_, address, size, user, v11=int(va, 0)):   # (v0.67: not `counted`, guest_call's tally, which it hid)
+            key = f"{v11:#010x}"                    # v0.73: keyed by the 1.11 address asked for
             counts[key] = counts.get(key, 0) + 1
-        uc.hook_add(UC_HOOK_CODE, counted, begin=int(va, 0), end=int(va, 0))
+        uc.hook_add(UC_HOOK_CODE, count_hit, begin=A(int(va, 0)), end=A(int(va, 0)))
 
     pixels: dict[str, int] = {}
     if a.pixel_callers:
@@ -1887,7 +1979,7 @@ def main() -> int:
         px0, py0, px1, py1 = (int(v) for v in a.panel_writers.split(","))
 
         def panel_write(pc, address, value, size):
-            for base in (0x44622BC8, 0x44622FC8):
+            for base in (A(0x44622BC8), A(0x44622FC8)):
                 off = address - base
                 if 0 <= off < 1024:
                     y, bx = off // 16, off % 16
@@ -1896,7 +1988,7 @@ def main() -> int:
                         stack = struct.unpack(">64I", bytes(uc.mem_read(sp, 256)))
                         chain = [f"{pc:08x}"] + [f"{v:08x}" for v in stack if 0x40000400 <= v < 0x40310000][:7]
                         panel_writers[" ".join(chain)] = panel_writers.get(" ".join(chain), 0) + 1
-        machine.watch_writes(0x44622BC8, 0x44622FC8 + 1024, panel_write)
+        machine.watch_writes(A(0x44622BC8), A(0x44622FC8) + 1024, panel_write)
 
     # who calls VA: the code addresses on the stack at its entry, deepest first
     stacks: dict[str, int] = {}
@@ -1907,7 +1999,7 @@ def main() -> int:
             chain = " ".join(f"{v:08x}" for v in words if 0x40000400 <= v < 0x40310000)
             key = f"{address:#010x}: " + " ".join(chain.split(" ")[:12])
             stacks[key] = stacks.get(key, 0) + 1
-        uc.hook_add(UC_HOOK_CODE, stacked, begin=int(va, 0), end=int(va, 0))
+        uc.hook_add(UC_HOOK_CODE, stacked, begin=A(int(va, 0)), end=A(int(va, 0)))
 
     # v0.22: every UI-queue item the main loop pops (type, code, flags, time), after the
     # pop at 0x4002f17e: how keys and encoders arrive (the recorder's input filter)
@@ -1923,13 +2015,13 @@ def main() -> int:
 
     regs_at: dict[str, list] = {}
     for va in a.regs_at:
-        def at(uc_, address, size, user):
-            rows = regs_at.setdefault(f"{address:#010x}", [])
+        def at(uc_, address, size, user, v11=int(va, 0)):
+            rows = regs_at.setdefault(f"{v11:#010x}", [])          # v0.73: keyed by the 1.11 address
             if len(rows) < 6 or a.regs_last:
                 rows.append({f"{r}{i}": f"{uc.reg_read(getattr(K, f'UC_M68K_REG_{r}{i}')):#010x}"
                              for r in "DA" for i in range(8)})
                 del rows[:-max(6, a.regs_last)]
-        uc.hook_add(UC_HOOK_CODE, at, begin=int(va, 0), end=int(va, 0))
+        uc.hook_add(UC_HOOK_CODE, at, begin=A(int(va, 0)), end=A(int(va, 0)))
 
     # the long arguments of the last entry to each --args-at VA, for `call:` to reuse
     # (`argN@VA`): MACHINE SEL's model object, say, which no fixed address holds
@@ -1937,7 +2029,7 @@ def main() -> int:
     for va in a.args_at:
         def took(uc_, address, size, user):
             entry_args[address] = tuple(arg(4 * n) & 0xFFFFFFFF for n in range(1, 6))
-        uc.hook_add(UC_HOOK_CODE, took, begin=int(va, 0), end=int(va, 0))
+        uc.hook_add(UC_HOOK_CODE, took, begin=A(int(va, 0)), end=A(int(va, 0)))
 
     track_getter5: dict[str, int] = {}
 
@@ -2046,6 +2138,7 @@ def main() -> int:
     guest_call.returned = returned
     for spec in a.set_d0_at:
         va, val = (int(x, 0) for x in spec.split(":"))
+        va = A(va)                              # v0.73: a 1.11 address, on this run's OS
 
         def set_d0(uc_, address, size, user, val=val):
             uc_.reg_write(K.UC_M68K_REG_D0, val & 0xFFFFFFFF)
@@ -2068,7 +2161,7 @@ def main() -> int:
                          "a2": f"{uc.reg_read(K.UC_M68K_REG_A2):#010x}",
                          "stack": bytes(uc.mem_read(sp, 96)).hex()})
     alive = []
-    uc.hook_add(UC_HOOK_CODE, fault_reporter, begin=0x4011EA6A, end=0x4011EA6A)
+    uc.hook_add(UC_HOOK_CODE, fault_reporter, begin=A(0x4011EA6A), end=A(0x4011EA6A))
     # v0.38: a free() of an address on the running stack (blskk's crash: stock grew a vector
     # slc_keynotes had put on its stack, and freed the stack buffer to the heap; the heap is
     # then corrupt and the unit crashes later, anywhere). Every heap free goes through
@@ -2087,7 +2180,7 @@ def main() -> int:
     # per-instruction hook while inside it (the hook is added at the entry and removed at the
     # rte, so the UI's own run stays uncounted and fast); the worst, the mean, and how many
     # ran past F (an overrun: on the unit the next frame's interrupt is late and the UI starves)
-    isr = {"delivered": 0, "cost": [], "overruns": 0, "frames0": machine.long(0x4058E8D4), "in": [0], "h": [None]}
+    isr = {"delivered": 0, "cost": [], "overruns": 0, "frames0": machine.long(A(0x4058E8D4)), "in": [0], "h": [None]}
     ssi = machine.ev.get("ssi0_dma")
     if ssi is not None:
         def isr_tick(uc_, address, size, user):
@@ -2176,15 +2269,15 @@ def main() -> int:
                 elif x.startswith("sound"):
                     args.append(machine.long(KIT_POINTER) + 52 + SOUND_STRIDE * int(x[5:]))
                 elif x.startswith("long@"):
-                    args.append(machine.long(int(x[5:], 0)))
+                    args.append(machine.long(A(int(x[5:], 0))))
                 elif x.startswith("arg") and "@" in x:
                     # argN@VA, or argN@VA-OFF: an object that argument points into
                     n, va = x[3:].split("@")
                     va, _, off = va.partition("-")
-                    args.append((entry_args[int(va, 0)][int(n) - 1] - int(off or "0", 0)) & 0xFFFFFFFF)
+                    args.append((entry_args[A(int(va, 0))][int(n) - 1] - int(off or "0", 0)) & 0xFFFFFFFF)
                 else:
                     args.append(int(x, 0) & 0xFFFFFFFF)
-            ran = guest_call(int(parts[1], 0), *args, want_count=True)
+            ran = guest_call(A(int(parts[1], 0)), *args, want_count=True)
             d0 = returned["d0"]
             calls_made.append({"fn": parts[1], "args": [f"{v:#x}" for v in args], "ran": ran,
                                "d0": d0 - (1 << 32) if d0 & 0x80000000 else d0})
@@ -2278,17 +2371,17 @@ def main() -> int:
             # v0.40: addl:VA:N, N added to the u32 at VA (the frame counter 0x4058e8d4 moved
             # on as the audio interrupt would, without running it)
             _, va, n = step.split(":")
-            machine.write(int(va, 0), struct.pack(">I", (machine.long(int(va, 0)) + int(n, 0)) & 0xFFFFFFFF))
+            machine.write(A(int(va, 0)), struct.pack(">I", (machine.long(A(int(va, 0))) + int(n, 0)) & 0xFFFFFFFF))
             print(f"  addl {va} += {n}")
         elif step.startswith("poke:"):
             _, va, data = step.split(":")
-            machine.write(int(va, 0), bytes.fromhex(data))
+            machine.write(A(int(va, 0)), bytes.fromhex(data))
             print(f"  poke {va} = {data}")
         elif step.startswith("onpc:"):
             # v0.45: onpc:PC:VA:HEX: the next time PC runs, write HEX at VA, once (as code there
             # would have: the stock modulation apply's offset on SAMP, written where it adds it)
             _, pc_s, va, data = step.split(":")
-            pc_v, va_v, by = int(pc_s, 0), int(va, 0), bytes.fromhex(data)
+            pc_v, va_v, by = A(int(pc_s, 0)), A(int(va, 0)), bytes.fromhex(data)
             once = {}
 
             def onpc_hit(uc_, ad, sz, us, va_v=va_v, by=by, once=once):
@@ -2303,7 +2396,7 @@ def main() -> int:
             # the first node at screen + 28, +0 the next, +8 the view, the sentinel at screen +
             # 20; a view's first long its class), each view's class, in order, into memory[]
             _, va = step.split(":")
-            scr = machine.long(int(va, 0))
+            scr = machine.long(A(int(va, 0)))
             node, classes = machine.long(scr + 28), []
             while node and node != scr + 20 and len(classes) < 32:
                 view = machine.long(node + 8)
@@ -2315,7 +2408,7 @@ def main() -> int:
             _, va, n = step.split(":")
             # a second read of the same address keeps the first: key it by its order
             key = va if va not in mems else f"{va}@{len(mems)}"
-            mems[key] = machine.read(int(va, 0), int(n, 0)).hex()
+            mems[key] = machine.read(A(int(va, 0)), int(n, 0)).hex()    # keyed by the 1.11 address
         elif step.startswith("sync:"):
             # One track, through the routine the ISR's note path calls when a
             # triggered track's sound has changed (0x40026bbc / 0x40026bfe).
@@ -2369,7 +2462,7 @@ def main() -> int:
               "isr": None if ssi is None else {
                   "frame_instructions": a.isr_frame, "delivered": isr["delivered"],
                   "vector170": ssi.vector170, "vector191": ssi.vector191, "requests": ssi.requests,
-                  "frames": machine.long(0x4058E8D4) - isr["frames0"],
+                  "frames": machine.long(A(0x4058E8D4)) - isr["frames0"],
                   "cost_max": max(isr["cost"], default=0),
                   "cost_mean": round(sum(isr["cost"]) / len(isr["cost"])) if isr["cost"] else 0,
                   "overruns": isr["overruns"]},

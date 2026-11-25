@@ -28,6 +28,7 @@
 typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
+#include "banks.h"                              /* v0.65: global slots, the banks */
 
 #define FRAMES (*(volatile u32 *)0x4058E8D4u)                         /* frames since boot, 1,500 a second */
 #define REC_THR_FLOOR 33u                       /* v0.30: THRES 0's level, -60 dB, under any real input */
@@ -86,10 +87,14 @@ static int trk_pend_t __attribute__((section(".data"))) = 0;        /* and the t
 static u32 no_at __attribute__((section(".data"))) = 0;             /* NO pressed (held: to the top) */
 extern void smp_discard(int k);
 static void rename_start(int slot);
+static void sn_poll(void);                     /* v0.54: the stock NAME screen */
 static int lst_func __attribute__((section(".data"))) = 0;
 #define UI_TRACK_NOW (*(volatile unsigned char *)0x42431A6Cu)
 int smp_set_samp(int track, int value);
 int smp_samp_of(int track);
+u32 smp_samp_word(int track);                   /* v0.65 */
+int smp_set_samp_word(int track, u32 word);
+int smp_set_samp_g(int track, int g);
 extern u32 smp_frames(int k);
 extern int smp_trim(int k, u32 s, u32 e);
 extern void smp_discard(int k);
@@ -100,7 +105,7 @@ int smp_assign(int track, int slot);                 /* below: 0 done */
 
 /* v0.22: after a recording, the DT2's steps (manual 13.2, 9..11): TRIM, then NAME, then
  * ASSIGN (a [TRIG] key: that track plays it; NO: none). rec_phase 0 is the RECORDER. */
-enum { PH_REC, PH_TRIM, PH_NAME, PH_ASSIGN, PH_WORK };   /* v0.25: WORK, NORMALIZING */
+enum { PH_REC, PH_TRIM, PH_NAME, PH_ASSIGN, PH_WORK, PH_SNAME };   /* v0.25: WORK, NORMALIZING; v0.54: SNAME, the stock NAME screen up */
 int rec_phase __attribute__((section(".data"))) = PH_REC;
 int trim_slot __attribute__((section(".data"))) = -1;
 u32 trim_n __attribute__((section(".data"))) = 0;           /* its frames, as recorded */
@@ -132,6 +137,12 @@ int trim_zoom __attribute__((section(".data"))) = 0;      /* v0.33: TRIM's zoom,
 u32 trim_pos __attribute__((section(".data"))) = 0;       /* v0.33: its window's first frame */
 int rec_rlen __attribute__((section(".data"))) = 0;         /* 0 MAX, else steps */
 int rec_rstrt __attribute__((section(".data"))) = 0;        /* 0 THRES, 1 PLAY */
+/* v0.59 MON (the RECORDER's C, owner 2026-11-17): hear SRC IN through the main out while armed or
+ * recording (the DSP's pvmix adds it at unity); every recorder command carries it (bit 30 of the
+ * channel word); FLEX REC never sets it. OFF at power-on. */
+int rec_mon __attribute__((section(".data"))) = 0;
+#define MON_BIT (1u << 30)
+u32 rec_sent_chan __attribute__((section(".data"))) = 0;   /* the last command's channel word (the gate's) */
 /* v0.50 FLEX REC's G: a buffer take's GAIN in dB, -24..+38 (0: unity at the FLEX track's defaults).
  * Sent as the record command's channel word bits 24..29, GAIN + 25 (1..63); 0 there, the RECORDER's
  * own commands, keeps the DSP's v0.49 scaling exactly (dnfw.sampler.program settings()) */
@@ -164,7 +175,7 @@ static u32 enc_eaten __attribute__((section(".data"))) = 0;    /* v0.39: the enc
 
 int rec_visible(void)
 {
-    return rec_overlay;
+    return rec_overlay && rec_phase != PH_SNAME;   /* v0.54: not over the stock NAME screen */
 }
 
 /* the DSP's source and channel: v0.33, SRC (IN, MAIN, TRK1..16: the DSP's 0, 1, 2 + t) and
@@ -285,15 +296,18 @@ static void send(int cmd)
         extern u32 smp_command_words(u32 *w, u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames);
         extern void rt_q_set(const u32 *w);
         u32 w[6];
-        sent_seq = smp_command_words(w, (u32)cmd, src, chan | (place / 512u) << 8, thr,
-                                     (u32)rec_dest << 24 | len);
+        extern int bn_active(void);
+        u32 m = rec_mon && !bn_active() ? MON_BIT : 0u;   /* v0.59 MON */
+        rec_sent_chan = chan | (place / 512u) << 8 | m;
+        sent_seq = smp_command_words(w, (u32)cmd, src, rec_sent_chan, thr, (u32)rec_dest << 24 | len);
         rt_q_set(w);
     } else {
         /* v0.50: FLEX REC's monitoring carries GAIN, so H's meter is the take's level */
         extern int bn_active(void);
         u32 g = cmd == CMD_MONITOR && bn_active() ? rec_gain_bits() : 0u;
-        sent_seq = smp_command((u32)cmd, src, chan | (place / 512u) << 8 | g, thr,
-                               (u32)rec_dest << 24 | len);
+        u32 m = rec_mon && !bn_active() ? MON_BIT : 0u;   /* v0.59 MON */
+        rec_sent_chan = chan | (place / 512u) << 8 | g | m;
+        sent_seq = smp_command((u32)cmd, src, rec_sent_chan, thr, (u32)rec_dest << 24 | len);
     }
     sent_at = FRAMES;
     mon_thres = rec_thres;
@@ -498,9 +512,10 @@ static void rec_arm_turn(int delta)
 
 /* v0.44 BOUNCE, FUNC + YES on its RECORDER: the buffer's playing take into the next empty
  * pool slot. The slot takes the take's frames where they lie (no copy: the buffer goes on
- * playing them, its next take goes elsewhere), and the take is saved to the +Drive,
- * normalised and named as a manual recording is (SAVING, NORMALIZING, TRIM, FILE NAME,
- * ASSIGN). Nothing to save, or a take still recording or waiting: the line says so */
+ * playing them, its next take goes elsewhere), and the take is saved to the +Drive and
+ * named as a manual recording is (SAVING, TRIM, FILE NAME, ASSIGN). v0.63 (the owner): never
+ * normalised -- the playing buffer shares those frames, and normalising them made it jump to
+ * full scale; a FLEX take is recorded at its source's level, so it is kept as it is. Nothing to save, or a take still recording or waiting: the line says so */
 u32 bn_nothing_at __attribute__((section(".data"))) = 0;
 void bn_save(void)
 {
@@ -518,6 +533,8 @@ void bn_save(void)
         return;
     }
     u32 frames = bytes / 2u;
+    extern u32 smp_save_keep;
+    smp_save_keep = 1;                               /* v0.63: kept as it lies, never normalised */
     smp_save_recording(slot, place, frames);
     smp_push_slot(slot);
     rec_saved_slot = slot;
@@ -614,6 +631,10 @@ static void fx_save(void)
 
 void rec_poll(void)
 {
+    extern void tn_poll(void);                  /* v0.61: the project's tuning (tune.c) */
+    tn_poll();
+    extern void pf_poll(void);                  /* v0.69: the project's PERFORM macros (perf.c) */
+    pf_poll();
     /* v0.48: a turned control's value shows for a second (smp_page.c shows()); then its
      * label again, drawn once more when the second is up */
     static int val_shown __attribute__((section(".data"))) = 0;
@@ -628,6 +649,7 @@ void rec_poll(void)
     }
     extern void smp_marquee_poll(void);
     rpt_poll();
+    sn_poll();                                  /* v0.54: the stock NAME screen's answer */
     smp_marquee_poll();                         /* v0.39: the selected long name's marquee */
     fb_pv_poll();
     extern void rt_poll(void);
@@ -822,6 +844,10 @@ __attribute__((optimize("no-jump-tables"))) static void knob(int index, int delt
         rec_rstrt = delta > 0 ? 1 : 0;
     else if (index == 8)
         rec_arm_turn(delta);
+    else if (index == 3 && delta) {             /* v0.59: C MON, OFF / ON (as R.STRT) */
+        rec_mon = delta > 0 ? 1 : 0;
+        mon_known = 0;                          /* the DSP hears it with the next MONITOR */
+    }
 }
 
 static int closes(u32 code)
@@ -903,11 +929,44 @@ int smp_assign(int track, int slot)
     return 0;
 }
 
+/* v0.65: SAMP on TRACK set to WORD (its bank in the low byte) as the knob sets it */
+int smp_set_samp_word(int track, u32 word)
+{
+    extern int rt_samp_buf(u32 samp);
+    u32 value = (word >> 8) & 0xFFu;
+    if (track < 0 || track > 15 || (value > 127 && rt_samp_buf(value) < 0) || !KIT)
+        return -1;                              /* v0.55: or a FLEX buffer's code */
+    int ty = SOUND_TYPE(track);
+    if (!SAMP_MACHINE(ty))
+        return -1;
+    u32 owner = UI_OWNER();
+    if (!owner)
+        return -1;
+    u32 ps = PARAM_SET(owner, SMP_SAMP_ID, (u32)track);
+    if (!ps)
+        return -1;
+    /* smp_quant writes WORD as it is, through the stock call made with a value in range and
+     * other than the one held (so it is not skipped): the stock path after the write (undo, the
+     * kit, a p-lock while a [TRIG] is held, the frame) carries it */
+    extern int smp_samp_direct;
+    smp_samp_direct = (int)(0x10000u | (word & 0xFFFFu));
+    u32 sent = smp_samp_of(track) == 127 ? 126u : 127u;
+    SET_VALUE(ps, SMP_SAMP_ID, sent << 8, (u32)track, 0, 0, 1);
+    smp_samp_direct = 0;
+    return 0;
+}
+
+int smp_set_samp_g(int track, int g)            /* v0.65: SAMP on global slot G */
+{
+    return g < 0 || g >= SMP_ALL ? -1 : smp_set_samp_word(track, G_WORD(g));
+}
+
 /* v0.25: SAMP on TRACK set to VALUE (0 OFF, k slot k - 1) as the knob sets it, and read */
 int smp_set_samp(int track, int value)
 {
-    if (track < 0 || track > 15 || value < 0 || value > 127 || !KIT)
-        return -1;
+    extern int rt_samp_buf(u32 samp);
+    if (track < 0 || track > 15 || value < 0 || (value > 127 && rt_samp_buf((u32)value) < 0) || !KIT)
+        return -1;                              /* v0.55: or a FLEX buffer's code */
     int ty = SOUND_TYPE(track);
     if (!SAMP_MACHINE(ty))
         return -1;                              /* not a sample machine: nothing to set */
@@ -917,7 +976,18 @@ int smp_set_samp(int track, int value)
     u32 ps = PARAM_SET(owner, SMP_SAMP_ID, (u32)track);
     if (!ps)
         return -1;
-    SET_VALUE(ps, SMP_SAMP_ID, (u32)value << 8, (u32)track, 0, 0, 1);
+    /* v0.55: smp_quant writes VALUE as it is; a FLEX buffer's code (above the record's 127,
+     * where the stock setter would clamp it) goes in through smp_quant's own write, the stock
+     * call made with a value in range and other than the one held (so it is not skipped) */
+    extern int smp_samp_direct;
+    u32 sent = (u32)value;
+    if (value > 127) {
+        smp_samp_direct = value;
+        sent = smp_samp_of(track) == 127 ? 126u : 127u;
+    } else
+        smp_samp_direct = -1;
+    SET_VALUE(ps, SMP_SAMP_ID, sent << 8, (u32)track, 0, 0, 1);
+    smp_samp_direct = 0;
     return 0;
 }
 
@@ -926,17 +996,20 @@ int smp_set_samp(int track, int value)
  * sound to the new machine's defaults, SAMP to OFF). Anything else is stock's. */
 u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
 {
-    int keep = 0;
+    extern int gr_allowed(u32 track, u32 type);
+    if (!gr_allowed(track, type))               /* v0.69: the guardrail (guard.c): refused, said so */
+        return 0;
+    u32 keep = 0;                               /* v0.65: the whole word (its bank) */
     if (track < 16 && KIT) {
         int old = SOUND_TYPE(track);
         int ty = (int)type;
         if (old != ty && SAMP_MACHINE(old) && SAMP_MACHINE(ty))
-            keep = smp_samp_of((int)track);
+            keep = smp_samp_word((int)track);
     }
     int was = track < 16 && KIT ? SOUND_TYPE(track) : -1;
     u32 r = MACHINE_COMMIT(model, track, type, a, b);
-    if (keep > 0 && SOUND_TYPE(track) == (int)type && smp_samp_of((int)track) != keep)
-        smp_set_samp((int)track, keep);
+    if ((keep >> 8) > 0 && SOUND_TYPE(track) == (int)type && smp_samp_word((int)track) != keep)
+        smp_set_samp_word((int)track, keep);
     /* v0.48: a fresh ONESHOT/STRETCH/REPITCH/BOUNCE starts at the DT2's LEN, 120.00 (fmt.c
      * smp_fine). The commit sets the shared record's default, WaveTone's 0x7f00 while the
      * records are still stock; anything left above 120.00 is put at it. */
@@ -990,10 +1063,137 @@ int smp_samp_of(int track)
     return *(volatile u8 *)(KIT + 52u + 1163u * (u32)track + 20u + 2u * 43u);
 }
 
+/* v0.65: SAMP's whole word (its bank in the low byte, docs/banks.md) */
+u32 smp_samp_word(int track)
+{
+    if (track < 0 || track > 15 || !KIT)
+        return 0;
+    volatile u8 *w = (volatile u8 *)(KIT + 52u + 1163u * (u32)track + 20u + 2u * 43u);
+    return (u32)w[0] << 8 | w[1];
+}
+
 /* a [TRIG] key's track, or -1 */
 int smp_trig_track(u32 code)
 {
     return code >= K_TRIG1 && code < K_TRIG1 + 16u ? (int)(code - K_TRIG1) : -1;
+}
+
+
+/* v0.54: the DN2's own NAME screen for our names (owner, 2026-11-14: "identical to the stock
+ * elektron namer"; docs/name-screen.md). Stock's naming screen is a view of its own class,
+ * NameView, made as PATTERN NAME makes it (0x400795ba): the shared block and the view in one
+ * allocation, NameView(title, name, id, max, prefixed, prefix, callback), then opened over the
+ * main screen's view. The callback (a std::function<void(std::string, int)>) runs on YES with
+ * the name; NO closes the view without it. While the view is up every key is stock's
+ * (smp_question_up) and none of our screens draws (page.c's wr_screen). Anything not as
+ * expected (no main screen view yet, or one whose controller is not the screen we draw over)
+ * leaves our own naming screen in use. */
+#define SN_NEW       ((u32 (*)(u32))0x40120264u)    /* operator new (as u32: stock returns in d0; a pointer return here would read a0) */
+#define SN_STR       ((void (*)(void *, const char *, void *))0x401CE69Eu)   /* std::string(const char *, alloc) */
+#define SN_STR_FREE  ((void (*)(void *))0x401CCBEEu)                    /* ~std::string */
+#define SN_FN_FREE   ((void (*)(void *))0x40188086u)                    /* ~std::function */
+#define SN_VIEW      ((void (*)(void *, void *, void *, int, int, int, void *, void *))0x40119156u)
+#define SN_OPEN      ((void (*)(void *, void *, int))0x4011C8BEu)       /* View::open(child shared_ptr, 0) */
+#define SN_COUNT_FREE ((void (*)(void *))0x401880CCu)                  /* ~__shared_count */
+#define SN_MAIN_VIEW 0x44647980u                                        /* MainScreenView's shared_ptr */
+#define SN_BLOCK_VT  0x401E0BC8u                                        /* _Sp_counted_ptr_inplace<NameView> */
+#define SN_VIEW_VT   0x40206AC0u                                        /* NameView */
+#define SN_BYTES     0xB0u                                              /* the block (16) and the view (160) */
+static char sn_name[NM_LONG + 1] __attribute__((section(".data")));
+static int sn_state __attribute__((section(".data"))) = 0;     /* 1 open, 2 named (YES) */
+static int sn_seen __attribute__((section(".data"))) = 0;      /* the view seen in the screen's list */
+static u32 sn_at __attribute__((section(".data"))) = 0;
+u32 sn_opens __attribute__((section(".data"))) = 0;            /* (the gate reads these) */
+u32 sn_results __attribute__((section(".data"))) = 0;
+
+static void sn_invoke(void *functor, u32 *str, int id)        /* the view's YES: the name */
+{
+    (void)functor;
+    (void)id;
+    const char *n = str ? (const char *)*str : 0;
+    int j = 0;
+    for (; n && j < NM_LONG && n[j]; j++) {
+        char ch = n[j];
+        if (ch >= 'a' && ch <= 'z')
+            ch = (char)(ch - 32);
+        sn_name[j] = ch >= ' ' && ch <= '~' ? ch : ' ';
+    }
+    sn_name[j] = 0;
+    sn_state = 2;
+    sn_results++;
+}
+
+static int sn_manage(u32 *dest, const u32 *src, int op)       /* std::function's manager: an empty functor */
+{
+    if (op == 0)                                /* __get_type_info: none */
+        dest[0] = 0;
+    else if (op == 1)                           /* __get_functor_ptr */
+        dest[0] = (u32)src;
+    else if (op == 2) {                         /* __clone_functor */
+        dest[0] = src[0];
+        dest[1] = src[1];
+    }
+    return 0;
+}
+
+static int ram_ok(u32 a);
+int sn_up(void)                                 /* a NameView in the screen's list */
+{
+    extern void *wr_screen_obj;
+    u32 s = (u32)wr_screen_obj;
+    if (!ram_ok(s))
+        return 0;
+    u32 node = *(volatile u32 *)(s + 28);
+    for (int n = 0; n < 32 && ram_ok(node) && node != s + 20; n++) {
+        u32 v = *(volatile u32 *)(node + 8);
+        if (ram_ok(v) && *(volatile u32 *)v == SN_VIEW_VT)
+            return 1;
+        node = *(volatile u32 *)node;
+    }
+    return 0;
+}
+
+/* the stock NAME screen over everything, titled TITLE, on TEXT (MAX characters at most); 1 if
+ * it opened (rec_poll's sn_poll finishes it), 0 to use ours */
+static int sn_open(const char *title, const char *text, int max)
+{
+    extern void *wr_screen_obj;
+    u32 main_view = *(volatile u32 *)SN_MAIN_VIEW;
+    if (sn_state || !ram_ok(main_view) || !wr_screen_obj
+        || *(volatile u32 *)(main_view + 44) != (u32)wr_screen_obj)
+        return 0;
+    u32 *blk = (u32 *)SN_NEW(SN_BYTES);
+    if (!blk)
+        return 0;
+    blk[0] = SN_BLOCK_VT;
+    blk[1] = 1;                                 /* use */
+    blk[2] = 1;                                 /* weak */
+    blk[3] = (u32)blk + 16u;                    /* the view, in place */
+    char alloc = 0;
+    u32 s_title = 0, s_name = 0, s_prefix = 0;
+    u32 fn[4];                                  /* std::function: the functor's 8 bytes, manager, invoker */
+    fn[0] = 0;
+    fn[1] = 0;
+    fn[2] = (u32)sn_manage;
+    fn[3] = (u32)sn_invoke;
+    SN_STR(&s_title, title, &alloc);
+    SN_STR(&s_name, text, &alloc);
+    SN_STR(&s_prefix, "%03d:", &alloc);         /* (not shown: prefixed 0) */
+    SN_VIEW(blk + 4, &s_title, &s_name, 0, max, 0, &s_prefix, fn);
+    SN_STR_FREE(&s_prefix);
+    SN_STR_FREE(&s_name);
+    SN_STR_FREE(&s_title);
+    SN_FN_FREE(fn);
+    u32 sp[2];                                  /* shared_ptr<View> (NameView's View is at +0) */
+    sp[0] = (u32)blk + 16u;
+    sp[1] = (u32)blk;
+    SN_OPEN((void *)main_view, sp, 0);
+    SN_COUNT_FREE(&sp[1]);
+    sn_state = 1;
+    sn_seen = 0;
+    sn_at = *(volatile u32 *)0x4058E8D4u;
+    sn_opens++;
+    return 1;
 }
 
 /* MAX: 35 for a recording (its name goes with it into +DRIVE > RECORDED), the pool's long
@@ -1011,7 +1211,25 @@ static void name_start_max(int max)
     nm_cur = 0;
     rec_phase = PH_NAME;
 }
-static void name_start(void) { name_start_max(NM_LONG); }
+/* v0.54: the stock NAME screen on the name as set up (sn_open), when it opens */
+static void name_open(const char *title)
+{
+    char t[NM_LONG + 1];
+    int j, last = -1;
+    for (j = 0; j < nm_max && j < NM_LONG; j++) {
+        t[j] = nm_text[j] ? nm_text[j] : ' ';
+        if (t[j] != ' ')
+            last = j;
+    }
+    t[last + 1] = 0;
+    if (sn_open(title, t, nm_max))
+        rec_phase = PH_SNAME;
+}
+static void name_start(void)
+{
+    name_start_max(NM_LONG);
+    name_open("FILE NAME");
+}
 
 static void name_step(int d)
 {
@@ -1043,6 +1261,7 @@ static void folder_name_start(void)
     nm_only = 2;
     rec_phase = PH_NAME;
     rec_overlay = 1;
+    name_open("FOLDER NAME");
 }
 
 static void rename_start(int slot)
@@ -1054,6 +1273,7 @@ static void rename_start(int slot)
     name_start_max(smp_meta_ok ? NM_LONG : 7);  /* v0.46: long where the pool keeps long names */
     nm_only = 1;
     rec_overlay = 1;
+    name_open("SAMPLE NAME");
 }
 
 extern void smp_rec_store_named(int k, const char *name);
@@ -1088,6 +1308,74 @@ static void name_done(void)
         nm_only = 0;
         rec_phase = PH_REC;
         rec_overlay = 0;
+    }
+}
+
+/* NO on the naming screen: a rename or a new folder left as it was; a recording keeps the
+ * name it has and goes on to ASSIGN */
+static void name_cancel(void)
+{
+    if (nm_only) {
+        nm_only = 0;
+        rec_phase = PH_REC;
+        rec_overlay = 0;
+    } else {
+        as_done = -1;
+        rec_phase = PH_ASSIGN;
+        extern const char *smp_long_name(int k);   /* v0.46: into +DRIVE > RECORDED, under it */
+        smp_rec_store_named(trim_slot, smp_long_name(trim_slot));
+    }
+}
+
+/* v0.54: the stock NAME screen's answer, once a UI pass: YES gave a name (the view's callback),
+ * or the view closed without one (NO). Finished here, outside stock's key handling. */
+/* v0.69: the NAME screen for another of ours (PERFORM's macro names, perf.c): DONE gets the name */
+static void (*sn_client)(const char *) __attribute__((section(".data"))) = 0;
+int smp_name_screen(const char *title, const char *text, int max, void (*done)(const char *))
+{
+    if (rec_overlay || !sn_open(title, text, max))
+        return 0;
+    sn_client = done;
+    return 1;
+}
+
+static void sn_poll(void)
+{
+    extern int smp_overlay_dirty;
+    if (!sn_state)
+        return;
+    int up = sn_up();
+    if (up)
+        sn_seen = 1;
+    if (sn_state == 2) {
+        sn_state = 0;
+        if (sn_client) {                        /* v0.69: someone else's name */
+            void (*f)(const char *) = sn_client;
+            sn_client = 0;
+            f(sn_name);
+            smp_overlay_dirty = 1;
+            return;
+        }
+        if (rec_phase != PH_SNAME)
+            return;
+        int j = 0;
+        for (; j < NM_LONG && sn_name[j]; j++)
+            nm_text[j] = sn_name[j];
+        for (; j <= NM_LONG; j++)
+            nm_text[j] = 0;
+        rec_phase = PH_NAME;
+        name_done();
+        smp_overlay_dirty = 1;
+        return;
+    }
+    if (!up && (sn_seen || *(volatile u32 *)0x4058E8D4u - sn_at > 3000u)) {
+        sn_state = 0;
+        sn_client = 0;
+        if (rec_phase == PH_SNAME) {
+            rec_phase = PH_NAME;
+            name_cancel();
+        }
+        smp_overlay_dirty = 1;
     }
 }
 
@@ -1353,7 +1641,7 @@ static void lrpt_poll(void)
         if (!smp_lib_used(trk_pend_k))
             trk_pend_k = -1;
         else if (s >= 0 && !smp_lib_pending()) {
-            smp_set_samp(trk_pend_t, s + 1);
+            smp_set_samp_g(trk_pend_t, s);          /* (v0.65: in its bank) */
             trk_pend_k = -1;
         }
     }
@@ -1478,16 +1766,9 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
         }
         else if (code == K_YES)
             name_done();
-        else if (code == K_NO && nm_only) {    /* the browser's RENAME, left as it was */
-            nm_only = 0;
-            rec_phase = PH_REC;
-            rec_overlay = 0;
-        } else if (code == K_NO) {
-            as_done = -1;
-            rec_phase = PH_ASSIGN;              /* the name it has */
-            extern const char *smp_long_name(int k);   /* v0.46: into +DRIVE > RECORDED, under it */
-            smp_rec_store_named(trim_slot, smp_long_name(trim_slot));
-        } else if (smp_func_held && code >= K_UP && code <= K_RIGHT) {  /* the grid */
+        else if (code == K_NO)                  /* the browser's RENAME left as it was; a recording */
+            name_cancel();                      /* keeps the name it has */
+        else if (smp_func_held && code >= K_UP && code <= K_RIGHT) {  /* the grid */
             grid_move(code);
             if (code == K_LEFT || code == K_RIGHT)
                 rpt_start(code);
@@ -1541,7 +1822,9 @@ static int ram_ok(u32 a)
 {
     return a >= 0x40000000u && a < 0x48000000u && !(a & 3);
 }
-int smp_question_up(void)
+/* v0.64: the first view on the screen of class CLS, or with CLS 0 of any question's class;
+ * 0 none (jump.c finds the PTN view with it) */
+u32 smp_view_of(u32 want)
 {
     extern void *wr_screen_obj;
     u32 s = (u32)wr_screen_obj;
@@ -1552,12 +1835,18 @@ int smp_question_up(void)
         u32 v = *(volatile u32 *)(node + 8);
         if (ram_ok(v)) {
             u32 cls = *(volatile u32 *)v;
-            if (cls == QUESTION_VTABLE || cls == PROGRESS_VTABLE || cls == MESSAGE_VTABLE)
-                return 1;
+            if (want ? cls == want
+                : (cls == QUESTION_VTABLE || cls == PROGRESS_VTABLE || cls == MESSAGE_VTABLE
+                   || cls == SN_VIEW_VT))       /* v0.54: the stock NAME screen */
+                return v;
         }
         node = *(volatile u32 *)node;
     }
     return 0;
+}
+int smp_question_up(void)
+{
+    return smp_view_of(0) != 0;
 }
 
 /* v0.30: the keys held now (codes 0..63), every key item seen here: TRIG + YES (stock's
@@ -1586,9 +1875,34 @@ int smp_knob_d __attribute__((section(".data"))) = 0;       /* v0.32: the last k
 u32 smp_knob_at __attribute__((section(".data"))) = 0;
 int smp_knob_code __attribute__((section(".data"))) = 0;     /* v0.48: which knob (1..8: A..H), its value shown */
 
+/* v0.64 KEYBOARD HOLD (docs/kbhold.md; the owner, 2026-11-19/20): PTN + KEYBOARD (below, in
+ * smp_ui_pop) turns kh_on, and with it stock's own sustain (what MIDI CC 64 sets) on all 16
+ * tracks: 0x40126d4a(track, on). While a track's sustain is on, stock's note-off for a played
+ * note (0x4012182a: the [TRIG] keys in KEYBOARD mode, MIDI in, the arp's held keys) is kept in
+ * the track's list (0x40126e30) instead of sent; sustain off sends every kept note-off. So a
+ * note already held when HOLD comes on is latched when its key is let go, and the arpeggiator
+ * keeps the held keys. The sequencer's notes never pass there. kh_press / kh_pend: one item held
+ * back for the next call of the receive (PTN's release, after the NO that closes the PTN view) */
+#define KH_ITEM 16
+#define SUSTAIN ((void (*)(u32, u32))0x40126D4Au)            /* (track, on): stock's CC 64 */
+u32 kh_on __attribute__((section(".data"))) = 0;
+static u32 kh_pend __attribute__((section(".data"))) = 0;
+static u8 kh_press[KH_ITEM] __attribute__((section(".data")));
+
+void kh_set(u32 on)                             /* PTN + KEYBOARD */
+{
+    kh_on = on;
+    for (u32 t = 0; t < 16; t++)
+        SUSTAIN(t, on);
+}
+
 u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock receive returns it */
 {
-    u8 *it = (u8 *)UI_POP(queue);
+    u8 *it = kh_press;                          /* v0.64: the held-back item before stock's */
+    if (!kh_pend)
+        it = (u8 *)UI_POP(queue);
+    u32 kh_serving = kh_pend;
+    kh_pend = 0;
     if (!it)
         return (u32)it;
     u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
@@ -1596,6 +1910,21 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         smp_knob_d = (signed char)it[8];
         smp_knob_at = *(volatile u32 *)0x4058E8D4u;
         smp_knob_code = (int)code;
+        /* v0.55: SAMP at 127 turned up on a sample machine's SRC page: on to the FLEX buffers
+         * (the stock knob stops at the record's 127, so this turn never reaches the setter) */
+        extern int smp_samp_page(void);
+        extern u32 rt_buf_code(u32 b);
+        int t = (int)UI_TRACK_NOW;
+        if (code == 4 && smp_knob_d > 0 && !rec_overlay && !smp_fb_open && smp_samp_page()
+            && SAMP_MACHINE(SOUND_TYPE(t)) && smp_samp_of(t) == 127) {
+            /* v0.65: from any bank's 127, on to the next bank's 001 (or the FLEX buffers) */
+            extern int smp_word_row(u32 w), smp_row_step(int r, int d);
+            extern u32 smp_row_word(int r);
+            (void)rt_buf_code;
+            smp_set_samp_word(t, smp_row_word(smp_row_step(smp_word_row(smp_samp_word(t)), smp_knob_d)));
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
     }
     u32 flags = (u32)it[8] << 24 | (u32)it[9] << 16 | (u32)it[10] << 8 | it[11];
     /* v0.25: a key's item: bit 0 while it is down (a press), bit 4 on most keys' release,
@@ -1611,6 +1940,31 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         *h = down ? *h | bit : *h & ~bit;
         if (down && code >= 25 && code <= 40)   /* v0.33: when each [TRIG] went down */
             smp_trig_at[code - 25] = *(volatile u32 *)0x4058E8D4u;
+    }
+    /* v0.64 KEYBOARD HOLD: PTN held, a fresh KEYBOARD without FUNC turns it on or off (stock:
+     * KEYBOARD's own toggle, taken before any view; dropped here), KB HOLD ON / OFF on the PTN
+     * view's line. When PTN is let go, a NO press goes first and then PTN's release (kh_press):
+     * jump.c hands that NO to the PTN view's stock handler (kh_close 2), which closes it as a
+     * PTN + [TRIG] does (left open, the next [TRIG] picks a pattern; measured) */
+    if (it[0] == IT_KEY && !kh_serving) {
+        extern void jmp_hold_say(u32 on);
+        extern u32 kh_close;
+        if (code == 18 && down && !(flags & F_REPEAT) && (smp_held_lo >> 23 & 1u)) {
+            kh_set(!kh_on);
+            jmp_hold_say(kh_on);
+            kh_close = 1;
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+        if (code == 23 && !down && kh_close == 1) {
+            for (int k = 0; k < KH_ITEM; k++)
+                kh_press[k] = it[k];
+            kh_pend = 1;
+            it[7] = 12;                         /* K_NO, pressed */
+            it[11] = F_PRESS;
+            kh_close = 2;
+            return (u32)it;
+        }
     }
     if (it[0] == IT_KEY && code == K_SRC) {     /* v0.35: SYN held: the pages' values (O14) */
         if (down && (flags & F_REPEAT))
@@ -1693,6 +2047,20 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     if (!rec_overlay && it[0] == IT_KNOB) {     /* parameter slides: E and F on TRIG page 2 */
         extern int sl_knob(u32 index, int delta);
         if (sl_knob(code, (signed char)it[8])) {
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+    }
+    if (!rec_overlay && !smp_lst_open && !smp_fb_open) {   /* v0.69: PERFORM, [MOD] + [FX] (perf.c) */
+        extern int pf_pop(u8 *it);
+        if (pf_pop(it)) {
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+    }
+    if (!rec_overlay && !smp_lst_open && !smp_fb_open) {   /* v0.61: TUNING, KB SETUP's H (tune.c) */
+        extern int tn_pop(u8 *it);
+        if (tn_pop(it)) {
             it[0] = IT_DROP;
             return (u32)it;
         }
@@ -1952,7 +2320,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     if (act == 0) {             /* v0.31: LOAD TO TRK from +DRIVE: into the pool, */
                         int s = smp_lib_slot_of(slot);      /* then the track's SAMP */
                         if (s >= 0) {
-                            smp_set_samp(t, s + 1);
+                            smp_set_samp_g(t, s);
                         } else if (smp_lib_load(slot) == 0) {
                             trk_pend_k = slot;
                             trk_pend_t = t;
@@ -1961,10 +2329,10 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 } else if (code == K_YES && slot >= 0) {
                     smp_fb_menu = 0;
                     if (act == 0) {             /* LOAD TO TRK */
-                        smp_set_samp(t, slot + 1);
+                        smp_set_samp_g(t, slot);
                         smp_fb_open = 0;
                         smp_fb_unmark_all();    /* v0.33: closed, so its ticks go (as a page key's) */
-                        smp_list_settle(slot + 1);
+                        smp_list_settle((int)G_WORD(slot));
                     } else if (act == 1) {      /* RENAME: the NAME screen, alone */
                         smp_fb_open = 0;
                         smp_list_close();
@@ -2039,8 +2407,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 smp_fb_cur = smp_fb_last_store == 1 ? 0 : 1;
             } else if (code == K_YES) {
                 smp_list_close();
-            } else {                            /* NO: as it was */
-                smp_set_samp(t, smp_lst_orig);
+            } else {                            /* NO: as it was (v0.65: the word, its bank) */
+                smp_set_samp_word(t, (u32)smp_lst_orig);
                 smp_list_settle(smp_lst_orig);
             }
             return (u32)it;
@@ -2085,9 +2453,14 @@ static void lst_step(u32 code)
     if (smp_list_view && smp_list_up(smp_list_view)) {
         int t = (int)UI_TRACK_NOW;
         smp_list_hold();
-        int v = smp_samp_of(t) + (code == K_DOWN ? 1 : -1);
-        if (v >= 0 && v <= 127)
-            smp_set_samp(t, v);
+        /* v0.55: by rows: SAMP 0..127, then the FLEX buffers B1..B8. v0.65: the rows run through
+         * the banks (smp_page.c smp_row_step); FUNC + UP / DOWN jumps a bank, as the DT2's */
+        extern int smp_word_row(u32 w), smp_row_step(int r, int d);
+        extern u32 smp_row_word(int r);
+        int r0 = smp_word_row(smp_samp_word(t)), d = code == K_DOWN ? 1 : -1;
+        int r = smp_row_step(r0, smp_func_held ? 127 * d : d);
+        if (r != r0)
+            smp_set_samp_word(t, smp_row_word(r));
         return;
     }
     lrpt_code = 0;                              /* neither up: the repeat ends */

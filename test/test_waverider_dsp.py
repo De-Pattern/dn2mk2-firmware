@@ -216,7 +216,7 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
     for _w, at, payload in data:
         assert dsp.L2_IMAGE_END + 0x10000 <= at and at + len(payload) <= dsp.PERC_L2_LOAD
         assert bootstream.read_span(built, at, len(payload)) == payload
-    assert dsp.SMP_L2_LOAD == dsp.PERC_L2_LOAD + dsp.PERC_L2_SPAN
+    assert dsp.SMP_L2_LOAD == 0x200B0000 and dsp.SMP_L2_LOAD + dsp.SMP_L2_SPAN <= dsp.PERC_L2_LOAD   # stereo: below PERC
     for (what, at, payload), name in zip(spans, ("perc", "smp")):
         code = dsp.objects()[name]
         if name == "smp":                        # v0.25: wr_pvmix in the span's last 1 KB
@@ -234,7 +234,7 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
         if b.count and 0x20000000 <= b.target < 0x20100000:
             assert b.target + b.count <= dsp.L2_IMAGE_END
     assert dsp.PERC_SW == 0xBE0000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
-    assert dsp.SMP_SW == 0xBF1800 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
+    assert dsp.SMP_SW == 0xBD8000 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD   # v0.59 (0xbf1800 before)
 
 
 def test_the_region_is_written_end_to_end_and_code_is_nop_padded():

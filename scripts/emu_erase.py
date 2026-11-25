@@ -48,6 +48,10 @@ Scenarios (each from a fresh machine):
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import bisect
 import json
@@ -64,10 +68,10 @@ from emulib.image import differences                           # noqa: E402
 from emulib import bounded                                      # noqa: E402
 from emulib.machine import Machine                             # noqa: E402
 
-BLK_READ, BLK_WRITE, BLK_TRIM = 0x4012C59A, 0x4012C780, 0x4012C4B2
-BLK_READY, BLK_SECTORS = 0x4461B68C, 0x4461B6B0
-SYSEX_ROUTER, SYSEX_SENDER = 0x4012166E, 0x401233F2
-KIT, SOUND_STRIDE = 0x4210C08C, 1163
+BLK_READ, BLK_WRITE, BLK_TRIM = A(0x4012C59A), A(0x4012C780), A(0x4012C4B2)
+BLK_READY, BLK_SECTORS = A(0x4461B68C), A(0x4461B6B0)
+SYSEX_ROUTER, SYSEX_SENDER = A(0x4012166E), A(0x401233F2)
+KIT, SOUND_STRIDE = A(0x4210C08C), 1163
 DEVICE = 48_340_992                     # the Kingston 32 GB part, reconfigured (docs/drive-storage-research.md)
 POOL0, POOL_END = 0x600000, 0x6C8001
 PL0, PL_END = 0x6D0000, 0x6E0300
@@ -75,6 +79,8 @@ SET = 0x6FF000
 HI, HI_END = 0x6FF800, 0x6FF805                 # v0.43: the library's folders 64..127 (lib.c)
 LIB0, LIB_DATA = 0x700000, 0x700105
 XA, XA_END = 0x6F0000, 0x6F0701                 # v0.45: the library's entries 2,048..16,383 (lib.c LIB_X_AT)
+BLA, BLA_END = 0x6E0600, 0x6E0600 + 2 * 64 * 464   # v0.65: the bank lists, projects 0..63 (pools.c)
+BLB, BLB_END = 0x6F0800, 0x6F0800 + 2 * 64 * 464   # .. and 64..127
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 RESULT = SENTINEL + 0x800               # what a stubbed driver entry returns (the hook sets it)
 PRSSTAT = 0xFC0CC024                    # the eSDHC's present state: bit 24 DAT0 (v0.41)
@@ -91,7 +97,20 @@ def check(name, ok, detail=""):
 
 
 def regions(dev):
-    return [(POOL0, POOL_END), (PL0, PL_END), (XA, XA_END), (SET, SET + 1), (HI, HI_END), (LIB0, dev)]
+    return [(POOL0, POOL_END), (PL0, PL_END), (BLA, BLA_END), (XA, XA_END), (BLB, BLB_END), (SET, SET + 1),
+            (HI, HI_END), (LIB0, dev)]
+
+
+def merged_regions(dev):
+    """the regions as the TRIMs that cover them merge (v0.65: the bank lists' second range ends where
+    the settings sector starts)"""
+    out = []
+    for a, b in regions(dev):
+        if out and out[-1][1] == a:
+            out[-1][1] = b
+        else:
+            out.append([a, b])
+    return out
 
 
 def in_regions(s, n, dev):
@@ -182,7 +201,8 @@ def install(a, machine):
     # only the pages stock touched (as emu_slides.py)
     from unicorn import UC_PROT_ALL, UcError
     from dnfw.sampler import machines as SMx                # noqa: PLC0415
-    for page in range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000):
+    for page in [*range(SMx.MIRROR, SMx.MIRROR + 0x500000, 0x100000),   # (v0.65: and the banks' RAM)
+            *range(SMx.BANK_RAM, SMx.BANK_RAM + SMx.BANK_RAM_BYTES + 0xFFFFF & ~0xFFFFF, 0x100000)]:
         try:
             machine.uc.mem_map(page, 0x100000, UC_PROT_ALL)
         except UcError:
@@ -283,10 +303,13 @@ def fill(disk, rng):
         return bytes(rng.randrange(1, 255) for _ in range(512))
     mod = [POOL0, POOL0 + 1, POOL0 + 2, POOL0 + 777, 0x6C8000, PL0, PL0 + 1, PL0 + 2, 0x6D00FF, 0x6D0100, 0x6D0101,
            0x6D0100 + 256 * 7, 0x6D0100 + 256 * 257, 0x6E02FF, XA, XA + 1, XA + 1792, SET, HI, HI + 4, LIB0, LIB0 + 1, LIB0 + 256, 0x700104, LIB_DATA,
-           LIB_DATA + 1, disk.dev - 2049, disk.dev - 1] + [s for s in (0x800000, 0x1000000) if s < disk.dev]
+           LIB_DATA + 1, disk.dev - 2049, disk.dev - 1,
+           BLA, BLA + 1, BLA + 464, BLA_END - 1, BLB, BLB + 465, BLB_END - 1]   \
+        + [s for s in (0x800000, 0x1000000) if s < disk.dev]   # (v0.65: the bank lists)
     mod += [rng.randrange(POOL0, POOL_END) for _ in range(60)] + [rng.randrange(LIB0, disk.dev) for _ in range(60)]
     other = [0x0, 0x800, 0x1000, 0x2000, 0x58000, 0x457FFF, 0x458000, 0x500000, 0x5D7FFF, 0x5D8000, 0x5FFFFF,
-             0x6C8001, 0x6CFFFF, 0x6E0300, 0x6EFFFF, 0x6F0701, 0x6FEFFF, 0x6FF001, 0x6FF7FF, 0x6FF805, 0x6FFFFF]
+             0x6C8001, 0x6CFFFF, 0x6E0300, 0x6E05FF, 0x6EEE00, 0x6EFFFF, 0x6F0701, 0x6F07FF, 0x6FF001,
+             0x6FF7FF, 0x6FF805, 0x6FFFFF]   # (v0.65: 0x6FEFFF is the bank lists' now; their gaps instead)
     other += [rng.randrange(0, 0x600000) for _ in range(60)]
     for s in mod + other:
         disk.put(s, junk())
@@ -461,14 +484,15 @@ def run_ui(a, lay, SMx):
             merged.append(["OVERLAP", s])
         else:
             merged.append([s, s + n])
-    want = [[POOL0, POOL_END], [PL0, PL_END], [XA, XA_END], [SET, SET + 1], [HI, HI_END], [LIB0, DEVICE]]
-    check("the TRIMs cover exactly the six regions (v0.43: folders 64..127's; v0.45: the library's extension), each sector once",
+    want = merged_regions(DEVICE)
+    check("the TRIMs cover exactly the eight regions (v0.43: folders 64..127's; v0.45: the library's extension; v0.65: the bank lists), each sector once",
           merged == want, f"{[[hex(x) if isinstance(x, int) else x for x in m] for m in merged]}")
     order = [s for s, _ in trims[:36]]
     check("headers first: the pool's, the lists' region, the settings, the library's headers, then the frames",
           order[0] == POOL0 and order[1] == PL0 and SET in order[:36] and LIB0 in order[:36]
           and trims[35] == (LIB0, LIB_DATA - LIB0) and trims[36] == (HI, HI_END - HI)
-          and trims[37] == (XA, XA_END - XA) and trims[38][0] == POOL0 + 1,
+          and trims[37] == (XA, XA_END - XA) and trims[38] == (BLA, 2048) and trims[67] == (BLB, 2048)
+          and trims[96][0] == POOL0 + 1,
           str([hex(x) for x in order[:3]]))
     check("not one write from the first TRIM on", first_t is not None and not [x for x in log[first_t:] if x[0] == "W"],
           f"{len(writes)} write(s) in all")
@@ -544,7 +568,7 @@ def covered(trims, dev):
             return False
         else:
             merged.append([s, s + n])
-    return merged == [[a, b] for a, b in regions(dev)]
+    return merged == merged_regions(dev)
 
 
 def run_link(a, lay, SMx):

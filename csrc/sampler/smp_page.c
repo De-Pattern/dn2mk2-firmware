@@ -21,6 +21,7 @@
 typedef unsigned int u32;
 typedef unsigned char u8;
 typedef unsigned short u16;
+#include "banks.h"                              /* v0.65: global slots, the banks */
 
 #define GET_VALUE ((int (*)(void *, u32, u8 *))0x4006538E)
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90)
@@ -93,11 +94,31 @@ static void glyph(void *c, int x, int y, char ch, int lit)
         }
 }
 
+/* v0.65: the bank of the SAMP value read last (value() keeps it), and a SAMP value's global slot
+ * in it (-1: OFF or a FLEX buffer) */
+static int samp_bank __attribute__((section(".data"))) = 0;
+#define GSLOT(v) ((v) >= 1 && (v) <= 127 ? G_OF(samp_bank, (v) - 1) : -1)
+int smp_view_bank(void *view)                   /* (page.c's value text) */
+{
+    u8 flag;
+    return smp_word_bank((u32)GET_VALUE(view, SMP_SAMP_ID, &flag) & 0xFFFFu);
+}
+
 /* a control's 0..top value, as the DSP reads it (dnfw.sampler.program.ctl), and its top */
 static int value(void *view, u32 id, int *top)
 {
     u8 flag;
     int v = GET_VALUE(view, id, &flag) >> 8;
+    if (id == SMP_SAMP_ID) {                    /* v0.55: a FLEX buffer's code (129..143) */
+        extern int rt_samp_buf(u32 samp);
+        int u = (GET_VALUE(view, id, &flag) & 0xFFFF) >> 8;
+        samp_bank = smp_word_bank((u32)GET_VALUE(view, id, &flag) & 0xFFFFu);   /* v0.65 */
+        if (rt_samp_buf((u32)u) >= 0) {
+            if (top)
+                *top = 127;
+            return u;
+        }
+    }
     const int *r = RECORD(id);
     int lo = r[2] >> 8, t = (r[3] >> 8) - lo;
     v -= lo;
@@ -235,6 +256,11 @@ static void w_empty(void *c, int x, int y)
     }
 }
 
+/* the bank letters, cut out: the DT2's flat-topped A, then B, C, D (v0.65), and F a FLEX
+ * buffer's (v0.57); rows top..bottom, bit 2 = left */
+static const unsigned char bank_glyph[5][5] = {
+    {7, 5, 7, 5, 5}, {6, 5, 6, 5, 6}, {7, 4, 4, 4, 7}, {6, 5, 5, 5, 6}, {7, 4, 6, 4, 4}};
+
 static void w_samp(void *c, int x, int y, int slot)
 {
     /* the DT2's SAMP: a box 22 x 15, its left seven columns filled with the bank letter
@@ -245,10 +271,11 @@ static void w_samp(void *c, int x, int y, int slot)
     vline(c, x1, y0 + 1, y1 - 1, 0);
     fill(c, x0, y0 + 1, x0 + 6, y1 - 1);
     /* the bank letter, cut out: the DT2's flat-topped A */
-    static const unsigned char bank_a[5] = {7, 5, 7, 5, 5};      /* rows top..bottom, bit 2 = left */
+    extern int rt_samp_buf(u32 samp);
+    const unsigned char *bank = rt_samp_buf((u32)slot) >= 0 ? bank_glyph[4] : bank_glyph[samp_bank & 3];
     for (int r = 0; r < 5; r++)
         for (int b = 0; b < 3; b++)
-            if (bank_a[r] & (4 >> b))
+            if (bank[r] & (4 >> b))
                 SET_PIXEL(c, x0 + 2 + b, y + 10 - r, 0);
     if (slot == 0) {                            /* OFF: two dashes */
         glyph(c, cx + 0, y + 6, '-', 1);
@@ -257,6 +284,13 @@ static void w_samp(void *c, int x, int y, int slot)
     }
     char d[4];
     int n = 0;
+    extern int rt_samp_buf(u32 samp);
+    int fb = rt_samp_buf((u32)slot);
+    if (fb >= 0) {                              /* v0.55: a FLEX buffer: B1..B8 */
+        glyph(c, cx - 1, y + 6, 'B', 1);
+        glyph(c, cx + 4, y + 6, (char)('1' + fb), 1);
+        return;
+    }
     if (slot >= 100) d[n++] = '0' + slot / 100;
     if (slot >= 10) d[n++] = '0' + slot / 10 % 10;
     d[n++] = '0' + slot % 10;
@@ -275,9 +309,12 @@ static void w_samp_small(void *c, int x, int y, int slot)
     vline(c, x1, y0 + 1, y1 - 1, 0);
     fill(c, x0, y0 + 1, x0 + 5, y1 - 1);
     static const unsigned char bank_a[5] = {7, 5, 7, 5, 5};
+    static const unsigned char bank_f[5] = {7, 4, 6, 4, 4};      /* v0.57: F, a FLEX buffer's */
+    extern int rt_samp_buf(u32 samp);
+    const unsigned char *bank = rt_samp_buf((u32)slot) >= 0 ? bank_f : bank_a;
     for (int r = 0; r < 5; r++)
         for (int b = 0; b < 3; b++)
-            if (bank_a[r] & (4 >> b))
+            if (bank[r] & (4 >> b))
                 SET_PIXEL(c, x0 + 2 + b, y + 10 - r, 0);
     if (slot == 0) {
         glyph(c, cx + 0, y + 6, '-', 1);
@@ -286,6 +323,13 @@ static void w_samp_small(void *c, int x, int y, int slot)
     }
     char d[4];
     int n = 0;
+    extern int rt_samp_buf(u32 samp);
+    int fb = rt_samp_buf((u32)slot);
+    if (fb >= 0) {                              /* v0.55: a FLEX buffer */
+        glyph(c, cx - 1, y + 6, 'B', 1);
+        glyph(c, cx + 4, y + 6, (char)('1' + fb), 1);
+        return;
+    }
     if (slot >= 100) d[n++] = '0' + slot / 100;
     if (slot >= 10) d[n++] = '0' + slot / 10 % 10;
     d[n++] = '0' + slot % 10;
@@ -330,6 +374,9 @@ static void w_knob_at(void *c, int x, int y, int v, int top, int dotted)
         if (e2 < dx) { err += dx; py += sy; }
     }
 }
+
+/* v0.69: the knob for PERFORM's screens (perf.c) */
+void smp_knob(void *c, int x, int y, int v, int top, int dotted) { w_knob_at(c, x, y, v, top, dotted); }
 
 static void w_fader(void *c, int x, int y, int v, int top)
 {
@@ -474,6 +521,23 @@ static int shows(int i)
 }
 
 /* one cell: its widget at (X, Y) and, LABELLED, its label under it */
+/* v0.55: a control's value text as its record writes it; SAMP on a FLEX buffer reads B1..B8 */
+static void val_text(void *view, u32 id, char *vb)
+{
+    u8 flag;
+    int w = GET_VALUE(view, id, &flag);
+    ((void (*)(int, char *))RECORD_FMT(id))(w, vb);
+    if (id == SMP_SAMP_ID) {
+        extern int rt_samp_buf(u32 samp);
+        int fb = rt_samp_buf((u32)((w & 0xFFFF) >> 8));
+        if (fb >= 0) {
+            vb[0] = 'B';
+            vb[1] = (char)('1' + fb);
+            vb[2] = 0;
+        }
+    }
+}
+
 static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labelled, int pill)
 {
     int top, v, w = id ? widget_of(id, kind) : W_EMPTY;
@@ -533,9 +597,8 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
     int buf_lock = labelled && id == SMP_BUF_ID && kind == SMP_BOUNCE_KIND && locked(view, id);
     if (labelled && id && (shows(cell_i) || buf_lock)) {     /* v0.35: SYN held (v0.48: or just turned): the value, as the record's */
         char vb[32];                            /* formatter writes it for the header (O14) */
-        u8 flag;
         vb[0] = 0;
-        ((void (*)(int, char *))RECORD_FMT(id))(GET_VALUE(view, id, &flag), vb);
+        val_text(view, id, vb);
         vb[6] = 0;
         LABEL(c, x + 12, y - 7, "%s", vb);
     } else if (labelled && id)
@@ -563,9 +626,8 @@ void smp_knob_page(void *view, void *c, const unsigned short *ids, const char *c
         }
         if (shows(i)) {                         /* v0.35: SYN held (v0.48: or just turned): the value (O14) */
             char vb[32];
-            u8 flag;
             vb[0] = 0;
-            ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
+            val_text(view, ids[i], vb);
             vb[6] = 0;
             LABEL(c, x + 12, y - 7, "%s", vb);
         } else
@@ -579,14 +641,14 @@ static void waveform(void *c, int slot, int x0, int cy)
 {
     /* v0.20: no test sounds any more (gone from the DSP since v0.17): a slot with nothing
      * loaded says so, rather than showing a wave that does not play */
-    const u8 *ov = slot >= 1 ? smp_overview(slot - 1) : 0;
+    const u8 *ov = smp_overview(GSLOT(slot));  /* (v0.65: in its bank) */
     if (!ov) {
         hline(c, x0, x0 + SMP_WAVE_W - 1, cy, 1);
         int bx = x0 + SMP_WAVE_W / 2;
         for (int y = cy - 4; y <= cy + 4; y++)
             for (int x = bx - 24; x <= bx + 24; x++)
                 SET_PIXEL(c, x, y, 0);
-        int named = slot >= 1 && slot <= smp_count() && smp_name(slot - 1)[0];
+        int named = slot >= 1 && slot <= smp_bank_count(samp_bank) && smp_name(GSLOT(slot))[0];
         int loading = named && smp_lstate != 0 && smp_lstate != 4;
         extern u32 smp_walk, smp_walk_total;    /* v0.31: how far the pool's load is */
         static char pc[12] __attribute__((section(".data")));
@@ -603,6 +665,19 @@ static void waveform(void *c, int slot, int x0, int cy)
             pc[i++] = (char)('0' + p % 10u);
             pc[i++] = '%';
             pc[i] = 0;
+        }
+        extern int rt_samp_buf(u32 samp);
+        extern u32 rt_buf_bytes(u32 b);
+        int fbw = rt_samp_buf((u32)slot);      /* v0.55: a FLEX buffer: what it holds */
+        if (fbw >= 0) {
+            static char fl[16] __attribute__((section(".data")));
+            const char *t = rt_buf_bytes((u32)fbw) ? "FLEX BUF " : "FLEX EMPTY ";
+            int i = 0;
+            while (t[i]) { fl[i] = t[i]; i++; }
+            fl[i++] = (char)('1' + fbw);
+            fl[i] = 0;
+            TEXT(c, FONT, bx, cy - 3, CENTRED, fl);
+            return;
         }
         TEXT(c, FONT, bx, cy - 3, CENTRED, slot < 1 ? "OFF"
              : loading ? (smp_walk_total ? pc : "LOADING") : "EMPTY");
@@ -737,24 +812,83 @@ extern const char *smp_folder_name(int f);
 extern int smp_folder_of(int k);
 #define LIST_IDLE 30000u                         /* FRAMES (~1500 a second): 20 s untouched, it closes */
 int smp_lst_open __attribute__((section(".data"))) = 0;
-int smp_lst_orig __attribute__((section(".data"))) = 0;   /* SAMP when it came up */
+int smp_lst_orig __attribute__((section(".data"))) = 0;   /* SAMP when it came up (v0.65: its whole word) */
 void *smp_list_view __attribute__((section(".data"))) = 0;   /* the page it is on */
-static int list_slot __attribute__((section(".data"))) = -1;
+static int list_slot __attribute__((section(".data"))) = -1;   /* v0.65: the row (banks.h) */
 static u32 list_at __attribute__((section(".data"))) = 0;
 int smp_overlay_dirty __attribute__((section(".data"))) = 0;   /* page.c's wr_poll redraws */
 
-static void slot_name(int k, char *out, int max)   /* SAMP value K (0 OFF) */
+extern int rt_samp_buf(u32 samp);
+extern u32 rt_buf_code(u32 b), rt_buf_bytes(u32 b);
+/* v0.55: the list's rows: SAMP 0..127, then the eight FLEX buffers (128..135). v0.65: the
+ * DT2's one run through the banks (banks.h): OFF, A001..A127, B001..B127, C.., D.., then the
+ * FLEX buffers; a bank not in use (smp_bank_live) is skipped */
+#define LIST_ROWS ROWS_ALL
+int smp_word_row(u32 w)                         /* a SAMP word's row */
+{
+    u32 v = (w >> 8) & 0xFFu;
+    int b = rt_samp_buf(v);
+    if (b >= 0)
+        return ROW_FLEX + b;
+    if (v == 0 || v > 127u)
+        return 0;
+    return ROW_BANK0 + 127 * smp_word_bank(w) + (int)v - 1;
+}
+u32 smp_row_word(int r)                         /* a row's SAMP word */
+{
+    if (r >= ROW_FLEX)
+        return rt_buf_code((u32)(r - ROW_FLEX)) << 8;
+    if (r <= 0)
+        return 0;
+    int b = (r - ROW_BANK0) / 127, s = (r - ROW_BANK0) % 127;
+    return (u32)(s + 1) << 8 | BANK_TAG(b);
+}
+static int row_live(int r)
+{
+    return r <= 0 || r >= ROW_FLEX || smp_bank_live((r - ROW_BANK0) / 127);
+}
+int smp_row_step(int r, int d)                  /* D rows on from R, past the banks not in use */
+{
+    int dir = d > 0 ? 1 : -1;
+    for (int n = d > 0 ? d : -d; n > 0; n--) {
+        int x = r + dir;
+        while (x > 0 && x < ROWS_ALL && !row_live(x))
+            x += dir;
+        if (x < 0 || x >= ROWS_ALL)
+            break;
+        r = x;
+    }
+    return r;
+}
+#define samp_row(w) smp_word_row((u32)(w))
+#define row_samp(r) smp_row_word(r)
+
+static void slot_name(int r, char *out, int max)   /* row R's (0 OFF; v0.65: through the banks) */
 {
     const char *n = 0;
-    int cnt = smp_count();
     extern int rt_on;
-    if (k <= 0)
+    int fb = r >= ROW_FLEX ? r - ROW_FLEX : -1;
+    int k = r >= ROW_FLEX ? 0 : r;              /* below: k the row, g its global slot */
+    int g = r > 0 && r < ROW_FLEX ? G_OF((r - ROW_BANK0) / 127, (r - ROW_BANK0) % 127) : -1;
+    int cnt = g >= 0 ? smp_bank_count((int)G_BANK(g)) : 0;
+    if (fb >= 0) {                              /* v0.55: a FLEX buffer */
+        static char bn[16] __attribute__((section(".data")));
+        const char *t = rt_buf_bytes((u32)fb) ? "FLEX BUF" : "FLEX EMPTY";
+        int j = 0;
+        for (; t[j] && j < 12; j++)
+            bn[j] = t[j];
+        bn[j++] = ' ';
+        bn[j++] = (char)('1' + fb);
+        bn[j] = 0;
+        n = bn;
+    } else if (k <= 0)
         n = "OFF";
-    else if (rt_on && k - 1 >= REC_FIRST && k - 1 < REC_FIRST + 4)
-        n = k - 1 == REC_FIRST ? "REC 1" : k - 1 == REC_FIRST + 1 ? "REC 2" : "---";   /* v0.41: the buffers */
-    else if (cnt >= 0 && k <= cnt && !smp_slot_empty(k - 1))
-        n = smp_long_name(k - 1);
-    if (k > 0 && !(n && n[0]) && !smp_slot_empty(k - 1))
+    else if (rt_on && g >= REC_FIRST && g < REC_FIRST + 4)
+        n = "---";      /* the recorder's own slots (v0.41 named two REC 1, REC 2; since v0.55 the FLEX
+                         * buffers are B1..B8 at the list's end: NiKo, 2026-11-15) */
+    else if (cnt >= 0 && (int)G_SLOT(g) < cnt && !smp_slot_empty(g))
+        n = smp_long_name(g);
+    if (k > 0 && g >= 0 && !(n && n[0]) && !smp_slot_empty(g))
         n = "SAMPLE";                           /* something there, without a name (v0.15's recordings) */
     if (!(n && n[0]))
         n = "---";                              /* the DT2's empty slot */
@@ -945,6 +1079,15 @@ static void sample_list(void *c, void *view, int slot, int kind)
 
 /* v0.33: the list belongs to the track it opened on. Another track active (its page drawn
  * by stock, or not yet drawn) means it is gone: it must not go on taking keys unseen */
+/* v0.55: a sample machine's SRC page (not FLEX's) on the active track, drawn just now: its
+ * knob D is SAMP (rec.c's smp_ui_pop takes a turn up past 127 onto the FLEX buffers) */
+int smp_samp_page(void)
+{
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    return now - lst_seen_at < 300u && list_trk == (int)UI_TRACK
+        && list_kind >= SMP_KIND0 && list_kind < SMP_KIND0 + SMP_N0;
+}
+
 int smp_list_elsewhere(void)
 {
     return smp_lst_open && list_trk >= 0 && UI_TRACK != list_trk;
@@ -962,7 +1105,7 @@ int smp_list_visible(void)
 _Static_assert(LIST_W < 19, "the list's name buffer");
 void smp_list_draw(void *c)
 {
-    int slot = list_slot < 0 ? 0 : list_slot;
+    int slot = list_slot < 0 ? 0 : samp_row(list_slot);   /* v0.55: as a row */
     int x0 = 26, x1 = 127;
     for (int y = 0; y <= 63; y++)
         for (int x = x0; x <= x1; x++)
@@ -974,24 +1117,32 @@ void smp_list_draw(void *c)
     /* the title bar: what YES, NO and FUNC + YES do, as the DT2 writes it there */
     LABEL(c, x0 + 51, 57, "%s", "YES:OK NO:X FN+YES:D");
     hline(c, x0 + 1, x1, 55, 0);
-    /* the bank: the DN2 has the one bank of 128 */
-    LABEL(c, x0 + 51, 47, "%s", "A");
+    /* the bank (v0.65: the outlined row's, A..D; F on a FLEX buffer) */
+    static const char bank_ch[] = "ABCDF";
+    char bk[2] = {bank_ch[slot >= ROW_FLEX ? 4 : slot <= 0 ? 0 : (slot - ROW_BANK0) / 127], 0};
+    LABEL(c, x0 + 51, 47, "%s", bk);
     box(c, x0 + 45, 45, x0 + 57, 53, 0);
     /* five slots around the chosen one, it outlined */
     for (int r = 0; r < 5; r++) {
         int k = slot - 2 + r, y = 36 - 9 * r;
-        if (k < 0 || k > 127)
+        if (k < 0 || k >= LIST_ROWS)
             continue;
         char ln[64], nm[19], num[4];
         slot_name(k, ln, 63);
-        fit_name(ln, LIST_W, k == slot ? mq_off(LIST_KEY(slot)) : -1, nm);   /* v0.39 */
-        num3(num, k);
+        fit_name(ln, LIST_W, k == slot ? mq_off(LIST_KEY(row_samp(slot))) : -1, nm);   /* v0.39 */
+        if (k >= ROW_FLEX) {                    /* v0.55: a FLEX buffer: B1..B8 */
+            num[0] = ' ';
+            num[1] = 'B';
+            num[2] = (char)('1' + k - ROW_FLEX);
+            num[3] = 0;
+        } else
+            num3(num, k <= 0 ? 0 : (k - ROW_BANK0) % 127 + 1);   /* (v0.65: the slot in its bank) */
         TEXT(c, FONT, x0 + 3, y, 0, "%s", num);
         TEXT(c, FONT, x0 + 23, y, 0, "%s", nm);
         if (k == slot)
             box(c, x0 + 1, y - 2, x1 - 4, y + 7, 0);
     }
-    scrollbar(c, x1 - 1, 1, 43, slot, 128);
+    scrollbar(c, x1 - 1, 1, 43, slot, LIST_ROWS);
 }
 
 /* -- v0.25: the folder browser (ASSIGN SAMPLE), FUNC + YES in the list, as the DT2's +Drive
@@ -1015,7 +1166,7 @@ int smp_fb_mcur __attribute__((section(".data"))) = 0;
  * YES marks a sample, or every sample of a folder at the top; SELECT ALL in the SAMPLE
  * ACTION menu marks the folder's; DELETE takes the marked ones if any, else the sample (or,
  * on a folder, the folder's samples). Marks last until the browser closes. */
-static u32 fb_marks[4] __attribute__((section(".data"))) = {0, 0, 0, 0};
+static u32 fb_marks[SMP_ALL / 32] __attribute__((section(".data"))) = {0};   /* v0.65: global slots */
 /* v0.31: the browser's two stores, as the DT2's SAMPLES menu (docs/drive-library-plan.md):
  * -1 the top (+DRIVE, PROJECT RAM), 0 PROJECT RAM (the pool, as before), 1 +DRIVE (the
  * library, lib.c). In +DRIVE an item's "slot" is a library entry. */
@@ -1076,7 +1227,7 @@ static int fb_in(int k, int folder)              /* slot K (holding something) s
 
 static int fb_has(int folder)
 {
-    for (int k = 0; k < 128; k++)
+    for (int k = 0; k < SMP_ALL; k++)
         if (!smp_slot_empty(k) && fb_in(k, folder))
             return 1;
     return 0;
@@ -1086,7 +1237,7 @@ int smp_fb_marked(int k)
 {
     if (smp_fb_store == 1)
         return lb_marked(k);
-    return k >= 0 && k < 128 && ((fb_marks[k >> 5] >> (k & 31)) & 1u);
+    return k >= 0 && k < SMP_ALL && ((fb_marks[k >> 5] >> (k & 31)) & 1u);
 }
 
 void smp_fb_mark(int k, int on)
@@ -1108,7 +1259,7 @@ extern int smp_fb_moving;
 void smp_fb_unmark_all(void)
 {
     smp_fb_moving = 0;
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < SMP_ALL / 32; i++)
         fb_marks[i] = 0;
     for (int i = 0; i < LB_CAP / 32; i++)
         lb_marks[i] = 0;
@@ -1134,9 +1285,9 @@ void smp_fb_unmark_all(void)
 #define LK_INDEX 20640u
 #define SAMP_FSLOT 43                           /* SAMP's frame slot: sound + 20 + 2 x 43 */
 
-int smp_fb_unused_scan(u32 used[4])
+int smp_fb_unused_scan(u32 used[SMP_ALL / 32])   /* v0.65: by global slot, each SAMP's bank */
 {
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < SMP_ALL / 32; i++)
         used[i] = 0;
     u8 *pat = SEQ_PATTERN_PTR, *kit = KIT_LIVE;
     if (!pat || !kit)
@@ -1154,9 +1305,9 @@ int smp_fb_unused_scan(u32 used[4])
             u8 ty = snd[0xDE];
             if (ty < 8 || ty > 13)
                 continue;
-            u32 s = snd[20 + 2 * SAMP_FSLOT];   /* 0 OFF, k: slot k - 1 */
-            if (s >= 1 && s <= 128)
-                used[(s - 1) >> 5] |= 1u << ((s - 1) & 31);
+            int g = smp_word_g((u32)snd[20 + 2 * SAMP_FSLOT] << 8 | snd[21 + 2 * SAMP_FSLOT]);   /* -1 OFF */
+            if (g >= 0)
+                used[g >> 5] |= 1u << (g & 31);
             signed char r = (signed char)table[LK_INDEX + 101u * t + SAMP_FSLOT];
             if (r < 0 || r >= LK_RECS)
                 continue;
@@ -1164,11 +1315,11 @@ int smp_fb_unused_scan(u32 used[4])
             if (rec[0] != SAMP_FSLOT || rec[1] != t)
                 continue;                       /* (an index that doesn't point at its record: skip) */
             for (u32 st = 0; st < 128; st++) {
-                u32 v = rec[2 + 2 * st];        /* the value's high byte: SAMP */
                 if (rec[2 + 2 * st] == 0xFF && rec[3 + 2 * st] == 0xFF)
                     continue;                   /* no lock on this step */
-                if (v >= 1 && v <= 128)
-                    used[(v - 1) >> 5] |= 1u << ((v - 1) & 31);
+                int lg = smp_word_g((u32)rec[2 + 2 * st] << 8 | rec[3 + 2 * st]);   /* the lock's slot, in its bank */
+                if (lg >= 0)
+                    used[lg >> 5] |= 1u << (lg & 31);
             }
         }
     }
@@ -1177,12 +1328,12 @@ int smp_fb_unused_scan(u32 used[4])
 
 int smp_fb_mark_unused(void)
 {
-    u32 used[4];
+    u32 used[SMP_ALL / 32];
     smp_fb_unmark_all();
     if (smp_fb_unused_scan(used))
         return -1;
     int n = 0;
-    for (int k = 0; k < 128; k++)
+    for (int k = 0; k < SMP_ALL; k++)
         if (!smp_slot_empty(k) && !((used[k >> 5] >> (k & 31)) & 1u)) {
             smp_fb_mark(k, 1);
             n++;
@@ -1200,7 +1351,7 @@ int smp_fb_mark_count(void)
                     n += smp_lib_used(32 * i + (int)b);
         return n;
     }
-    for (int k = 0; k < 128; k++)
+    for (int k = 0; k < SMP_ALL; k++)
         if (smp_fb_marked(k) && !smp_slot_empty(k))
             n++;
     return n;
@@ -1230,7 +1381,7 @@ static int fb_size_d(int folder, int *marked, int deep)
             *marked = m;
         return n;
     }
-    for (int k = 0; k < 128; k++)
+    for (int k = 0; k < SMP_ALL; k++)
         if (!smp_slot_empty(k) && fb_in(k, folder)) {
             n++;
             m += smp_fb_marked(k);
@@ -1253,7 +1404,7 @@ static void fb_mark_d(int folder, int deep)
                 lb_mark(k, on);
         return;
     }
-    for (int k = 0; k < 128; k++)
+    for (int k = 0; k < SMP_ALL; k++)
         if (!smp_slot_empty(k) && fb_in(k, folder))
             smp_fb_mark(k, on);
 }
@@ -1352,13 +1503,13 @@ void smp_fb_delete(int slot, int folder)
         return;
     }
     if (smp_fb_mark_count()) {
-        for (int k = 0; k < 128; k++)
+        for (int k = 0; k < SMP_ALL; k++)
             if (smp_fb_marked(k) && !smp_slot_empty(k))
                 smp_discard(k);
     } else if (slot >= 0)
         smp_discard(slot);
     else if (folder != -1)
-        for (int k = 0; k < 128; k++)
+        for (int k = 0; k < SMP_ALL; k++)
             if (!smp_slot_empty(k) && fb_in(k, folder))
                 smp_discard(k);
     smp_fb_unmark_all();
@@ -1369,6 +1520,10 @@ int smp_fb_load_project(int slot, int folder)
     int n = 0;
     if (smp_fb_store != 1)
         return 0;
+    /* v0.65: into the bank the track's SAMP is in first (link.c lp_poll: then the next banks) */
+    extern int smp_lp_bank;
+    extern u32 smp_samp_word(int track);
+    smp_lp_bank = smp_word_bank(smp_samp_word(UI_TRACK));
     if (smp_fb_mark_count()) {
         for (int k = 0; k < LB_CAP; k++)
             if (!lb_marks[k >> 5])
@@ -1427,7 +1582,7 @@ int smp_fb_count(void)
             n += fb_has(f);
         return n + fb_has(FB_INCOMING) + fb_has(FB_RECORDED);
     }
-    for (int k = 0; k < 128; k++)
+    for (int k = 0; k < SMP_ALL; k++)
         if (!smp_slot_empty(k) && fb_in(k, smp_fb_folder))
             n++;
     return n;
@@ -1459,7 +1614,7 @@ int smp_fb_item(int i, int *slot)
             return FB_RECORDED;
         return -1;
     }
-    for (int k = 0; k < 128; k++)
+    for (int k = 0; k < SMP_ALL; k++)
         if (!smp_slot_empty(k) && fb_in(k, smp_fb_folder) && i-- == 0) {
             *slot = k;
             return -1;
@@ -1677,7 +1832,7 @@ void smp_marquee_poll(void)
         else if (smp_fb_store == 1)
             nm = smp_lib_name(slot);
         else {
-            slot_name(slot + 1, ln, 63);
+            slot_name(G_ROW(slot), ln, 63);
             w = smp_fb_menu ? FB_MENU_W : FB_SLOT_W;
         }
         if (slot >= 0 && !smp_fb_menu && fb_st(slot))
@@ -1688,22 +1843,24 @@ void smp_marquee_poll(void)
         if (LIST_KEY(list_slot) == mq_key)
             mq_follow(mq_key, 0, 0);
         else {
-            slot_name(list_slot, ln, 63);
+            slot_name(samp_row(list_slot), ln, 63);
             mq_follow(LIST_KEY(list_slot), ln, LIST_W);
         }
     } else
         mq_key = 0xFFFFFFFFu;                   /* closed: it starts again when opened */
 }
 
-void smp_fb_draw(void *c, int samp)
+void smp_fb_draw(void *c, int sw)              /* v0.65: SW, the track's SAMP word */
 {
     for (int y = 0; y <= 63; y++)
         for (int x = 0; x <= 127; x++)
             SET_PIXEL(c, x, y, 0);
     if (er_draw(c))
         return;
+    static const char bl[] = "ABCD";
+    int sg = smp_word_g((u32)sw);               /* the track's global slot, -1 none */
     char num[4];
-    num3(num, samp);
+    num3(num, sg >= 0 ? (int)G_SLOT(sg) + 1 : 0);
     int marks = smp_fb_mark_count(), pend = smp_lib_pending();
     if (pend)                                   /* v0.31: LOAD TO PROJECT under way */
         LABEL(c, 64, 57, "LOADING TO PROJECT %d", pend);
@@ -1714,7 +1871,7 @@ void smp_fb_draw(void *c, int samp)
     else if (smp_fb_folder == -1 && smp_fb_store == 1)
         LABEL(c, 64, 57, "%s", "+DRIVE");
     else if (smp_fb_folder == -1)
-        LABEL(c, 64, 57, "ASSIGN SAMPLE > A%s", num);
+        LABEL(c, 64, 57, "ASSIGN SAMPLE > %c%s", bl[sg >= 0 ? G_BANK(sg) : 0], num);
     else if (smp_fb_store == 1) {               /* v0.40: the path, head...tail if long */
         char path[200], t[FB_TITLE_W + 3];
         fb_path(smp_fb_folder, path, (int)sizeof path);
@@ -1769,14 +1926,14 @@ void smp_fb_draw(void *c, int samp)
             if (st)
                 LABEL(c, 98, y, "%s", "ST");
             if (!smp_fb_menu && s >= 0) {
-                num3(sn, s + 1);
-                LABEL(c, 109, y, ">A%s", sn);
+                num3(sn, (int)G_SLOT(s) + 1);
+                LABEL(c, 109, y, ">%c%s", bl[G_BANK(s)], sn);
             }
             if (smp_fb_marked(slot))
                 invert(c, 2, y - 1, wide - 1, y + 6);
         } else {
             char ln[64], nm[FB_W + 3], sn[4];
-            slot_name(slot + 1, ln, 63);
+            slot_name(G_ROW(slot), ln, 63);
             int st = !smp_fb_menu && fb_st(slot);
             fit_name(ln, smp_fb_menu ? FB_MENU_W : FB_SLOT_W - (st ? FB_ST_CHARS : 0), i == smp_fb_cur ? mq_off(fb_key()) : -1, nm);
             TEXT(c, FONT, 3, y, 0, "%s", nm);
@@ -1784,9 +1941,9 @@ void smp_fb_draw(void *c, int samp)
             if (st)
                 LABEL(c, 98, y, "%s", "ST");
             if (!smp_fb_menu) {
-                num3(sn, slot + 1);
-                LABEL(c, 109, y, ">A%s", sn);  /* the slot it plays from */
-                if (slot + 1 == samp)
+                num3(sn, (int)G_SLOT(slot) + 1);
+                LABEL(c, 109, y, ">%c%s", bl[G_BANK(slot)], sn);  /* the slot it plays from */
+                if (slot == sg)
                     fill(c, 0, y, 1, y + 4);   /* the track's own */
             }
             if (smp_fb_marked(slot))            /* v0.29: marked, drawn lit */
@@ -1877,7 +2034,8 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
             cell(c, view, kind, ids[i], CELL_X(i & 3), i < 4 ? TOP_Y : BOT_Y, 1, 0);
         }
         cell_i = -1;
-        sample_list(c, view, value(view, SMP_SAMP_ID, 0), kind);
+        u8 fl;
+        sample_list(c, view, (int)((u32)GET_VALUE(view, SMP_SAMP_ID, &fl) & 0xFFFFu), kind);   /* v0.65: the word */
         return;
     }
     /* page 2: the top row, unlabelled, raised a little; the waveform; the bottom labels */
@@ -1896,12 +2054,12 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
             int gi = value(view, SMP_GRID_ID, 0) / 24;
             n = smp_grids[gi > 4 ? 4 : gi];
         } else if (slot >= 1) {
-            col = smp_slices(slot - 1, &n);
+            col = smp_slices(GSLOT(slot), &n);
         }
         int s = value(view, SMP_SLICE_ID, 0) >> 1;    /* 0 NOTE, 1..63 */
         int len = (value(view, SMP_SLEN_ID, 0) >> 1) + 1;
 #define SLICE_X(j) ((j) >= n ? x0 + w - 1 : col ? x0 + col[j] * (w - 1) / (100 - 1) : x0 + (j) * (w - 1) / n)
-        if (n > 0 && slot >= 1 && smp_overview(slot - 1)) {     /* (nothing to slice: OFF, EMPTY) */
+        if (n > 0 && smp_overview(GSLOT(slot))) {   /* (nothing to slice: OFF, EMPTY) */
             if (s > 0) {
                 int first = (s > n ? n : s) - 1, end = first + len > n ? n : first + len;
                 int a = SLICE_X(first), b = SLICE_X(end);
@@ -1959,7 +2117,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
                 marker(c, x0 + lp, cy, 1);
         }
     }
-    if (slot >= 1 && smp_overview(slot - 1))
+    if (smp_overview(GSLOT(slot)))
         playhead(c, x0, w, cy);
     else {
         ph_was = -1;
@@ -1978,9 +2136,8 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
             fill(c, x + 6, 2, x + 17, 4);
         else if (shows(i)) {                    /* v0.35: SYN held (v0.48: or just turned): the value (O14) */
             char vb[32];
-            u8 flag;
             vb[0] = 0;
-            ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
+            val_text(view, ids[i], vb);
             vb[6] = 0;
             LABEL(c, x + 12, 0, "%s", vb);
         } else
@@ -1989,9 +2146,8 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     for (int i = 0; i < 4; i++)                 /* v0.35: the top row's too (unlabelled: on the knobs' line) */
             if (ids[i] && shows(i)) {
                 char vb[32];
-                u8 flag;
                 vb[0] = 0;
-                ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
+                val_text(view, ids[i], vb);
                 vb[6] = 0;
                 LABEL(c, CELL_X(i) + 12, TOP_Y + 3 - 7, "%s", vb);
             }
@@ -2005,7 +2161,8 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     for (int i = 4; i < 8; i++)
         if (ids[i] && locked(view, ids[i]))
             invert(c, CELL_X(i - 4) - 1, 0, CELL_X(i - 4) + 24, 6);
-    sample_list(c, view, slot, kind);
+    u8 fl2;
+    sample_list(c, view, (int)((u32)GET_VALUE(view, SMP_SAMP_ID, &fl2) & 0xFFFFu), kind);   /* v0.65: the word */
 }
 
 /* v0.22: the RECORDER, the DT2's SAMPLING screen as the DN2 has room for it, over the
@@ -2620,6 +2777,12 @@ void rec_screen_draw(void *c)
             extern int smp_rs_last;             /* v0.46: RECORDED full: the take is in the pool only */
             LABEL(c, cx, by0 + 2, smp_rs_last == 2 ? "%d +DRV FULL" : "SAVED %d", rec_saved_slot + 1);
         }
+    }
+
+    {                                           /* v0.59: C MON, in the box's top right corner, when on */
+        extern int rec_mon;
+        if (rec_mon)
+            LABEL(c, bx1 - 8, by1 - 5, "%s", "MON");
     }
 
     /* THRES, on the right */

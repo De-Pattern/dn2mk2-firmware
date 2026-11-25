@@ -38,6 +38,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 import gate_sharc  # noqa: E402
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 WAV = ROOT / "out" / "waverider"
 WORKPATH = re.compile(r"/[^\s\"']*/out/(ship_gate_[A-Za-z0-9_]+|crosscheck/[0-9a-f]+/[a-z]+)")
@@ -162,7 +163,7 @@ def main() -> int:
                     d.append(f"frame WAV {s} differs")
             done(name, d)
 
-    snap = ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"
+    snap = ROOT.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"
     env = {"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"]) / "section_3_MAIN_OS.bin"),
            "DNFW_EMU_FLAGS": '{"weakptr": false}', "DNFW_LOWTRAP": "1"}     # the gate's EMU_ENV
     for name, script in (("thres", "emu_coupled_thres.py"), ("flex", "emu_coupled_flex.py")):

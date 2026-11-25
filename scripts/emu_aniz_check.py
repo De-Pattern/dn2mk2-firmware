@@ -32,12 +32,14 @@ sys.path.insert(0, str(DIGIKIT / "tools"))
 sys.path.insert(0, str(DIGIKIT))
 
 from dnfw import bootanim                                     # noqa: E402
+from dnfw.osport.os import A                                  # noqa: E402
 from dnfw.cli.files import read_image                         # noqa: E402
 from dnfw.firmware.load import load                           # noqa: E402
 from dnfw.mods import bootscreen, platform                    # noqa: E402
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
-SNAP = DIGIKIT / "out/snapshots/dn2-1.11/boot400M.snap"
-SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
+SNAP = DIGIKIT / f"out/snapshots/dn2-{_OSV}/boot400M.snap"
+SYX = ROOT / f"00_Resources/00_Firmware/Digitone_II_OS{_OSV}_dist/Digitone_II_OS{_OSV}.syx"
 if "DT2_SECTIONS" in os.environ:          # the stock MAIN OS the emulator runs (not the .aplib)
     os.environ.setdefault("DT2_MAIN_IMG", os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin"))
 LIMIT = 80_000_000            # the intro's 175 frames come at about four per 1M
@@ -51,7 +53,7 @@ def main() -> int:
 
     content = load(read_image(a.build)).container.find(3).unpack()
     spec = bootscreen.SPEC
-    va = spec["intro_va"]
+    va = A(spec["intro_va"])              # v0.73: the intro hook's place on this run's OS
     hook = bytes(content[va - bootscreen.BASE:va - bootscreen.BASE + 8])
     writes = [(va, hook)] + platform.runtime(content)
     expect = bootanim.images()
@@ -105,7 +107,7 @@ def main() -> int:
 
         def at_drawn(uc, address, size, user):
             k = uc.reg_read(UC_M68K_REG_D3)
-            src = int.from_bytes(uc.mem_read(spec["source_data_ptr"], 4), "big")
+            src = int.from_bytes(uc.mem_read(A(spec["source_data_ptr"]), 4), "big")   # stock BSS: per OS
             got = bytes(uc.mem_read(src, 1024))
             res["drawn"] += 1
             if got != expect[k]:

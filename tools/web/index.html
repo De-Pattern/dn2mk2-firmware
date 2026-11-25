@@ -271,7 +271,8 @@ const DN2 = (() => {
   C.HOLE_BYTES = C.REC_END - C.REC_OFFSET;           /* what a send skips */
   C.SLICE_AREA = C.REC_END - (128 << 10);           /* v0.23: slices made on the instrument */
   C.TABLE_AREA = C.SLICE_AREA - (512 << 10);         /* v0.26: the machines' tables, before the slices */
-  C.REC_BYTES = C.TABLE_AREA - C.REC_OFFSET;
+  C.BANK_AREA = C.TABLE_AREA - 3 * (128 << 10);     /* v0.65: banks B..D's pages, before the tables */
+  C.REC_BYTES = C.BANK_AREA - C.REC_OFFSET;
 
   function pack7(data) {
     const out = [];

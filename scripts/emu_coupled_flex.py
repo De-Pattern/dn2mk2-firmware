@@ -39,6 +39,10 @@ Usage: emu_coupled_flex.py --build out/v049.syx [--break notrig|nosamp|wrongbuf|
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import math
@@ -51,15 +55,16 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from emu_coupled import CF_FRAME, Coupled                       # noqa: E402
 from emu_coupled_recplay import best_match, chirp              # noqa: E402
+_OSV = __import__("os").environ.get("DN2_OS", "1.11")   # v0.73: the stock OS this run is for
 
 KIT, STRIDE = 0x800052A0, 1163
-SEQ_PATTERN, TRACK_CUR = 0x42C5A9A0, 0x42C5A984
+SEQ_PATTERN, TRACK_CUR = A(0x42C5A9A0), A(0x42C5A984)
 PAT_LENGTH, PAT_LOCK_TABLE = 122196, 97872
 FLEX = 17
 T = 1                                    # the FLEX track (not 0: the voice table reads 0 for an idle voice)
 SLOT_RLEN, SLOT_SAMP, SLOT_SRC = 40, 43, 38
 SLOT_TRACK = 0x80005308
-KB_ON = 0x42431A9C                       # KEYBOARD's state (1 on; measured on stock, 2026-11-10)
+KB_ON = A(0x42431A9C)                       # KEYBOARD's state (1 on; measured on stock, 2026-11-10)
 
 
 STATE, SRC, OUT = 0x8000DE60, 0x80003AF0, 0x800068E4
@@ -99,16 +104,18 @@ def install_smoother_model(c):
         uc_.reg_write(K.UC_M68K_REG_A7, sp + 4)
         uc_.reg_write(K.UC_M68K_REG_D0, OUT)
         uc_.reg_write(K.UC_M68K_REG_PC, ret)
-    c.uc.hook_add(UC_HOOK_CODE, smoother, begin=0x400DB12A, end=0x400DB12A)
+    c.uc.hook_add(UC_HOOK_CODE, smoother, begin=A(0x400DB12A), end=A(0x400DB12A))
 
 
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
     p.add_argument("--layout", default=str(HERE.parent / "src/dnfw/mods/waverider_code.json"))
-    p.add_argument("--stock", default=str(HERE.parent.parent / "Digitone_II_OS1.11.syx"))
-    p.add_argument("--snapshot", default=str(HERE.parent.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
-    p.add_argument("--break", dest="brk", default=None, choices=("notrig", "nosamp", "wrongbuf", "noclear"))
+    p.add_argument("--stock", default=str(HERE.parent.parent / f"Digitone_II_OS{_OSV}.syx"))
+    p.add_argument("--snapshot", default=str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
+    p.add_argument("--break", dest="brk", default=None, choices=("notrig", "nosamp", "wrongbuf", "noclear", "poolsamp", "nohold"))
+    p.add_argument("--pool", action="store_true",
+                   help="v0.55: after the take (links 0..4), a ONESHOT track on SAMP B1 plays it (links P1..P3)")
     p.add_argument("--json", default=None)
     p.add_argument("--raw-smoother", action="store_true",
                    help="leave the stock smoother to the emulated EMAC (its fractional products halved): "
@@ -153,9 +160,12 @@ def main() -> int:
         held(code, False)
     kit = c.long(KIT)
     snd = kit + 52 + STRIDE * T
-    owner = c.call(0x4018A97A)[0]
+    owner = c.call(A(0x4018A97A))[0]
     c.call(lay["smp_machine_commit"], owner + 0xF4, T, FLEX, 1, 1)
     rep["setup"].append(("track 1 FLEX", "direct: smp_machine_commit (the UI's commit path)"))
+    if a.pool:                                                   # v0.55: track 2 ONESHOT, from the start
+        c.call(lay["smp_machine_commit"], owner + 0xF4, 2, 8, 1, 1)
+        rep["setup"].append(("track 2 ONESHOT", "direct: smp_machine_commit"))
     # v0.49: no pool image on the emulator's +Drive, as on a unit nothing was sent to: the
     # ColdFire's own start-up decides (FLEX's buffers are on once it is over); waited for here
     c.periods(1)
@@ -307,6 +317,8 @@ def main() -> int:
     link("4d. v0.51: settings changed mid-take (R.LEN 3, SRC MAIN): the take keeps its own R.LEN (one step) "
          "and SRC (4b)", abs(frames - one) <= 64, f"{frames} frames, one step {one}")
 
+    if a.pool:
+        return pool(c, a, lay, rep, link, finish, held, tap, key, P, owner, kit, take, SM)
     # the note: KEYBOARD on (a tap toggles it), [TRIG 9] held; the voice's buffer read right
     # after our voices render (ping.asm's entry), before the stock chain clears it
     mid = {}
@@ -458,7 +470,7 @@ def main() -> int:
         return set(c.panel.panel.lit(bytes(f[-1]))) if f else set()
 
     def aged():
-        c.poke(lay["smp_knob_at"], struct.pack(">I", (c.long(0x4058E8D4) - 3000) & 0xFFFFFFFF))
+        c.poke(lay["smp_knob_at"], struct.pack(">I", (c.long(A(0x4058E8D4)) - 3000) & 0xFFFFFFFF))
         c.periods(6)
     tap(19)                                                      # GRID RECORD: a held trig takes locks
     held(25, True)
@@ -506,6 +518,151 @@ def main() -> int:
     # this harness's encoder pulses do not reach a stock page's knob here, 8 pulses after SRC left the word as
     # it was, so TUNE's new display is checked in emu_rectext.py, its knob in the gate's functurn step)
     return finish()
+
+
+def pool(c, a, lay, rep, link, finish, held, tap, key, P, owner, kit, take, SM):
+    """v0.55 (owner: "add the recorded buffers (1-8) to the end of the project RAM list"): track 2
+    ONESHOT (smp_machine_commit, at the start with track 1's FLEX), its SAMP B1 (buffer 1's code, BUF_SAMP0, as the knob or the list
+    sets it: written into the sound here), a note on it: the frame sends its voice the buffer's
+    playing half (P1), the DSP renders it (P2), and the render is the take at the note's pitch (P3).
+    Negative control poolsamp: SAMP 127 (an empty slot) instead: fails at P1."""
+    T2 = 2
+    snd2 = kit + 52 + STRIDE * T2
+    code = SM.BUF_SAMP0 if a.brk != "poolsamp" else 127
+    c.poke(snd2 + 20 + 2 * SLOT_SAMP, struct.pack(">H", code << 8))
+    rep["setup"].append(("track 2 ONESHOT, SAMP B1", "direct: smp_machine_commit; the sound's SAMP word"))
+    held(16, True)
+    tap(24 + T2 + 1)                                             # [TRK] + [TRIG 3]: track 2
+    held(16, False)
+    c.periods(4)
+    if not link("P0. track 2 is ONESHOT on B1", c.read(snd2 + 0xDE, 1)[0] == 8 and
+                struct.unpack(">H", c.read(snd2 + 20 + 2 * SLOT_SAMP, 2))[0] == code << 8,
+                f"type {c.read(snd2 + 0xDE, 1)[0]}"):
+        return finish()
+    mid = {}
+
+    def at_mid(r, cc):
+        mid["bufs"] = [cc.M.m2.floats(r.state, cc.M.m2.word(r.state, cc.M.V.TRACK_BUFFERS + 4 * v), 32) for v in range(16)]
+        mid["notes"] = cc.M.m2.floats(r.state, NOTE_CELLS, 16)
+    c.taps[c.M.dsp.PING_SW] = at_mid
+    if not c.read(KB_ON, 1)[0]:
+        tap(18)
+    c.machine.pc = P.press(c.machine.m, c.panel.profile, *key(33))
+    fw, per, notes, tunes = [], {}, {}, {}
+    c.phase = "the note on the ONESHOT track"
+    for n in range(60):
+        if not c.period():
+            break
+        vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
+        for v in [v for v in range(16) if vt[v] == T2]:
+            fw.append(struct.unpack(">H", c.read(CF_FRAME + 168 + 2 * SLOT_SAMP + 146 * v, 2))[0])
+            if "bufs" in mid:
+                per.setdefault(v, []).append(mid["bufs"][v])
+            if "notes" in mid:
+                notes[v] = mid["notes"][v]
+            tunes[v] = struct.unpack(">H", c.read(OUT + 2 * (17 + 101 * v + SLOT_TUNE), 2))[0]
+    c.machine.pc = P.release(c.machine.m, c.panel.profile, *key(33))
+    c.periods(2)
+    note_v = max(per, key=lambda v: max(abs(x) for blk in per[v] for x in blk), default=None)
+    out = [x for blk in per.get(note_v, []) for x in blk]
+    peak = max((abs(x) for x in out), default=0.0)
+    want = SM.BUF_SAMP0 << 8
+    rep["numbers"]["pool"] = {"frame_samp": sorted(set(fw)), "peak": peak}
+    link("P1. the frame sends the ONESHOT voice buffer 1's playing half (SAMP 129)", want in fw,
+         f"SAMP words {sorted(hex(x) for x in set(fw))}, want {want:#x}")
+    link("P2. the DSP renders it", peak > 0.001, f"peak {peak:.4f} (voice {note_v})")
+    if peak > 0.001:
+        start = next(i for i, x in enumerate(out) if abs(x) > 1e-4)
+        note = notes.get(note_v)
+        tw = tunes.get(note_v, 0x4000)
+        tune = max(0, min(120, (tw >> 8) - 4)) - 60
+        rate = 2.0 ** ((note - 60 + tune) / 12.0) if note is not None else None
+        seg = out[start + 32:start + 32 + 1536]
+        best = (None, -2.0)
+        if rate:
+            for lag8 in range(0, 8 * 256 + 1, 4):              # the head 0 .. 256 frames in, in 1/2
+                f0 = lag8 / 8.0 + 32 * rate
+                ref = []
+                for i in range(len(seg)):
+                    x = f0 + i * rate
+                    k = int(x)
+                    if k + 1 >= len(take):
+                        break
+                    ref.append(take[k] + (take[k + 1] - take[k]) * (x - k))
+                n = len(ref)
+                if n < 256:
+                    continue
+                num = sum(p * q for p, q in zip(seg[:n], ref))
+                den = math.sqrt(sum(p * p for p in seg[:n]) * sum(q * q for q in ref)) or 1.0
+                if num / den > best[1]:
+                    best = (lag8 / 8.0, num / den)
+        lag, corr = best
+        rep["numbers"]["pool"].update({"note": note, "tune": tune, "rate": rate, "lag": lag, "corr": corr,
+                                       "notes": notes, "tunes": tunes, "start": start,
+                                       "render": [round(x, 5) for x in out[:6000]],
+                                       "take": [round(x, 5) for x in take[:6000]]})
+        # (the note's voice is often sounding when the reading starts, a sequencer trig on track 2 or
+        # the key's press a block or two before: the head is allowed four blocks in, 128 frames;
+        # measured 2026-11-15: about 70 frames in, corr 0.98)
+        link("P3. the render is the take at the note's pitch, from its start (within four blocks)",
+             rate is not None and corr > 0.95 and lag is not None and lag <= 128,
+             f"note {note}, TUNE {tune:+d}: rate {rate}; corr {corr:.4f}, head {lag}")
+    mute_links(c, a, lay, rep, link, held, tap, key, P, T2)
+    return finish()
+
+
+def mute_links(c, a, lay, rep, link, held, tap, key, P, T2):
+    """v0.57 (NiKo: "shouldn't it wait for the PLEN to cycle"; "you can't simply unmute them"):
+    with a real take in buffer 1, FLEX track 1's MUTE SRC (SRC: track 2) holds track 2 muted only
+    while track 1 PLAYS: not while it is silent (M1), while a note on it sounds (M2), and not
+    past MS_HOLD after its release (M3). Negative control --break nohold (MUTE OFF): fails at M2."""
+    tap(21)                                                      # STOP: no trig of the pattern's
+    c.periods(4)
+    c.call(lay["fx_set"], T, 0, 2 + T2)                          # FX_SRC: TRK of track 2
+    c.call(lay["fx_set"], T, 6, 0 if a.brk == "nohold" else 1)   # FX_MUTE
+    c.periods(500)                                               # every note released, MS_HOLD past
+    m1 = (c.long(lay["ms_mask"]), c.long(lay["ms_playing_mask"]))
+    link("M1. MUTE SRC ON, a take, track 1 silent: track 2 not muted", m1 == (0, 0),
+         f"ms_mask {m1[0]:#x}, playing {m1[1]:#x}")
+    held(16, True)
+    tap(24 + T + 1)                                              # [TRK] + [TRIG 2]: track 1
+    held(16, False)
+    c.periods(4)
+    if not c.read(KB_ON, 1)[0]:
+        tap(18)
+    masks = []
+
+    def grab(tag, n):
+        for _ in range(n):
+            if not c.period():
+                break
+            fr = c.last_frame
+            w = struct.unpack(">4H", fr[34:42])
+            if any(w):
+                masks.append((tag, c.long(lay["smp_periods"]), w))
+    c.machine.pc = P.press(c.machine.m, c.panel.profile, *key(33))
+    grab("press", 60)
+    m2 = (c.long(lay["ms_mask"]), c.long(lay["ms_playing_mask"]))
+    link("M2. a note on track 1 sounding its take: track 2 muted (ms_mask), track 1 playing",
+         m2 == (1 << T2, 1 << T), f"ms_mask {m2[0]:#x}, playing {m2[1]:#x}")
+    c.machine.pc = P.release(c.machine.m, c.panel.profile, *key(33))
+    grab("release", 40)
+    rep["numbers"]["trig_masks"] = masks[:40]
+    print("  trig masks (34, 36, 38, 40):", masks[:20], flush=True)
+    # (the FLEX voice's take loops on silently after the key, so its DSP play position never ends:
+    # the play is the note's -- the frame's note-on and note-off trigger words, the voice's bit)
+    c.periods(460)                                               # MS_HOLD (300) past the note-off
+    m3 = (c.long(lay["ms_mask"]), c.long(lay["ms_playing_mask"]))
+    vt3 = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
+    rep["numbers"]["m3_voices"] = {"tracks": vt3, "pos": struct.unpack(">16H", c.read(lay["smp_pos"], 32)),
+                                   "pos_age": c.long(lay["smp_periods"]) - c.long(lay["smp_pos_at"]),
+                                   "levels": [struct.unpack(">H", c.last_frame[116 + 2 * v:118 + 2 * v])[0]
+                                              for v in range(16)]}
+    link("M3. the note off (the key released), past MS_HOLD: track 2 heard again, MUTE still ON",
+         m3 == (0, 0),
+         f"ms_mask {m3[0]:#x}, playing {m3[1]:#x}, MUTE {c.call(lay['fx_get'], T, 6)[0]}; "
+         f"{rep['numbers']['m3_voices']}")
+    rep["numbers"]["mute"] = {"M1": m1, "M2": m2, "M3": m3}
 
 
 if __name__ == "__main__":

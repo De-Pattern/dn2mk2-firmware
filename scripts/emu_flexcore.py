@@ -13,6 +13,10 @@ processors)."""
 
 from __future__ import annotations
 
+import sys as _osport_sys, pathlib as _osport_pl  # noqa: E401
+_osport_sys.path.insert(0, str(_osport_pl.Path(__file__).resolve().parents[1] / 'src'))
+from dnfw.osport.os import A  # noqa: E402  (docs/os112-port.md)
+
 import argparse
 import json
 import os
@@ -30,12 +34,12 @@ from emulib.machine import Machine                             # noqa: E402
 
 ISR, ISR_RTE = 0x40025E36, 0x40027BC6
 SRC, STATE = 0x80003AF0, 0x8000DE60
-OWNER, FRAMES, TEMPO_AT = 0x80005308, 0x4058E8D4, 0x80005E60 + 216
+OWNER, FRAMES, TEMPO_AT = 0x80005308, A(0x4058E8D4), 0x80005E60 + 216
 KIT, SOUND_STRIDE = 0x800052A0, 1163
-SYNC, UNDO, BITMAP_CLEAR = 0x4002549C, 0x400DAF44, 0x400DB052
-BUILD, APPLY = 0x400D85E8, 0x400DB092
-LOAD, SAVE, CLEAR = 0x400DE51E, 0x400DE718, 0x4003D14E
-SEQ_PLAYING, SEQ_PATTERN, TRACK_CUR = 0x42C5A918, 0x42C5A9A0, 0x42C5A984
+SYNC, UNDO, BITMAP_CLEAR = 0x4002549C, A(0x400DAF44), A(0x400DB052)
+BUILD, APPLY = A(0x400D85E8), A(0x400DB092)
+LOAD, SAVE, CLEAR = A(0x400DE51E), A(0x400DE718), 0x4003D14E
+SEQ_PLAYING, SEQ_PATTERN, TRACK_CUR = A(0x42C5A918), A(0x42C5A9A0), A(0x42C5A984)
 PAT_LENGTH, PAT_MODE = 122196, 122201
 REC, RECS, INDEX, TABLE_BYTES = 258, 80, 20640, 22256 + 2048
 LIST_BYTES = 20 + 202 * 8
@@ -133,7 +137,7 @@ def main() -> int:
     put32(SEQ_PLAYING, 0)
     table = pat + PAT_LOCK_TABLE
     # the model's table getter (vtable +40: *(model + 16)) must give the same address
-    APP, TRACK_CTX = 0x4018A97A, 0x4003EFDE
+    APP, TRACK_CTX = A(0x4018A97A), 0x4003EFDE
     app = call(APP)[0]
     ctx = call(TRACK_CTX, app)[0]
     model = machine.long(ctx + 44)
@@ -251,7 +255,7 @@ def main() -> int:
           led_site != bytes.fromhex("4eb94011d3b2"), led_site.hex())
 
     # ---- record 244: FLEX's BUF (01..08) on FLEX, stock's text elsewhere ----------------------
-    REC244 = 0x401F7F94 + 60 * 244
+    REC244 = A(0x401F7F94) + 60 * 244
     stock_f = machine.long(REC244 + 0x34)
     fs = []
     for kind in (13, 4, 0, 2):                         # FLEX, ONESHOT, a stock machine, SID
@@ -310,7 +314,7 @@ def main() -> int:
         panel.settle(5_000_000)
         # v0.45: the trig LEDs (stock's LedManager, docs/leds.md: modes at +40, palette values at
         # +256, 4 bytes an LED; the trig keys are ids 26..41) -- stock's before the panel opens
-        LM_PTR = 0x446478E0
+        LM_PTR = A(0x446478E0)
 
         def leds():
             lm = machine.long(LM_PTR)
@@ -420,7 +424,7 @@ def main() -> int:
     # v0.47: the Monomachine's TUNE (knob H, record 240): its header text a signed knob
     # (-64..+63, 0 in tune), not stock's percentage; FUNC + turn steps by semitones (32)
     if "smp_quant" in lay:
-        REC240 = 0x401F7F94 + 60 * 240
+        REC240 = A(0x401F7F94) + 60 * 240
         stock_t = machine.long(REC240 + 0x34)
         call(lay["smp_formats"], 2)                          # SID 6581 (type 6, kind 2)
         f_t = machine.long(REC240 + 0x34)

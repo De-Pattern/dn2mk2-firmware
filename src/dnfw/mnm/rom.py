@@ -225,8 +225,8 @@ def table_words() -> tuple[int, ...]:
     (signed words; the DSP holds each as FLOAT w BY -23): DPRO-WAVE's samples, then
     SID's combined waveforms >> 16 (each render scales them back), then DPRO-DENS/DDRW's
     (dpro_words; their Digibank stand-in the DSP builds itself, dnfw.mnm.dpro.build), then
-    VO-6's (vo6_words)."""
-    return wave_samples() + comb8() + dpro_words() + vo6_words()
+    VO-6's (vo6_words), then FM+'s (fm_words, v0.59)."""
+    return wave_samples() + comb8() + dpro_words() + vo6_words() + fm_words()
 
 
 WAVE_WORDS = 33 * 512                         # the samples' words at the tables' start
@@ -372,3 +372,49 @@ def vo6_cons() -> list[int]:
             out += list(ops[k]) if k < len(ops) else [0] * 8
         out += [kind, -xk] + [s24(c) for c in co] + [y40]          # xk: what the crossfade adds
     return out
+
+
+# -- FM+ STAT / PAR / DYN (v0.59, dnfw.mnm.fm) ------------------------------------------------
+FM_SINE_CODE = 0x100077            # the external image's sine builder (x:0x14A000, 8192 words)
+FM_FLIST = (0x141A80, 24)          # the listed frequency ratios (by knob: (6 k + 3) >> 5)
+FM_TONE = (0x144AC7, 128)          # TONE's one-pole coefficients (by knob)
+FM_ENVT = (0x141880, 129)          # DYN's envelope multipliers (by 128 - 2 |knob - 64|)
+
+
+@functools.lru_cache(maxsize=1)
+def fm_sine() -> tuple[int, ...]:
+    """The FM+ machines' sine, word for word (signed 24-bit): the builder at FM_SINE_CODE runs
+    a 48-bit recursion y[n+1] = 2 c y[n] - y[n-1] from y[0] = 0, y[1] its immediate (hi:lo),
+    with its partial products and limiter (as dnfw.md.core.md_sine_words, DSP2's), 0x1FFE
+    times. Its four immediates are read from the image (each checked by its opcode), then one
+    more word, the first again, for the interpolation's wrap."""
+    w = words(FM_SINE_CODE, 0x16)
+    # move #>$14A000,r0 .. move #>y1hi,x1 .. #>y1lo,x0 .. #>chi,x1; move #>clo,x0
+    if (w[1], w[2], w[0xB], w[0xF], w[0x12], w[0x14]) != (0x60F400, 0x14A000, 0x45F400, 0x44F400,
+                                                           0x45F400, 0x44F400):
+        raise RomError("FM+'s sine builder is not where OS 1.32B has it")
+    y1hi, y1lo, chi, clo = w[0xC], w[0x10], w[0x13], w[0x15]
+    st = [0, (y1hi << 24) | y1lo]
+    out = [0, s24(y1hi)]
+    idx = 1
+    for _ in range(0x1FFE):
+        y = st[idx]
+        yh, yl = y >> 24, y & 0xFFFFFF
+        a = (clo * yl) << 1
+        a = (a >> 24) + ((s24(chi) * yl) << 1)
+        a += (s24(yh) * clo) << 1
+        a = (a >> 24) + ((s24(chi) * s24(yh)) << 1)
+        a <<= 1
+        idx ^= 1
+        o = st[idx]
+        a -= (s24(o >> 24) << 24) | (o & 0xFFFFFF)
+        a = max(-(1 << 47), min((1 << 47) - 1, a))
+        st[idx] = a & ((1 << 48) - 1)
+        out.append(s24(a >> 24))
+    return tuple(out) + (out[0],)
+
+
+@functools.lru_cache(maxsize=1)
+def fm_words() -> tuple[int, ...]:
+    """FM+'s tables in dnfw.mnm.core.FM_TABLES's order (signed 24-bit words)."""
+    return fm_sine() + tuple(s24(v) for v in words(*FM_FLIST) + words(*FM_TONE) + words(*FM_ENVT))

@@ -16,6 +16,7 @@
  *
  * Length: SLEN in 1/24 of a step (sl_units), at the tempo the frame carries (BPM x 120,
  * frame word 108) and the track's scale (the pattern's, or the track's in per-track mode).
+ * v0.66: NXT (SLEN's first choice, and its value with no lock): until the track's next trig.
  *
  * Per-trig storage: lock records of their own in the pattern's lock pool, RAM header
  * (SL_RAM_SLD / SL_RAM_SLEN, track | SL_TAG), stored (SL_ID_SLD / SL_ID_SLEN, track). The
@@ -163,6 +164,41 @@ static u32 ticks_a_step(u32 t)
     return n ? n : 6;
 }
 
+/* v0.66 (the owner, the Analog Four's rule: "the slide is completed when the next trig is
+ * reached"): the steps from STEP to track T's next trig (a note or a lock trig: step flag bit 0,
+ * which both set: DNX, a note 0x0381, a lock trig 0x7801), round the track's length; no other
+ * trig: the whole length (to itself). The pattern's tracks are 1701 bytes from +0, each step's
+ * flags a u16 at +2 step (stock's step test 0x4004e95a reads them through the track's vtable
+ * +40: the gate checks that pointer is this one for every track); a track's length at +1164
+ * per track, the pattern's at +122196 per pattern (as jump.c). */
+#define PAT_TRACK 1701u
+#define PAT_TLEN 1164u
+#define PAT_LEN 122196u
+#define PAT_MODE 122201u
+u32 sl_nxt_last D;                              /* the steps the last NXT slide found (the checks) */
+
+static u32 steps_to_next(u32 t, u32 step)
+{
+    const u8 *p = PATTERN;
+    if (!p || t >= NV)
+        return 1;
+    int len = p[PAT_MODE] != 0 ? *(const short *)(p + PAT_TRACK * t + PAT_TLEN)
+                               : *(const short *)(p + PAT_LEN);
+    if (len < 1 || len > 128)
+        return 1;
+    if (step >= (u32)len)
+        step %= (u32)len;
+    const u8 *f = p + PAT_TRACK * t;
+    for (u32 k = 1; k < (u32)len; k++) {
+        u32 s = step + k;
+        if (s >= (u32)len)
+            s -= (u32)len;
+        if (f[2 * s + 1] & 1)                   /* the flags' low byte (big-endian u16) */
+            return k;
+    }
+    return (u32)len;
+}
+
 static void trigger(u32 v, u32 t, u8 *list)
 {
     int count = *(int *)(list + 8);
@@ -203,8 +239,12 @@ static void trigger(u32 v, u32 t, u8 *list)
     }
     if (!n)
         return;
-    u32 len = e->slen < SL_NLEN ? e->slen : SL_LEN_DEFAULT;
-    sl->units = sl_units[len];
+    if (e->slen < SL_NLEN)
+        sl->units = sl_units[e->slen];
+    else {                                      /* NXT (or no SLEN lock): to the next trig */
+        sl_nxt_last = steps_to_next(t, e->magic & 0xFFu);
+        sl->units = (u16)(24u * sl_nxt_last);
+    }
     sl->prog = 0;
     sl->mul = (6u << 8) / ticks_a_step(t);
     sl->n = (u16)n;
@@ -437,7 +477,7 @@ int sl_ours_any(const u8 *table, u32 t)
  * drawn, so the two places to its left, (24, 0) and (50, 0), get SLD and SLEN, which encoders
  * E and F set. A trig held: its own value (the first held step's), drawn inverted when it is
  * a lock, as stock draws a p-lock; turning sets it on every held step. No trig held: what a
- * trig gets with no lock (OFF, 1 step), and turning does nothing. */
+ * trig gets with no lock (OFF, NXT: v0.66), and turning does nothing. */
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90u)   /* (canvas, x, y, on) */
 #define TEXT ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011545Cu)
 #define CENTRED 2
@@ -549,7 +589,7 @@ void sl_draw_slen(void *c, int x, int y, u32 i, int locked)
     static u32 font[8] D;                       /* the font object (stock's: on its stack) */
     clear(c, x - 3, y, x + 21, y + 24);
     BOX_FONT_INIT(font, BOX_FONT);
-    TEXT(c, (u32)font, x + 9, y + 13, CENTRED, (const char *)FMT_S, sl_len_text[i < SL_NLEN ? i : SL_LEN_DEFAULT]);
+    TEXT(c, (u32)font, x + 9, y + 13, CENTRED, (const char *)FMT_S, sl_len_text[i <= SL_NXT ? i : SL_LEN_DEFAULT]);
     BOX_FONT_FREE(font);
     RECT(c, x, y + 7, x + 18, y + 23, 1);
     label(c, x, y, "SLEN", locked);
@@ -623,8 +663,11 @@ int sl_knob(u32 index, int delta)
         int step = sl_choice_step(delta);       /* v0.41: four detents a choice */
         if (!step)
             return 1;
-        int n = (int)(cur != 0xFFFF ? cur : SL_LEN_DEFAULT) + step;
-        v = (u32)(n < 0 ? 0 : n >= SL_NLEN ? SL_NLEN - 1 : n);
+        /* v0.66: the choices NXT, 1/8 .. 64 (NXT first, the value with no lock) */
+        u32 c = cur != 0xFFFF && cur <= SL_NXT ? cur : SL_LEN_DEFAULT;
+        int n = (c == SL_NXT ? 0 : (int)c + 1) + step;
+        n = n < 0 ? 0 : n > SL_NLEN ? SL_NLEN : n;
+        v = n == 0 ? SL_NXT : (u32)(n - 1);
     }
     for (u32 s = 0; s < h.len; s++)
         if (BIT_TEST(obj + 600, s) & 0xFF)

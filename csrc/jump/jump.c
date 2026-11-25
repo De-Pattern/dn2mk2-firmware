@@ -145,12 +145,29 @@ static void say(void *view, const char *text)
     STR_FREE(s);
 }
 
+/* v0.64 KEYBOARD HOLD (rec.c smp_ui_pop catches PTN + KEYBOARD: stock takes KEYBOARD before
+ * any view): its message on the PTN view's line, that view found in the screen's list by its
+ * class (0x402008c4, measured: put at the list's end when PTN goes down; rec.c smp_view_of) */
+#define PTN_VIEW_VT 0x402008C4u
+u32 kh_close __attribute__((section(".data"))) = 0;
+void jmp_hold_say(u32 on)
+{
+    extern u32 smp_view_of(u32 want);
+    u32 v = smp_view_of(PTN_VIEW_VT);
+    if (v)
+        say((void *)v, on ? "KB HOLD ON" : "KB HOLD OFF");
+}
+
 /* the PTN view's key handler (its vtable slot 0x402008cc points here): PTN held, a fresh
  * YES or NO without FUNC sets DIRECT JUMP on or off (stock: either closes the PTN view);
  * everything else is stock's */
 int jmp_key(void *view, void *ev)
 {
     u32 code = *(u32 *)((u8 *)ev + 12);
+    if (kh_close == 2) {                        /* v0.64: rec.c's NO after PTN + KEYBOARD: stock's */
+        kh_close = 0;
+        return PTN_VIEW_KEY(view, ev);
+    }
     if ((code == K_YES || code == K_NO) && EV_PRESSED(ev) && !EV_FUNC(ev)
         && KEY_HELD(K_PTN) && !KEY_HELD(K_FUNC)) {
         jmp_on = code == K_YES;
@@ -218,12 +235,18 @@ void jmp_wrap_tracks(void)
     if (!pat)
         return;
     int per_track = pat[PAT_MODE] != 0;
+    /* v0.73 (docs/os112-port.md): each array through its own base, kept opaque, so the compiler
+     * cannot fold one stock address into the other (it made TRACK_NEXT's 2 x cur - 0x42c5a91e,
+     * a constant no port can tell is an address) */
+    volatile u16 *next_at = TRACK_NEXT;
+    volatile const u8 *cur_at = TRACK_CUR;
+    __asm__("" : "+a"(next_at), "+a"(cur_at));
     for (int t = 0; t < 16; t++) {
         s16 len = per_track ? *(const s16 *)(pat + TRK_STRIDE * t + TRK_LENGTH)
                             : *(const s16 *)(pat + PAT_LENGTH);
-        u32 next = (u32)(u8)(TRACK_CUR[t] + 1u);
+        u32 next = (u32)(u8)(cur_at[t] + 1u);
         if (len >= 1)
             next %= (u32)(u16)len;
-        TRACK_NEXT[t] = (u16)next;
+        next_at[t] = (u16)next;
     }
 }

@@ -182,20 +182,42 @@ void wr_screen(void *screen, void *canvas)
     extern int smp_fb_visible(void);
     extern void smp_fb_draw(void *canvas, int samp);
     extern int smp_samp_of(int track);
+    extern unsigned int smp_samp_word(int track);
     extern int smp_list_visible(void);
     extern void smp_list_draw(void *canvas);
     extern void sl_screen(int phase, int covered);      /* parameter slides (csrc/slides) */
     sl_screen(0, 0);
     SCREEN_DRAW(screen, canvas);
-    sl_screen(1, rec_visible() || slc_visible() || smp_fb_visible() || smp_list_visible());
-    if (rec_visible())
+    extern int sn_up(void);
+    if (sn_up()) {                              /* v0.54: the stock NAME screen: nothing of ours over it */
+        sl_screen(1, 1);
+        return;
+    }
+    extern int tn_visible(void);                /* v0.61: TUNING (csrc/sampler/tune.c) */
+    extern void tn_draw(void *canvas);
+    extern void tn_kb_draw(void *canvas);
+    extern int pf_visible(void);                /* v0.69: PERFORM (csrc/sampler/perf.c) */
+    extern void pf_draw(void *canvas);
+    sl_screen(1, rec_visible() || slc_visible() || smp_fb_visible() || smp_list_visible() || tn_visible()
+              || pf_visible());
+    if (pf_visible())
+        pf_draw(canvas);
+    else if (tn_visible())
+        tn_draw(canvas);
+    else if (rec_visible())
         rec_screen_draw(canvas);
     else if (slc_visible())
         slc_draw(canvas);
     else if (smp_fb_visible())                  /* v0.25: the folder browser (ASSIGN SAMPLE) */
-        smp_fb_draw(canvas, smp_samp_of(UI_TRACK));
+        smp_fb_draw(canvas, (int)smp_samp_word(UI_TRACK));   /* v0.65: the whole word (its bank) */
     else if (smp_list_visible())                /* v0.25: the sample list, over the title bar too */
         smp_list_draw(canvas);
+    else
+        tn_kb_draw(canvas);                     /* KB SETUP's H slot, when KB SETUP is on top */
+    extern int gr_visible(void);                /* v0.69: the guardrail's message, over everything */
+    extern void gr_draw(void *canvas);
+    if (gr_visible())
+        gr_draw(canvas);
 }
 
 /* the UI loop's redraw test, as stock (and the names kept current, once a loop; and
@@ -228,6 +250,8 @@ int wr_poll(void *screen)
     extern int smp_overlay_dirty;               /* v0.25: the sample list and the browser */
     extern int slc_state;                       /* v0.25: a SLICE/GRID menu opening or moving */
     static int slc_last __attribute__((section(".data"))) = 0;   /* on is drawn at once, not */
+    extern int gr_visible(void);
+    (void)gr_visible();                         /* v0.69: the guardrail's message ends (a redraw) */
     if (smp_overlay_dirty || slc_state != slc_last) {            /* at the next redraw tick */
         smp_overlay_dirty = 0;
         slc_last = slc_state;
@@ -344,8 +368,10 @@ static const char *mnm_text(void *view, int m, int j)
     if (!n)
         return 0;                                   /* a knob */
     int k = mnm_knob(view, j);
-    if (n == MNM_PCH)                               /* DENS's PCH2..4: by the ROM's table */
-        return mnm_choice_names[mnm_choice_at[m][j] + mnm_pch_idx[k > 127 ? 127 : k]];
+    if (mnm_cont(n))                                /* v0.60: DYN's 1FRQ / 2FRQ: x.x / x.xx */
+        return mnm_cont_text(n, k, num);
+    if (n == MNM_PCH || n == MNM_FLIST)             /* DENS's PCH2..4, FM+'s listed: the ROM's tables */
+        return mnm_choice_names[mnm_choice_at[m][j] + mnm_choice(n, k)];
     int c = (k * n) >> 7;
     if (n == MNM_WAVES || n == 2 * MNM_WAVES) {     /* the ROM waves: S01..S32 (DDRW, DENS: the */
         c &= MNM_WAVES - 1;                         /* Digibank's 64, here the 32 twice) */
@@ -381,11 +407,13 @@ static int smp_pos(void *view, u32 id, int w)
 extern int smp_count(void);
 extern const char *smp_name(int k);
 
-static const char *sound_name(int k)
+extern int smp_view_bank(void *view), smp_bank_count(int b);
+static const char *sound_name(void *view, int k)  /* v0.65: in SAMP's bank */
 {
-    int n = smp_count();
+    int b = smp_view_bank(view);
+    int n = b ? smp_bank_count(b) : smp_count();
     if (n >= 0)
-        return k <= n ? smp_name(k - 1) : 0;
+        return k <= n && k <= 127 ? smp_name(b * 128 + k - 1) : 0;
     return k <= SMP_SOUNDS ? smp_sound[k - 1] : 0;
 }
 
@@ -400,7 +428,7 @@ static const char *smp_text(void *view, u32 id, int kind, const char *label)
         int k = smp_get(view, id);
         if (k == 0)
             return "OFF";
-        const char *nm = sound_name(k);
+        const char *nm = sound_name(view, k);
         if (nm && nm[0])
             return nm;
         buf[0] = '0' + k / 100; buf[1] = '0' + k / 10 % 10; buf[2] = '0' + k % 10; buf[3] = 0;
@@ -442,7 +470,7 @@ static const char *smp_text(void *view, u32 id, int kind, const char *label)
 static void smp_picture(void *c, void *view, int kind)
 {
     int k = smp_get(view, SMP_SAMP_ID);
-    const char *snd = k == 0 ? "OFF" : sound_name(k);
+    const char *snd = k == 0 ? "OFF" : sound_name(view, k);
     if (!snd)
         snd = "EMPTY";
     TEXT(c, FONT, WAVE_X + WR_WIDTH / 2, 30, CENTRED, "%.7s", smp_machine[SMP_IDX(kind)]);
