@@ -743,6 +743,8 @@ def main() -> int:
             scen = ("save", "fast", "dead", "high", "lowram") if "smp_ram" in lay else ("save", "fast", "dead")
             if "smp_slices_set" in lay:
                 scen += ("slices",)             # v0.23: the slice editor's reading and saving
+            if "smp_slot_fmt" in lay and "smp_frames_read" in lay:
+                scen += ("stereo",)             # stereo: a format-2 sample's power-on load, SLICE's read, the editor's frames
             if "smp_lib_state" in lay:
                 scen += ("lib",)                # v0.31: the +Drive's library, bounded to its region
             if "smp_heads" in lay:
@@ -779,7 +781,7 @@ def main() -> int:
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
-                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live|nest|recstore|norm): .*\"ok\": (true|false)", out)
+                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|stereo|lib|live|nest|recstore|norm): .*\"ok\": (true|false)", out)
                 good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
                 return good, ("save, fast (a lost packet resent); every byte loaded and saved; the frame's routing words stock's in "
                               "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
@@ -795,6 +797,9 @@ def main() -> int:
                                  "its name, the slot marked as that sample, a power cut after any pass leaves no entry or "
                                  "all of it, a slot changed mid-copy stops it, no room writes nothing (recstore)"
                                  if "recstore" in scen else "")
+                              + ("; stereo: a stereo sample beside a mono one loads at power-on, every byte and its "
+                                 "format; SLICE's read finds its hits on either side; the editor's frames are "
+                                 "(L + R) / 2 (stereo)" if "stereo" in scen else "")
                               + ("; v0.41: takes at 4,000, 32,000 and 10 (-70 dBFS) normalised to full scale, every frame "
                                  "exact, none clipped; an all-zero take stays zero (norm)" if "norm" in scen else "")
                               if good else out[-800:])

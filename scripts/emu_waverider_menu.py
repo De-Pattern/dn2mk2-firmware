@@ -528,6 +528,80 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out["ok"] = (loaded and an == 2 and near and len(ons) == 4 and set_rc == 0
                      and order == ["area", "entry"] and back_n == 3 and back == table
                      and out["disk_table"] == table and not route.get("changed"))
+    elif scenario == "stereo":
+        # stereo (v0.54-t1's field reports, docs/stereo-assessment.md): a stereo sample (format 2,
+        # int16 L R) on the +Drive beside a mono one, as after a power cycle. Hits 0 and 2 are on
+        # its L side only, hits 1 and 3 on its R side only. Checked: the loader gives the DSP every
+        # byte of both (4 bytes a frame for the stereo one) and the directory with its format;
+        # SLICE's read runs to its end (v0.54-t1: NO SAMPLE) and finds all four hits (the louder
+        # side); the editor's frames are (L + R) / 2 of the sample's own; the slot says stereo
+        n = 96000
+        hits = [0, 24000, 48000, 72000]
+        st_l, st_r = [0.0] * n, [0.0] * n
+        for j, h in enumerate(hits):
+            for k in range(6000):
+                (st_l if j % 2 == 0 else st_r)[h + k] = 0.8 * ((k * 37 % 50) / 25 - 1) * (1 - k / 6000)
+        mono_s = [0.3 * ((k % 50) / 25 - 1) for k in range(700)]
+        img = SL.pool_bytes([list(zip(st_l, st_r)), mono_s], base, [1.0, 1.0], [SM.FMT_I16S, SM.FMT_I16], ["WIDE", "TRI"])
+        img = bytearray(img + bytes((-len(img)) % 512))
+        hdr_dir = bytes(img[:SM.DATA_OFFSET])
+
+        def adler_st(b):
+            a_, b_ = 1, 0
+            for x in b:
+                a_ = (a_ + x) & 0xFFFFFFFF
+                b_ = (b_ + a_) & 0xFFFFFFFF
+            return (b_ << 16 ^ a_) & 0xFFFFFFFF
+        magic, nbytes, ck = 0x444E3251, len(img), adler_st(hdr_dir)
+        disk[STORE_SECTOR] = struct.pack(">5I", magic, 2, nbytes, ck,
+                                         (~magic ^ nbytes ^ ck) & 0xFFFFFFFF).ljust(512, b"\0")
+        for k in range(len(img) // 512):
+            disk[STORE_SECTOR + 1 + k] = bytes(img[512 * k:512 * k + 512])
+        periods = 0
+        while periods < 6000:
+            period()
+            call("smp_boot")
+            periods += 1
+            if long("smp_lstate") == 4:
+                break
+        loaded = long("smp_lstate") == 4
+        frames_wrong, dir_wrong = 0, 0
+        for slot in range(2):
+            addr, fr, _r, fmt = struct.unpack_from("<IIfI", img, 8 + 16 * slot)
+            lo = addr - base
+            for k in range(lo // 4, (lo + fr * (4 if fmt & 0xFF == SM.FMT_I16S else 2) + 3) // 4):
+                if pool.get(k) != struct.unpack_from("<I", img, 4 * k)[0]:
+                    frames_wrong += 1
+            for k in range((8 + 16 * slot) // 4, (8 + 16 * slot) // 4 + 4):
+                if pool.get(k) != struct.unpack_from("<I", img, 4 * k)[0]:
+                    dir_wrong += 1
+        call("smp_slot_fmt", 0)
+        fmt0 = returned_d0()
+        call("smp_analyse", 0)
+        an_rc = returned_d0()
+        for _ in range(600):
+            call("smp_boot")
+            call("smp_analysis", 0)
+            if returned_d0() == 2:
+                break
+        an = returned_d0()
+        buf = STACK_TOP - 0x2000
+        call("smp_onsets", buf, 16)
+        nos = returned_d0()
+        ons = list(struct.unpack(f">{nos}I", machine.read(buf, 4 * nos))) if 0 < nos <= 16 else []
+        f0, nf = 24000 - 64, 256                # across the second hit's start (R only there)
+        call("smp_frames_read", 0, f0, nf)
+        ptr = returned_d0()
+        got = list(struct.unpack(f"<{nf}h", machine.read(ptr, 2 * nf))) if ptr else []
+        q = lambda x: max(-32768, min(32767, round(x * 32768)))        # noqa: E731
+        want_f = [(q(st_l[f0 + i]) + q(st_r[f0 + i])) >> 1 for i in range(nf)]
+        near = all(any(abs(o - h) <= 400 for o in ons) for h in hits)
+        out.update(loaded=loaded, periods=periods, frames_wrong=frames_wrong, dir_wrong=dir_wrong, fmt0=fmt0,
+                   analyse_rc=an_rc, analysis=an, onsets=ons, frames_read=bool(ptr), frames_same=got == want_f,
+                   frames_sound=max((abs(x) for x in got), default=0), routing_changed=route.get("changed", 0))
+        out["ok"] = (loaded and not frames_wrong and not dir_wrong and fmt0 == SM.FMT_I16S and an_rc == 0 and an == 2
+                     and near and len(ons) == 4 and bool(ptr) and got == want_f and out["frames_sound"] > 5000
+                     and not route.get("changed"))
     elif scenario == "slicebusy":
         # v0.40 (a user: "sometimes EDIT SLICE POINTS or CREATE SLICE GRID returns CANNOT READ
         # IT ... the slices are created on page 2 without the Slice Editor opening ...

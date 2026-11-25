@@ -3325,6 +3325,10 @@ def pvmix(p: Prog, L: Layout) -> None:
     p.iconst(12, 0)
 
     def some():
+        if SM.STEREO:                         # the words a block: 32 for a stereo slot, else 16 (whatever
+            p.ld(0, C["pvw"])                 # the word held: only the preview command sets it)
+            p.iconst(12, 32)
+            p.if_(0, "NE", 12, lambda: (p.iconst(0, 16), p.st(C["pvw"], 0)), kind="i")
         p.iconst(0, 0)
         p.st(C["pvk"], 0)
 

@@ -3058,9 +3058,11 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         for k in range(64):
             put(SM.IN_BUF + 4 * k, in_blk[k])
 
-    def run(image, words_left, mix0=mix_in, loop=False, mon=None):
+    def run(image, words_left, mix0=mix_in, loop=False, mon=None, st=False):
         r = init_on(snap, m2mach, image).fresh_call(dsp.PVMIX_SITE_SW, regs=regs)
         poke_mon(lambda a, v: m2.poke(r.state, a, v), mon)
+        if st and "pvw" in C:                   # stereo: a stereo slot's preview (a frame a word)
+            m2.poke(r.state, C["pvw"], 32)
         for k in range(64):
             m2.poke(r.state, SM.MIX_BUF + 4 * k, mix0[k])
         for k, w in enumerate(pairs):
@@ -3086,10 +3088,12 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
     def mix(r):
         return [m2.word(r.state, SM.MIX_BUF + 4 * k) or 0 for k in range(64)]
 
-    def model(words_left, mix0, loop=False, mon=None):
+    def model(words_left, mix0, loop=False, mon=None, st=False):
         from dnfw.perc.dsl import Mem
         mem = Mem(lambda a: 0)
         poke_mon(mem.put, mon)
+        if st and "pvw" in C:
+            mem.put(C["pvw"], 32)
         for k in range(64):
             mem.put(SM.MIX_BUF + 4 * k, mix0[k])
         for k, w in enumerate(pairs):
@@ -3103,7 +3107,7 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         return [mem.get(SM.MIX_BUF + 4 * k) for k in range(64)], mem.get(C["pva"]), mem.get(C["pvn"])
 
     own = {C[w] for w in ("pva", "pvn", "pvk", "pvs0", "pvs1", "pvs2", "pvs3", "pvs12", "pvs13", "pvsi", "pvsa",
-                          "pvl0", "pvln")}
+                          "pvl0", "pvln", *(("pvw",) if "pvw" in C else ()))}
     own |= {SM.MAIN_TAP + 4 * k for k in range(64)}     # v0.37: the MAIN tap is the preview's too
     out, checks = {}, {}
     # v0.59 MON: on, IN, armed (1) / recording (2): the input added; off, MAIN (1), a track (2),
@@ -3116,16 +3120,27 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
     added = [struct.unpack("<I", struct.pack("<f", f32(struct.unpack("<f", struct.pack("<I", a))[0]
                                                             + struct.unpack("<f", struct.pack("<I", b))[0])))[0]
              for a, b in zip(mix_in, in_blk)]
+    ST_CASES = (("stereo full", 40, False), ("stereo tail", 5, False), ("stereo loop", 5, True)) if "pvw" in C else ()
     for name, left, loop, *mon in (("none", 0, False), ("full", 40, False), ("tail", 5, False), ("loop", 5, True),
-                                   *MON_CASES):
+                                   *MON_CASES, *ST_CASES):
         mon = mon[0] if mon else None
-        want, pva, pvn = model(left, mix_in, loop, mon)
+        st = name.startswith("stereo")
+        want, pva, pvn = model(left, mix_in, loop, mon, st)
+        if st:                                  # a stereo slot's frame k: its low half to L[k], its high half to R[k]
+            def s16(x):
+                return x - 0x10000 if x & 0x8000 else x
+            exp = list(mix_in)
+            for k in range(min(left, 32)):
+                for side, half in ((0, pairs[k] & 0xFFFF), (32, pairs[k] >> 16)):
+                    a = struct.unpack("<f", struct.pack("<I", mix_in[side + k]))[0]
+                    exp[side + k] = struct.unpack("<I", struct.pack("<f", f32(a + f32(s16(half) / 131072.0))))[0]
+            checks[f"{name}: the model's mix is each frame's L on the L side and R on the R side, a quarter level"] = want == exp
         if mon is not None and left == 0:
             hears = mon[0] == 1 and mon[1] == 0 and mon[2] in (1, 2)
             checks[f"{name}: the model's mix {'is the mix + the input' if hears else 'untouched'}"] = (
                 want == (added if hears else mix_in))
         rs, hs, _ = run(stock, 0, want, mon=mon)   # stock, given the mix the preview makes (v0.59: MON's words too)
-        rm, hm, _ = run(m5, left, loop=loop, mon=mon)
+        rm, hm, _ = run(m5, left, loop=loop, mon=mon, st=st)
         ok = hs[0] == "stop" and hm[0] == "stop"
         same_regs = ok and rm.state.uregs == rs.state.uregs
         diff = sorted(a for a in set(rm.state.overlay) | set(rs.state.overlay)
@@ -3137,7 +3152,7 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         checks[f"{name}: both make the call and come back after it"] = ok
         checks[f"{name}: every register as stock's"] = same_regs
         checks[f"{name}: every word written as stock's (given the mixed block), but the preview's own"] = ok and not stray
-        checks[f"{name}: the mix as the model's ({min(left, 16)} words added)"] = ok and got == want
+        checks[f"{name}: the mix as the model's ({min(left, 32 if st else 16)} words added)"] = ok and got == want
         tap = [m2.word(rm.state, SM.MAIN_TAP + 4 * k) or 0 for k in range(64)]
         checks[f"{name}: v0.37: the MAIN tap holds the mix as it came, before the preview"] = ok and tap == mix_in
         if left == 0 and mon is None:
