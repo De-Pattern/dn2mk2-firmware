@@ -1,17 +1,13 @@
 {
  "gates": [
   {
-   "label": "v0.76 \u00b7 ColdFire steps, part 3",
-   "done": 35,
+   "label": "v0.76 \u00b7 ColdFire steps, last part",
+   "done": 0,
    "total": 0,
-   "last": [
-    "ERASE MOD DATA (ColdFire)",
-    "engine + LOAD/SAVE",
-    "boot from reset"
-   ],
+   "last": [],
    "state": "run",
-   "frac": 0.875,
-   "status": "running: fuzz"
+   "frac": 0.0,
+   "status": "running"
   },
   {
    "label": "v0.76 \u00b7 steps on both processors",
@@ -27,6 +23,6 @@
    "status": "running: flexplay"
   }
  ],
- "note": "v0.76: the ColdFire steps continue; beside them the steps that run both processors, the new FLEX timing check first. Then the SHARC parts, the full gate and the release.",
- "updated": "2026-11-26T23:21:24+00:00"
+ "note": "v0.76: the last ColdFire steps (the UI fuzz, the dead link) and the steps on both processors. Then the FLEX timing check, the SHARC parts, the full gate and the release.",
+ "updated": "2026-11-26T23:31:12+00:00"
 }
