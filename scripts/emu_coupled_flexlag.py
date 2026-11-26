@@ -24,7 +24,9 @@ status recording then done); 2 track 1 sounds in pass 2; 3 the take is the input
 
 A negative control: v0.75's build must fail at 4 (a tick late).
 
-Usage: emu_coupled_flexlag.py --build BUILD.syx [--layout waverider_code.json] [--json OUT]"""
+Usage: emu_coupled_flexlag.py --build BUILD.syx [--step 1|0] [--layout waverider_code.json] [--json OUT]
+  --step 1 (the default): the trig and the note on step 2, a step change while it plays
+  (Dubmaster's case); --step 0: step 1, PLAY's own first step"""
 
 from __future__ import annotations
 
@@ -81,6 +83,9 @@ def main() -> int:
     p.add_argument("--stock", default=str(HERE.parent.parent / f"Digitone_II_OS{_OSV}.syx"))
     p.add_argument("--snapshot", default=str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
     p.add_argument("--json", default=None)
+    p.add_argument("--step", type=int, default=1, choices=(0, 1),
+                   help="the recorder trig's and the note's step: 1 (step 2, a step change while it plays: "
+                        "Dubmaster's case) or 0 (step 1, PLAY's own first step)")
     a = p.parse_args()
     lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
     c = Coupled(a.build, a.snapshot, a.stock, verbose=False)
@@ -142,22 +147,24 @@ def main() -> int:
         ptk = c.call(A(0x4003B2EA), c.call(A(0x4003EFA8), c.call(A(0x4018A97A))[0])[0], t)[0]
         return bool(c.call(A(0x4004F0F4), ptk, st)[0] & 0xFF)
     track(T)
-    had = has_note(T, 0)
+    S0 = a.step
+    rep["numbers"]["step"] = S0 + 1
+    had = has_note(T, S0)
     tap(19)                                                      # GRID RECORD: a fresh note on step 1, no locks.
     if had:                                                      # The snapshot's pattern has one there, with the
-        tap(25)                                                  # synth's locks (a FLEX note on it played
-    tap(25)                                                      # silence, 2026-11-26): a tap takes it away, the
+        tap(25 + S0)                                             # synth's locks (a FLEX note on it played
+    tap(25 + S0)                                                 # silence, 2026-11-26): a tap takes it away, the
     tap(19)                                                      # next places a plain one
     c.periods(4)
-    if not link("0. track 1 has a fresh note on step 1", has_note(T, 0),
-                "UI: GRID RECORD [TRIG 1]" + (" twice (the snapshot's own taken away first)" if had else "")):
+    if not link(f"0. track 1 has a fresh note on step {S0 + 1}", has_note(T, S0),
+                f"UI: GRID RECORD [TRIG {S0 + 1}]" + (" twice (the snapshot's own taken away first)" if had else "")):
         return finish()
     held(17, True)                                               # FUNC + VOICE: FLEX REC
     held(49, True)
     held(49, False)
     held(17, False)
-    tap(25)                                                      # the one-shot recorder trig
-    rtv = c.call(lay["rt_trig_get"], pat + F.PAT_LOCK_TABLE, T, 0)[0] & 0xFFFF
+    tap(25 + S0)                                                 # the one-shot recorder trig
+    rtv = c.call(lay["rt_trig_get"], pat + F.PAT_LOCK_TABLE, T, S0)[0] & 0xFFFF
     tap(12)                                                      # NO
     bpm120 = struct.unpack(">H", c.read(TEMPO, 2))[0] or 14400
     step = 86400000 // bpm120                                    # samples a step
@@ -223,7 +230,7 @@ def main() -> int:
         if 32 * k < p2 - step // 2:
             continue
         for v, on, pos, bs, fr in fv:
-            if on & 1 and pos and play_start is None:
+            if on & 1 and 0 < pos <= 64 and play_start is None:   # a start (pass 1's note may still play)
                 play_start, base, frames = 32 * (b + 1) - pos, bs, fr   # block b: samples 32b..32b+31
     # the take's start, from its own samples: the take (int16, two to a DSP word) against the input
     take = []

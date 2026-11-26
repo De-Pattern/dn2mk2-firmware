@@ -465,6 +465,7 @@ void rt_frame(void)
         u8 cur = TRACK_CUR[t];
         if (cur == rt_last_step[t])
             continue;
+        u8 was = rt_last_step[t];
         rt_last_step[t] = cur;
         if (!table || cur > 127 || !rt_is_bounce(t) || !fx_get(t, FX_ARM))   /* v0.51: the track's ARM */
             continue;
@@ -472,7 +473,10 @@ void rt_frame(void)
         if (v == RT_TRIG || v == RT_ONESHOT) {  /* v0.76: started one tick on (rt_late) */
             rt_dl_step[t] = cur;
             rt_dl_v[t] = (u8)v;
-            rt_dl_at[t] = FRAMES + rt_late();
+            /* ...except PLAY's own first step: its notes go out at once, not a tick after the
+             * change (measured in emu_coupled_flexlag, 2026-11-26: delayed there, the take began
+             * 0.9 tick after the notes and played that much early) */
+            rt_dl_at[t] = FRAMES + (was == 0xFF ? 0u : rt_late());
             rt_dl_on |= (u16)(1u << t);
         }
     }
