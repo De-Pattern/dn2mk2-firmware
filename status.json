@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs, part 2 (rebuilt: FLEX first-step fix)",
-   "done": 19,
+   "done": 20,
    "total": 0,
    "last": [
-    "+DRIVE browser (ColdFire)",
     "+DRIVE keys and long names (ColdFire)",
-    "DIRECT JUMP (ColdFire)"
+    "DIRECT JUMP (ColdFire)",
+    "parameter slides (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.475,
-   "status": "running: slides-build"
+   "frac": 0.5,
+   "status": "running: flexcore"
   }
  ],
  "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix: its first ColdFire steps passed again, the rest run now; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
- "updated": "2026-11-26T21:13:25+00:00"
+ "updated": "2026-11-26T21:22:27+00:00"
 }
