@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs (last ColdFire steps)",
-   "done": 17,
+   "done": 18,
    "total": 0,
    "last": [
-    "Overbridge's code untouched",
     "ERASE MOD DATA (ColdFire)",
-    "engine + LOAD/SAVE"
+    "engine + LOAD/SAVE",
+    "boot from reset"
    ],
    "state": "run",
-   "frac": 0.425,
-   "status": "running: boot_check"
+   "frac": 0.45,
+   "status": "running: fuzz"
   }
  ],
  "note": "Plan: v0.76 (PERFORM fixes, FLEX step lag) gets its full gate once its step runs pass, then publishes. 47 of its ColdFire steps passed so far today.",
- "updated": "2026-11-26T15:05:05+00:00"
+ "updated": "2026-11-26T15:14:07+00:00"
 }
