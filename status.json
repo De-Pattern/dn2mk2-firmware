@@ -11,9 +11,9 @@
    ],
    "state": "run",
    "frac": 0.4,
-   "status": "running: drive"
+   "status": "running: drive_nest"
   }
  ],
  "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix: its first ColdFire steps passed again, the rest run now; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
- "updated": "2026-11-26T20:10:01+00:00"
+ "updated": "2026-11-26T20:16:04+00:00"
 }
