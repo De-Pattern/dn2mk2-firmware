@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs",
-   "done": 25,
+   "done": 27,
    "total": 0,
    "last": [
-    "microtuning",
-    "microtuning",
-    "the voice/load guardrail"
+    "the voice/load guardrail",
+    "SLICE editor",
+    "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.625,
-   "status": "running: waverider_menu"
+   "frac": 0.675,
+   "status": "running: fineknob"
   }
  ],
  "note": "Plan: v0.76 (PERFORM fixes, FLEX step lag) gets its full gate once its step runs pass, then publishes.",
- "updated": "2026-11-26T13:51:37+00:00"
+ "updated": "2026-11-26T13:54:40+00:00"
 }
