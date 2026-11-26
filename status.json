@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs (rebuilt: FLEX first-step fix)",
-   "done": 30,
+   "done": 31,
    "total": 0,
    "last": [
-    "GRID allocate slice locks (ColdFire)",
     "multi-select delete (ColdFire)",
-    "SELECT UNUSED (ColdFire)"
+    "SELECT UNUSED (ColdFire)",
+    "overlays let go (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.75,
-   "status": "running: hooks"
+   "frac": 0.775,
+   "status": "running: recflow"
   }
  ],
  "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix, so its ColdFire steps run again; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
- "updated": "2026-11-26T18:20:55+00:00"
+ "updated": "2026-11-26T18:23:58+00:00"
 }
