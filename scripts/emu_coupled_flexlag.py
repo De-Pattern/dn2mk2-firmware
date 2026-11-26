@@ -13,7 +13,8 @@ too quiet to measure, every voice under 1e-4 -- measured, not assumed.)
 
   direct: track 1 FLEX (smp_machine_commit), the pattern's length 2, track 1's SRC IN and R.LEN
           (fx_set), the input (the noise)
-  UI:     [TRK] + [TRIG 2], GRID RECORD [TRIG 1] (track 1's note); FUNC + VOICE (the FLEX REC
+  UI:     [TRK] + [TRIG 2], GRID RECORD [TRIG 1] (track 1's note, if step 1 has none: the
+          snapshot's pattern has one); FUNC + VOICE (the FLEX REC
           panel), [TRIG 1] (the one-shot recorder trig), NO; PLAY
 
 Links: 1 the take recorded in pass 1 (rt_fired, the DSP's status recording then done); 2 track 1
@@ -135,11 +136,19 @@ def main() -> int:
     c.call(lay["fx_set"], T, 2, 2)                               # R.LEN: two steps
     c.input = lambda b: ([noise(32 * b + k) for k in range(32)],) * 2
     c.periods(4)
-    track(T)                                                     # a note on step 1 (GRID RECORD)
-    tap(19)
-    tap(25)
-    tap(19)
-    c.periods(4)
+    def has_note(t, st):                                         # stock's own test (slice.c's PTRACK_NOTE)
+        ptk = c.call(A(0x4003B2EA), c.call(A(0x4003EFA8), c.call(A(0x4018A97A))[0])[0], t)[0]
+        return bool(c.call(A(0x4004F0F4), ptk, st)[0] & 0xFF)
+    track(T)
+    had = has_note(T, 0)
+    if not had:                                                  # a note on step 1 (GRID RECORD); a tap on a
+        tap(19)                                                  # step holding one takes it away (the snapshot's
+        tap(25)                                                  # pattern has one there: measured 2026-11-26)
+        tap(19)
+        c.periods(4)
+    if not link("0. track 1 has a note on step 1", has_note(T, 0),
+                "the snapshot's own" if had else "UI: GRID RECORD [TRIG 1]"):
+        return finish()
     held(17, True)                                               # FUNC + VOICE: FLEX REC
     held(49, True)
     held(49, False)
