@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs (rebuilt: FLEX first-step fix)",
-   "done": 22,
+   "done": 23,
    "total": 0,
    "last": [
-    "FLEX buffers in every sample machine's SAMP (ColdFire)",
     "start-up animation, every frame",
-    "the instrument's own depacker on every repacked section"
+    "the instrument's own depacker on every repacked section",
+    "recorder screen (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.55,
-   "status": "running: recorder"
+   "frac": 0.575,
+   "status": "running: mnmpages"
   }
  ],
  "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix, so its ColdFire steps run again; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
- "updated": "2026-11-26T17:59:39+00:00"
+ "updated": "2026-11-26T18:02:41+00:00"
 }
