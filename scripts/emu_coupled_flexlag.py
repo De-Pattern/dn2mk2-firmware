@@ -142,7 +142,7 @@ def main() -> int:
     rep["numbers"]["setup"] = {"rt_trig": rtv, "bpm": bpm120 / 120, "step_samples": step}
     fired0 = c.long(lay["rt_fired"])
     tap(20)                                                      # PLAY
-    a_s, a_t, log = [], [], []
+    a_s, a_t, log, sounds = [], [], [], []
     rec_seen = rec_done = False
     n_periods = (4 * step) // 32 + 40                            # two passes and a margin
     for n in range(n_periods):
@@ -163,10 +163,18 @@ def main() -> int:
                 bt = [x + (y if y == y else 0.0) for x, y in zip(bt, buf)]
         a_s += bs
         a_t += bt
+        fr = c.last_frame
+        trigw = struct.unpack(">4H", fr[34:42]) if fr else (0, 0, 0, 0)
+        loud = {v: round(max(abs(y) for y in c.last_bufs[v] if y == y), 4) for v in range(16)
+                if c.last_bufs[v] and max((abs(y) for y in c.last_bufs[v] if y == y), default=0) > 1e-4}
+        if any(trigw) or (loud and n % 20 == 0):
+            sounds.append({"n": n, "trig": trigw, "loud": loud, "vt": {v: vt[v] for v in loud}})
         log.append({"n": n, "step": c.read(F.TRACK_CUR + S, 1)[0], "fired": c.long(lay["rt_fired"]) != fired0,
                     "rec": rec})
         if n % 200 == 0:
             print(f"  [play] period {n}/{n_periods}, {time.perf_counter() - t0:.0f} s", flush=True)
+    rep["numbers"]["sounds"] = sounds[:120]
+    print("  sounds:", sounds[:30], flush=True)
     fired_at = next((e["n"] for e in log if e["fired"]), None)
     changes = [e["n"] for i, e in enumerate(log) if i and log[i - 1]["step"] != e["step"]]
     rep["numbers"]["play"] = {"fired_at": fired_at, "step_changes": changes[:8], "rec_seen": rec_seen,
