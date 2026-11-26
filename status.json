@@ -1,19 +1,15 @@
 {
  "gates": [
   {
-   "label": "v0.76 \u00b7 ColdFire step runs",
-   "done": 20,
+   "label": "v0.76 \u00b7 step runs (rebuilt: FLEX first-step fix)",
+   "done": 0,
    "total": 0,
-   "last": [
-    "boot from reset",
-    "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)",
-    "sample link, dead link (ColdFire)"
-   ],
-   "state": "ok",
-   "frac": 1,
-   "status": "finished (partial run: passes recorded)"
+   "last": [],
+   "state": "run",
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "v0.76: every ColdFire step passed. Now: the FLEX timing check on both processors, then the other two-processor steps and the SHARC runner, then the full gate and the release.",
- "updated": "2026-11-26T15:53:26+00:00"
+ "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix, so its ColdFire steps run again; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
+ "updated": "2026-11-26T17:26:19+00:00"
 }
