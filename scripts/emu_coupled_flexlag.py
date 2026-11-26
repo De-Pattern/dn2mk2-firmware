@@ -4,22 +4,23 @@ back 41 ms late at 60 BPM, 25 ms at 90, 18 ms at 120 -- a sequencer tick, a sixt
 The sequencer plays it, as a user's pattern does: a two-step pattern; track 1 is FLEX, recording
 the input (SRC IN) with a one-shot recorder trig on step 1 and R.LEN 2 (the whole pattern), and
 has a note of its own on step 1. Pass 1 records; pass 2 plays the take on the note. The input is
-a known noise, a function of the sample's own number, so the take played on time is the input
-exactly one pattern later: track 1's pass-2 audio at sample n is the input at n - P (P the
-pattern's samples). The lag of the best correlation, less P, is the playback's lateness, the
-quantity a user hears against the source (play's offset from the step less the take's start's).
-(2026-11-26: the first version recorded track 3's snapshot synth, a slow pad under a 1/16 trig:
-too quiet to measure, every voice under 1e-4 -- measured, not assumed.)
+a known noise, a function of the sample's own number. What a user hears (Dubmaster's lag) is when
+an event recorded in pass 1 sounds again against its own next pass: the playback's start less the
+take's, less the pattern's length P. Both starts are measured, not inferred: the take's from its
+own samples in the DSP's memory (the input it holds, found by correlation), the playback's from the
+DSP's voice state (the block its position began). (2026-11-26: the track's audio itself is the
+snapshot synth's filter and envelope over the take -- too far from the input to correlate, so it
+is only checked to sound.)
 
   direct: track 1 FLEX (smp_machine_commit), the pattern's length 2, track 1's SRC IN and R.LEN
           (fx_set), the input (the noise)
   UI:     [TRK] + [TRIG 2], GRID RECORD [TRIG 1] (track 1's note; twice when step 1 has one, as
-          the snapshot's pattern does, locks and all: taken away, then a plain one); FUNC + VOICE (the FLEX REC
-          panel), [TRIG 1] (the one-shot recorder trig), NO; PLAY
+          the snapshot's pattern does, locks and all: taken away, then a plain one);
+          FUNC + VOICE (the FLEX REC panel), [TRIG 1] (the one-shot recorder trig), NO; PLAY
 
-Links: 1 the take recorded in pass 1 (rt_fired, the DSP's status recording then done); 2 track 1
-sounds in pass 2; 3 its pass-2 audio is the input a pattern earlier (correlation > 0.9 at the best
-lag); 4 the best lag less P within 3 ms (144 samples) either side (v0.75: about a tick late).
+Links: 0 track 1 has a plain note on step 1; 1 the take recorded in pass 1 (rt_fired, the DSP's
+status recording then done); 2 track 1 sounds in pass 2; 3 the take is the input (correlation >
+0.9) and its playback is seen; 4 the lag within 3 ms (144 samples) either side (v0.75: a tick).
 
 A negative control: v0.75's build must fail at 4 (a tick late).
 
@@ -163,7 +164,7 @@ def main() -> int:
     rep["numbers"]["setup"] = {"rt_trig": rtv, "bpm": bpm120 / 120, "step_samples": step}
     fired0 = c.long(lay["rt_fired"])
     tap(20)                                                      # PLAY
-    a_t, blk, log, sounds = [], [], [], []
+    a_t, blk, log, sounds, flex = [], [], [], [], []
     rec_seen = rec_done = False
     n_periods = (4 * step) // 32 + 40                            # two passes and a margin
     for n in range(n_periods):
@@ -181,6 +182,10 @@ def main() -> int:
                 bt = [x + (y if y == y else 0.0) for x, y in zip(bt, buf)]
         a_t += bt
         blk.append(c.blocks)
+        fv = [(v, c.dsp_word(WD.SMP_STATE_DM + 128 * v), c.dsp_word(WD.SMP_STATE_DM + 128 * v + 8),
+               c.dsp_word(WD.SMP_STATE_DM + 128 * v + 32), c.dsp_word(WD.SMP_STATE_DM + 128 * v + 36))
+              for v in range(16) if vt[v] == T]
+        flex.append((c.blocks, fv))
         fr = c.last_frame
         trigw = struct.unpack(">4H", fr[34:42]) if fr else (0, 0, 0, 0)
         if any(trigw) or n % 50 == 0:                            # the FLEX voices' sampler state (words 0..13)
@@ -210,22 +215,50 @@ def main() -> int:
     if not link("2. track 1 sounds in pass 2", pk_t > 1e-4, f"track {T} peak {pk_t:.5f}"):
         return finish()
     P = 2 * step
+    # the playback's start, from the DSP's own state: the first block a voice of track 1 plays the
+    # take (on, its base) after pass 1; its position then is the samples it has played
+    base = frames = None
+    play_start = None
+    for k, (b, fv) in enumerate(flex):
+        if 32 * k < p2 - step // 2:
+            continue
+        for v, on, pos, bs, fr in fv:
+            if on & 1 and pos and play_start is None:
+                play_start, base, frames = 32 * (b + 1) - pos, bs, fr   # block b: samples 32b..32b+31
+    # the take's start, from its own samples: the take (int16, two to a DSP word) against the input
+    take = []
+    if base is not None:
+        for k in range(min(frames, 6 * 4096) // 2):
+            w = c.dsp_word(base + 4 * k)
+            for h in (w & 0xFFFF, w >> 16):
+                take.append((h - 65536 if h & 0x8000 else h) / 32768.0)
+    first_blk = blk[0] - 1 if blk else 0
+    rec_lo = 32 * first_blk                                      # PLAY's block: the take starts after it
 
-    def corr(L):                                                 # out[n] against in[n - P - L]
-        ref = [noise(m - P - L) for m in sn]
-        ea = math.sqrt(sum(v * v for v in xt)) or 1e-30
+    def tcorr(start):                                            # the take against the input from START
+        ref = [noise(start + i) for i in range(len(take))]
+        ea = math.sqrt(sum(v * v for v in take)) or 1e-30
         eb = math.sqrt(sum(v * v for v in ref)) or 1e-30
-        return sum(p * q for p, q in zip(xt, ref)) / (ea * eb)
-    lim = step // 3
-    best = max((abs(corr(L)), L) for L in range(-lim, lim + 1, 4))
-    best = max(((abs(corr(L)), L) for L in range(best[1] - 4, best[1] + 5)), default=best)
-    tick = step / 6
-    rep["numbers"]["lag"] = {"samples": best[1], "ms": round(best[1] / 48, 2), "corr": round(best[0], 4),
-                             "ticks": round(best[1] / tick, 3), "peak": round(pk_t, 5)}
-    link("3. track 1's pass-2 audio is the input a pattern earlier (|correlation| > 0.9 at the best lag)",
-         best[0] > 0.9, f"corr {best[0]:.4f} at lag {best[1]}")
-    link(f"4. the take plays on time: the best lag within {ON_TIME} samples (3 ms) either side",
-         abs(best[1]) <= ON_TIME, f"lag {best[1]} samples ({best[1] / 48:.1f} ms, {best[1] / tick:.2f} ticks)")
+        return sum(p_ * q for p_, q in zip(take, ref)) / (ea * eb)
+    best = (-2.0, None)
+    if take:
+        cands = range(rec_lo - 64, rec_lo + 2 * step, 32)
+        best = max((tcorr(st), st) for st in cands)
+        best = max(((tcorr(st), st) for st in range(best[1] - 32, best[1] + 33)), default=best)
+    rec_start = best[1]
+    rep["numbers"]["take"] = {"base": base, "frames": frames, "read": len(take), "corr": round(best[0], 4),
+                              "rec_start": rec_start, "play_start": play_start, "play_block": first_blk}
+    if not link("3. the take is the input (correlation > 0.9 at its start), its playback seen",
+                best[0] > 0.9 and play_start is not None,
+                f"take corr {best[0]:.4f} from sample {rec_start}; playback from sample {play_start}"):
+        return finish()
+    lag = play_start - rec_start - P                             # what a user hears: a source event reappears
+    tick = step / 6                                              # lag samples after its own next pass
+    rep["numbers"]["lag"] = {"samples": lag, "ms": round(lag / 48, 2), "ticks": round(lag / tick, 3),
+                             "P": P, "peak": round(pk_t, 5)}
+    link(f"4. the take plays on time: play's start less the take's, less the pattern, within {ON_TIME} samples (3 ms)",
+         abs(lag) <= ON_TIME, f"lag {lag} samples ({lag / 48:.1f} ms, {lag / tick:.2f} ticks): play from {play_start}, "
+         f"take from {rec_start}, pattern {P}")
     return finish()
 
 
