@@ -2,14 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs (rebuilt: FLEX first-step fix)",
-   "done": 0,
+   "done": 15,
    "total": 0,
-   "last": [],
+   "last": [
+    "ColdFire",
+    "ColdFire",
+    "Overbridge's code untouched"
+   ],
    "state": "run",
-   "frac": 0.0,
-   "status": "running"
+   "frac": 0.375,
+   "status": "running: a step"
   }
  ],
  "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix, so its ColdFire steps run again; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
- "updated": "2026-11-26T17:26:19+00:00"
+ "updated": "2026-11-26T17:29:21+00:00"
 }
