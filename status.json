@@ -1,19 +1,15 @@
 {
  "gates": [
   {
-   "label": "v0.76 \u00b7 step runs",
-   "done": 31,
+   "label": "v0.76 \u00b7 step runs (last ColdFire steps)",
+   "done": 0,
    "total": 0,
-   "last": [
-    "sample link (ColdFire)",
-    "PROJECT RAM banks B..D",
-    "per-project pools (ColdFire)"
-   ],
+   "last": [],
    "state": "run",
-   "frac": 0.775,
-   "status": "running: erase"
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "Plan: v0.76 (PERFORM fixes, FLEX step lag) gets its full gate once its step runs pass, then publishes.",
- "updated": "2026-11-26T14:24:55+00:00"
+ "note": "Plan: v0.76 (PERFORM fixes, FLEX step lag) gets its full gate once its step runs pass, then publishes. 47 of its ColdFire steps passed so far today.",
+ "updated": "2026-11-26T14:25:50+00:00"
 }
