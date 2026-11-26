@@ -34,7 +34,9 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| v0.73-t1 (TEST) | 2026-11-25 | **TEST build: the mod on OS 1.12**, for Outbox 8 (main outputs through it, FUNC + UP/DOWN in its menus); v0.72 otherwise unchanged | `builds/test/v0.73-t1-OS112/` | yes |
+| v0.75 | 2026-11-25 | **Lighter P-I machines** (their block memory in the DSP's fast L1, bit-identical: PI-SD/PI-RS -47 %, PI-CC/RC/HH -36 %) and **FLEX takes of a track follow its LEVEL** (NiKo: they were recorded before it) | `builds/v0.75-PILEVEL/` | yes |
+| v0.74 | 2026-11-25 | **Live recording no longer drags the sequencer** (REC + PLAY with 6-7 keys: each recorded key cleared its step's slide locks in three passes; now one) | `builds/v0.74-LIVEREC/` | yes |
+| ~~v0.73-t1 (TEST)~~ PULLED | 2026-11-25 | **pulled (2026-11-25): crashed at start-up on a unit.** TEST build: the mod on OS 1.12, for Outbox 8 (main outputs through it, FUNC + UP/DOWN in its menus); v0.72 otherwise unchanged | `builds/test/v0.73-t1-OS112/` | yes |
 | v0.72 | 2026-11-23 | **Lighter Machinedrum/Monomachine engines**, part one: EFM, TRX and VO-6 use the DSP's float multiply where the 56300's exact arithmetic made no audible difference (EFM-CY -26 %, TRX-S2 -16 %, VO-6 -14 %) | `builds/v0.72-LIGHTER/` | yes |
 | v0.71 | 2026-11-23 | **FLEX levels** to NiKo's measurements: a track's take +6 dB, MAIN/IN takes +4 dB (v0.68's +24 was 18-20 dB too hot) | `builds/v0.71-LEVELS/` | yes |
 | v0.70 | 2026-11-22 | **arp scale lock** (ARP OFS IN SCALE: arp offsets in degrees of the track's scale) and **in-key transpose** ([KEYBOARD] + [FUNC] + [+]/[-] by degrees), w-winter's mods from upstream; **PERFORM fix**: macros move every voice playing their track | `builds/v0.70-INKEY/` | yes |
@@ -112,7 +114,74 @@ Every flash, every version:
 
 ---
 
+## v0.75 — PILEVEL (lighter P-I machines, FLEX takes follow the track's LEVEL)
+
+`DN2mod_v0.75_PILEVEL_OS1.11.syx`
+sha256 `a771dff99acc4a524380eab5f99a10f884e44f94d86d4020c6f94b2867af143e`
+Gate: CLEARED TO FLASH, 2026-11-25 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps, the coupled thres/flex/flexplay/mute, boot from reset, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock, flexlevel with the new LEVEL checks). Source: commit `5cb6263` (branch `pi`).
+
+v0.74 LIVEREC, plus:
+
+**The Machinedrum's P-I machines are lighter on the DSP.** Their per-block working memory
+is now in the DSP's fast internal memory (L1), as the Monomachine voices' has been since
+v0.43. Same sound: the reference cases are bit-identical. Cost per voice: PI-SD -47 %,
+PI-RS -47 %, PI-CC -36 %, PI-RC -36 %, PI-HH -37 %, PI-BD -25 %, PI-MT -23 %; PI-ML and
+PI-MA unchanged. More P-I voices fit before the DSP guard drops one (`docs/dsp-cost.md`).
+
+**A FLEX take of a track follows the track's LEVEL** (NiKo: FLEX recorded the track before its
+LEVEL). Stock applies LEVEL after the track's buffer, as (LEVEL/100)² with 100 at unity, so a
+take was recorded at LEVEL 100 whatever the knob said. Now the take is scaled the same way:
+LEVEL 100 records as before (unity at GAIN 0), LEVEL 20 records 0.04 of it (-28 dB), LEVEL 127
+1.61 (+4 dB). MAIN and IN takes are unchanged (the main mix already includes the levels). The
+RECORDER (FUNC + VOICE) is unchanged.
+
+**Tests**
+1. A track at LEVEL 100, a FLEX take of it, GAIN 0: the take plays at the track's level, as in
+   v0.74.
+2. The same track at LEVEL 40: the take is as quiet as the track sounds.
+3. LEVEL 127: the take matches the louder track.
+4. A FLEX take of MAIN: as in v0.74.
+5. A kit with several P-I tracks (PI-SD, PI-RS, PI-HH) playing chords or fast rolls: more voices
+   before any drop out than in v0.74; each machine sounds as before.
+6. The regression check (top of this file).
+
+**Known issues**
+- A 1.11 build. The 1.12 test build (v0.73-t1) is pulled; use 1.11 builds for now.
+- FLEX takes start a little late, about 1/6 of a step (Dubmaster: 41 ms at 60 BPM, 18 ms at
+  120). Being fixed; until then, microtime -4/24 on the FLEX playback trig.
+- Everything listed for v0.72.
+
+## v0.74 — LIVEREC (live recording without lag)
+
+`DN2mod_v0.74_LIVEREC_OS1.11.syx`
+sha256 `7f7ef0ca8d5880b608c00ddb8613550607339c93d5fbed496e45aecb746df641`
+Gate: CLEARED TO FLASH, 2026-11-25 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps, the coupled thres/flex/flexplay/mute, boot from reset, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `afe2bec` (branch `livelag`; the fix is `8a00762`).
+
+v0.72 LIGHTER, plus:
+
+**Live recording no longer drags the sequencer** (oksami: REC + PLAY, with or without the
+sequencer running, 6-7 trig keys at once). Live recording clears the step's slide locks for
+each key it records (`sl_clear`, `csrc/slides/slide.c`). Since v0.40 that took three passes
+over the 80 lock records, one per lock, about 3,400 instructions a key. It is now one pass that
+checks the track's tag byte first, with the same result: each of our records on the track loses
+the step's lock, and a record left with none is freed. On the same live-recording run, the
+ColdFire's busy instructions: stock 807k, v0.72 1.11M, v0.74 842k.
+
+**Tests**
+1. REC + PLAY with the sequencer stopped, entering notes step by step with 6-7 keys at once:
+   it keeps up.
+2. Live recording with the sequencer running, chords of 4-7 notes: no lag.
+3. Slides on a track, then a live recording over some of its steps: the recorded steps lose
+   their slide as before, the others keep theirs.
+4. The regression check (top of this file).
+
+**Known issues**
+- A 1.11 build. Outbox 8 users: the 1.12 build is still v0.73-t1 (TEST).
+- Everything listed for v0.72.
+
 ## v0.73-t1 — OS112 (TEST build: the mod on OS 1.12, for Outbox 8)
+
+**Pulled 2026-11-25**: on one unit it crashed during the start-up animation (`EXCEPTION ... V0B ... P46708000`: the animation's code was not in RAM). Recovery: hold FUNC at power-on, OS UPGRADE, send stock 1.12. Not to be flashed.
 
 `DN2mod_v0.73-t1_OS112_OS1.12.syx` (on `builds` under `test/v0.73-t1-OS112/`)
 sha256 `487111672c0dffcc59e544a3992269e62e8412d44431c170ce4a28eea8b5d235`

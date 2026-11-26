@@ -74,3 +74,20 @@ three VO-6 tracks (`docs/guardrail.md`).
 - **A scheduler in the DSL**: pairing compute with post-modify loads and stores into the SHARC's
   multifunction instructions, and keeping constants in registers across loops, for every machine
   at once. The model and the DSP stay one program, so the runner's bit-exact check still holds.
+
+## Part two (v0.75): P-I's block scratch out of DDR
+
+Each P-I voice's delay area (8 KB a slot, in DDR) held two things: the delay lines, which are
+kept from block to block, and the block's scratch arrays (BD/MT: the hammer and line outputs,
+the resonators' coefficients; SD/RS: the excitation, noise and line arrays, the modes'
+coefficients; RC/CC/HH: DSP2's internal X words, the noise words, the mix). The scratch was
+most of PI-SD's and PI-RS's 1,800 DDR accesses a block, and a DDR access costs about ten
+instructions on the unit.
+
+The scratch is never kept: a voice writes every scratch word before it reads it, within one
+render (`test_md.py::test_pi_block_scratch_is_not_kept`: garbage there before every render
+leaves every sample of every golden case the clean run's, bit for bit; the negative control
+puts garbage in a delay line, which is kept, and the output changes). So it is one area for
+all voices now, in L1 after the Monomachine's render scratch (`dsp.PI_SCRATCH_DM`, 2 KB), where
+an access costs no more than its instruction. The delay lines stay where they were. No
+arithmetic changed: every P-I machine is still the Machinedrum's to the same figures.

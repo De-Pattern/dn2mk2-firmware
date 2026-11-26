@@ -159,6 +159,11 @@ GRAN_STATE_DM, GRAN_STATE_STRIDE = SHFT_STATE_DM + 16 * SHFT_STATE_STRIDE, 128  
 # bookkeeping (keys, costs, the voice order, rests, strikes) stays at MNM_SCRATCH_L2.
 MNM_RENDER_DM = 0x2E5400
 MNM_RENDER_BYTES = 0x1000                                    # to 0x2e6400 (core.RENDER_BYTES used)
+# v0.75: the P-I machines' block scratch (dnfw.md.core.Layout.pi, PI_SCRATCH_WORDS floats), one
+# for all voices, after the Monomachine's render scratch: out of each slot's delay area in DDR
+# (PI-SD and PI-RS: about 1,800 DDR accesses a block, most of them these arrays)
+PI_SCRATCH_DM = MNM_RENDER_DM + MNM_RENDER_BYTES             # 0x2e6400
+PI_SCRATCH_BYTES = 0x800                                     # to 0x2e6c00
 GRAN_TABLES_DDR = 0x81214000
 GRAN_BUF_DDR, GRAN_BUF_STRIDE = 0x81400000, 0x20000
 # v0.26: RESONATOR and CZ are gone (their types are the Monomachine machines', in PERC's

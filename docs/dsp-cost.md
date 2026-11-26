@@ -61,6 +61,37 @@ under it too, STRETCH's whole row. The empty run: 15,152 instructions, 943 L2, 4
 `python3 scripts/sharc_waverider_m5.py --image ../Digitone_II_OS1.11.syx --steps cost --tag before`,
 6,693 s; report `out/waverider/m5_report_before.json`.)
 
+## v0.75: the P-I block scratch in L1 (2026-11-25)
+
+Each P-I voice kept its per-block scratch (the filter's and delay's working words past the
+delay lines' heads, `SCR_H` on) in its own DDR delay area. That scratch is written before it
+is read in every block (`test_md.py::test_pi_block_scratch_is_not_kept`: every golden case
+the same with those words filled with garbage before each block; its negative control, a word
+that is carried, differs), so the voices share one 2 KB area in L1 after the Monomachine render
+scratch (`dsp.PI_SCRATCH_DM`, 0x2e6400; `md.core.Layout.pi`). The delay lines stay in DDR. The
+same instructions; every output word of the P-I golden cases the same. One voice, a block,
+`--steps cost` on the v0.75 source:
+
+| machine | instructions | DDR accesses | estimate | of the frame |
+|---|---|---|---|---|
+| PI-SD | 15,052 | 1,803 -> 219 | 33,503 -> 17,690 (-47 %) | 5.0 % -> 2.7 % |
+| PI-RS | 14,786 | 1,779 -> 219 | 32,988 -> 17,416 (-47 %) | 4.9 % -> 2.6 % |
+| PI-MT | 13,921 | 783 -> 231 | 23,742 -> 18,227 (-23 %) | 3.6 % -> 2.7 % |
+| PI-BD | 11,751 | 729 -> 213 | 20,957 -> 15,801 (-25 %) | 3.1 % -> 2.4 % |
+| PI-ML | 14,060 | 68 -> 68 | 19,032 -> 19,032 (+0 %) | 2.9 % -> 2.9 % |
+| PI-CC | 8,303 | 807 -> 222 | 17,189 -> 11,075 (-36 %) | 2.6 % -> 1.7 % |
+| PI-RC | 8,095 | 787 -> 214 | 16,711 -> 10,747 (-36 %) | 2.5 % -> 1.6 % |
+| PI-HH | 7,123 | 783 -> 221 | 15,748 -> 9,877 (-37 %) | 2.4 % -> 1.5 % |
+| PI-MA | 7,392 | 0 -> 0 | 9,482 -> 9,482 (+0 %) | 1.4 % -> 1.4 % |
+
+The seven P-I machines with delay-area scratch lose 510..1,580 DDR accesses a block each;
+PI-ML and PI-MA, which had none there, are unchanged. Sixteen PI-SD voices go from about
+80 % of the frame to about 42 % by this estimate. The rest of this run's table moved too, by
+the work since v0.39 (v0.43's Monomachine scratch, v0.36/v0.37's DPRO tables, the PERC kernels):
+SID 6581 is 8,408 here (57,691 in the v0.39 table), DPRO-DDRW 15,320 (55,402), VO-6 22,219
+(47,928). The unit's meter (FUNC held on a PERC page) is still the measure.
+(Run: `python3 scripts/sharc_waverider_m5.py --steps cost`, 3,225 s, 48 machines.)
+
 ## v0.43: the Monomachine render scratch in L1 (2026-11-07)
 
 The Monomachine machines' render scratch (the decimator's input, SID's phases, the coefficients,

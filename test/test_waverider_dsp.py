@@ -196,6 +196,13 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     tail = [(a, len(pl)) for _, a, pl in dsp.spans()]
     assert any(a <= dsp.dm_to_load(dsp.MNM_RENDER_DM) and dsp.dm_to_load(dsp.MNM_RENDER_DM + dsp.MNM_RENDER_BYTES) <= a + n
                for a, n in tail)
+    # v0.75: the P-I machines' block scratch in L1, after the Monomachine's render scratch, inside
+    # the region (zeros at boot, as that is); the delay lines still in DDR
+    assert L.md.pi == dsp.PI_SCRATCH_DM == dsp.MNM_RENDER_DM + dsp.MNM_RENDER_BYTES
+    assert 4 * MDK.PI_SCRATCH_WORDS <= dsp.PI_SCRATCH_BYTES and dsp.PI_SCRATCH_DM + dsp.PI_SCRATCH_BYTES <= dsp.REGION[1]
+    assert L.md.delay == dsp.MD_DELAY_DDR
+    assert any(a <= dsp.dm_to_load(dsp.PI_SCRATCH_DM) and dsp.dm_to_load(dsp.PI_SCRATCH_DM + dsp.PI_SCRATCH_BYTES) <= a + n
+               for a, n in tail)
     # v0.17: the sample pool's directory begins with its magic, and holds nothing (the
     # +Drive's samples are loaded in; the test sounds are gone)
     assert struct.unpack_from("<II", ddr[-2][2]) == (0x31504D53, 0)

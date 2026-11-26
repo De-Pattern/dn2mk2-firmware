@@ -331,7 +331,8 @@ int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
     u32 seq = 0x80008000u | (++rt_n & 0x7FFFu);  /* low half's bit 15: a buffer take (rec.c) */
     rt_w[0] = seq;
     rt_w[1] = CMD_NOW;
-    rt_w[2] = src > 17 ? 0 : src;
+    extern u32 rt_lvl_bits(u32 src);
+    rt_w[2] = src > 17 ? 0 : src | rt_lvl_bits(src);   /* v0.75: the source track's LEVEL */
     u32 gain = (u32)(fx_get(track, FX_GAIN) + 25) << 24;   /* v0.50: GAIN (rec.c rec_gain_bits); v0.51 the track's */
     rt_w[3] = (chan > 2 ? 2 : chan) | (place / 512u) << 8 | gain;
     rt_w[4] = THR_FLOOR | (steps & 0x7FFFu) << 16;   /* the take's steps: the DSP keeps them */
@@ -651,6 +652,17 @@ int rt_mute_knob(int delta)
 u32 ms_mask D = 0;                                    /* the tracks muted now (bit t), for tests and the screen */
 static u16 ms_gain[16] D = {256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256};
 static u8 ms_track[16] D = {0};                       /* each voice's track at its last frame */
+/* v0.75: each track's LEVEL as the frame had it before MUTE SRC (coarse << 8 | fine; 100 until a
+ * voice has played the track): a FLEX take of a track follows it (rt_lvl_bits, the DSP's settings) */
+static u16 rt_lvl[16] D = {0x6400, 0x6400, 0x6400, 0x6400, 0x6400, 0x6400, 0x6400, 0x6400,
+                           0x6400, 0x6400, 0x6400, 0x6400, 0x6400, 0x6400, 0x6400, 0x6400};
+u32 rt_lvl_bits(u32 src)                              /* the record command's source word's bits 8..15 */
+{
+    if (src < 2 || src > 17)
+        return 0;
+    u32 l = rt_lvl[src - 2] >> 8;
+    return 0x8000u | (l > 127u ? 127u : l) << 8;
+}
 u32 ms_frames D = 0;
 typedef void (*copy_fn)(void *, const void *, u32);
 #define STOCK_COPY ((copy_fn)0x40134490u)
@@ -723,6 +735,8 @@ void ms_frame(void *dst, const void *src, u32 n)
     for (u32 v = 0; v < 16; v++) {
         u32 t = VOICE_TRACK[v];
         u32 g = ms_gain[v];
+        if (t < 16)
+            rt_lvl[t] = CTL_FRAME[FRAME_LEVEL(v)];      /* v0.75: before the fade below */
         int muted = t < 16 && (m >> t & 1u);
         if ((u8)t != ms_track[v]) {                   /* the voice now plays another track: no fade over */
             ms_track[v] = (u8)t;

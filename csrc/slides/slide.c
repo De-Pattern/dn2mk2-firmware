@@ -417,9 +417,30 @@ int sl_clear(void *model, int track, int step)
     /* the model's lock table (vtable +40). Declared as returning an integer: stock returns it
      * in d0, and GCC would take a returned pointer from a0 */
     u8 *table = (u8 *)((u32 (*)(void *))((*(void ***)model)[10]))(model);
-    sl_lock_set(table, (u32)track, (u32)step, 0, 0xFFFF);
-    sl_lock_set(table, (u32)track, (u32)step, 1, 0xFFFF);
-    sl_lock_set(table, (u32)track, (u32)step, 2, 0xFFFF);
+    /* v0.74 (oksami, live recording with 6+ keys: the sequencer drags): one pass over the 80
+     * records, the track's tag byte first (v0.40..v0.73: three passes, one per lock, each
+     * reading both bytes of every record: about 3,400 instructions a call, and live recording
+     * calls this for each key it records). The same result: each of our records on the track
+     * loses the step's lock, and one left with none is freed */
+    if (!table)
+        return r;
+    u8 tag = (u8)(SL_TAG | (u32)track);
+    for (u32 i = 0; i < RECS; i++) {
+        u8 *rec = table + REC * i;
+        if (rec[1] != tag || !our_head(rec[0]))
+            continue;
+        u16 *at = (u16 *)(rec + 2 + 2 * (u32)step);
+        if (*at == 0xFFFF)
+            continue;
+        *at = 0xFFFF;
+        u32 s = 0;
+        while (s < 128 && *(u16 *)(rec + 2 + 2 * s) == 0xFFFF)
+            s++;
+        if (s == 128) {
+            rec[0] = 0xFF;
+            rec[1] = 0xFF;
+        }
+    }
     return r;
 }
 

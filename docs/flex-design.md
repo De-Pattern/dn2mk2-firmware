@@ -190,3 +190,24 @@ make up for it clipped the take, because GAIN is applied before the recorder's i
   frames the source's (not boosted), each playing x 3.981 its unmarked self within 0.1 % on both
   readers; negative controls: a TRK take and a plain recording of MAIN unmarked, as themselves.
 - Known: a MAIN or IN take **saved** as a sample loses the mark, so it plays 12 dB under the live take.
+
+## v0.75: a take of a track follows the track's LEVEL
+
+NiKo (2026-11-25): "FLEX is recording pre-level of the track ... a src track at level 100 will be
+at unity gain when recording with gain 0". The SHARC runner agrees: the track buffer a TRK source
+reads (`TRK_BUF`, 0x1c244d's) is the same at LEVEL 127, 100, 64 and 20, and the track's own
+stereo buffer after the chain scales as (LEVEL / 127)^2. So a quiet track's take played louder
+than the track sounded, and each tester's "right" GAIN depended on his track's level (the
++24 / +6 / +12 of v0.63..v0.71 and spknfx's +12).
+
+- The ColdFire keeps each track's LEVEL as the frame has it, before MUTE SRC fades it
+  (`rt_lvl`, rectrig.c `ms_frame`; 100 until a voice has played the track) and sends the source
+  track's in the record command's source word, bits 8..14 with bit 15 set (`rt_lvl_bits`), for a
+  FLEX take and FLEX REC's monitoring.
+- The DSP scales a take that has GAIN (a FLEX take) by (LEVEL / 100)^2 (`TRK_LEVEL_UNITY`),
+  once, when the command arrives: the LEVEL at the take's start. At 100 nothing changes.
+- The RECORDER's own takes, and FLEX takes of MAIN and IN, are unchanged.
+- Runner step flexlevel: LEVEL 100 as before, 20 x 0.04 and 127 x 1.613 frame for frame, the
+  RECORDER's command with the bits the same take as without, and a negative control.
+- Not measured on the unit: LEVEL's own law is the runner's (stock's code); the unit's +6 dB
+  (TRK_HW_DB) was NiKo's at LEVEL 100.

@@ -57,6 +57,7 @@ def _s24(v: int) -> int:
 
 PI_DELAY_STRIDE = 8192                   # v0.24: a slot's P-I delay lines, 2048 words (floats)
 PI_DELAY_WORDS = PI_DELAY_STRIDE // 4
+PI_SCRATCH_WORDS = 512                  # v0.75: the block scratch (Layout.pi)
 
 
 class Layout:
@@ -64,9 +65,15 @@ class Layout:
     P-I machines' delay lines, PI_DELAY_STRIDE a slot (default 1 MB past the state)."""
 
     def __init__(self, state: int, scratch: int, tables: int, delay: int | None = None,
-                 shipped: int | None = None, ready: int | None = None):
+                 shipped: int | None = None, ready: int | None = None, pi: int | None = None):
         self.state, self.tables = state, tables
         self.delay = state + 0x100000 if delay is None else delay
+        # v0.75: the P-I machines' block scratch (PI_SCRATCH_WORDS: written and read within one
+        # voice's render, never kept: test_md's poison check), one for all voices, in L1 on the
+        # unit (dsp.PI_SCRATCH_DM). v0.24..v0.74 kept it in each slot's delay area, in DDR, where
+        # an access costs about ten instructions: it was most of PI-SD's and PI-RS's 1,800 DDR
+        # accesses a block. Default: after the sixteen slots' lines.
+        self.pi = self.delay + 16 * PI_DELAY_STRIDE if pi is None else pi
         self.T = {name: tables + off for name, (off, _n) in TABLE_LAYOUT.items()}
         # v0.26: what ships (the host's pitch table, zpack) arrives over the fast link at
         # SHIPPED, and READY holds TABLE_MAGIC once it is all there (None: in place, ready)
