@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs",
-   "done": 30,
+   "done": 31,
    "total": 0,
    "last": [
-    "STRT's knob against stock's fine FREQ (ColdFire)",
     "sample link (ColdFire)",
-    "PROJECT RAM banks B..D"
+    "PROJECT RAM banks B..D",
+    "per-project pools (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.75,
-   "status": "running: waverider_menu"
+   "frac": 0.775,
+   "status": "running: erase"
   }
  ],
  "note": "Plan: v0.76 (PERFORM fixes, FLEX step lag) gets its full gate once its step runs pass, then publishes.",
- "updated": "2026-11-26T14:18:49+00:00"
+ "updated": "2026-11-26T14:24:55+00:00"
 }
