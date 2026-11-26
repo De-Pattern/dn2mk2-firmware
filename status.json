@@ -11,9 +11,9 @@
    ],
    "state": "run",
    "frac": 0.45,
-   "status": "running: persist_pp_build"
+   "status": "running: rapid_pp_build"
   }
  ],
  "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix: its first ColdFire steps passed again, the rest run now; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
- "updated": "2026-11-26T20:43:14+00:00"
+ "updated": "2026-11-26T20:46:17+00:00"
 }
