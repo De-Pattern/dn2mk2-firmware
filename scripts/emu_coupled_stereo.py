@@ -39,6 +39,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from emu_coupled import Coupled                                 # noqa: E402
 from emu_coupled_recplay import best_match                      # noqa: E402
+import emu_coupled_flex as F                                    # noqa: E402
 _OSV = __import__("os").environ.get("DN2_OS", "1.11")
 
 KIT, STRIDE = 0x800052A0, 1163
@@ -88,7 +89,8 @@ def main() -> int:
     from dnfw.waverider import dsp as WD                        # noqa: PLC0415
     c = Coupled(a.build, a.snapshot, a.stock, verbose=False)
     c.watchdog()
-    rep = {"links": {}, "numbers": {}, "setup": []}
+    F.install_smoother_model(c)          # digikit's EMAC decays the stock smoother's output to ~3% (emu_coupled_flex)
+    rep = {"links": {}, "numbers": {}, "setup": [("the stock smoother 0x400db12a modelled", "emu_coupled_flex")]}
     t0 = time.perf_counter()
 
     def link(name, ok, detail=""):
@@ -183,6 +185,12 @@ def main() -> int:
         c.poke(kit + 52 + STRIDE * T + 20 + 2 * SLOT_SAMP, struct.pack(">H", 1 << 8))
         rc = 0
     c.periods(4)
+    # the ONESHOT's own controls at the DT2's defaults (machine_commit keeps the synth sound's words;
+    # runs 1..3, without the smoother's model either, played REV from STRT's middle, crawling), TUNE
+    # +36: the KEYBOARD key plays note 24 (C1), so the sample plays at its own rate
+    for slot, w in ((25, 100 << 8), (41, 127 << 8), (26, 0), (45, 120 << 8), (44, 0), (30, 100 << 8)):
+        c.poke(kit + 52 + STRIDE * T + 20 + 2 * slot, struct.pack(">H", w))
+    c.periods(4)
     synth = next((t for t in (2, 3, 0) if types[t] < 5), None)
     rep["setup"].append((f"track {T} ONESHOT on slot 0 (smp_set_samp_word {rc}); track {synth} the snapshot's "
                          f"synth (type {types[synth] if synth is not None else None})", "direct"))
@@ -229,9 +237,9 @@ def main() -> int:
         for _ in range(n):
             if not c.period():
                 break
-            syn = max((abs(x) for x in (c.last_bufs[synth] or []) if x == x), default=0.0)
-            trk = max((abs(x) for x in (c.last_bufs[T] or []) if x == x), default=0.0)
-            vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
+            vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))   # c.last_bufs is per VOICE
+            syn = max((abs(x) for v in range(16) if vt[v] == synth for x in (c.last_bufs[v] or []) if x == x), default=0.0)
+            trk = max((abs(x) for v in range(16) if vt[v] == T for x in (c.last_bufs[v] or []) if x == x), default=0.0)
             log.append({"phase": name, "synth": syn, "trk": trk, "status": c.last_status[0],
                         "voices_t": [v for v in range(16) if vt[v] == T],
                         "voices_s": [v for v in range(16) if vt[v] == synth]})
@@ -272,8 +280,11 @@ def main() -> int:
     print("  phases:", json.dumps(rep["numbers"]["phases"]), flush=True)
     mono_b = [b for ph, b in sb if ph == "mono"]
     mono_pk = max((abs(x) for blk in mono_b for v in blk for x in blk[v][0] if x == x), default=0.0)
-    link("0. the control: the mono sample on the same track sounds in its stereo buffer (the harness reads the right place)",
-         mono_pk > 0.02, f"peak {mono_pk:.3f}")
+    mono_blk = max((e["trk"] for e in log if e["phase"] == "mono"), default=0.0)
+    link("0. the control: the mono sample on the same track sounds, in its voice's block and its stereo buffer "
+         "(the harness plays and reads the right place)", mono_blk > 0.01 and mono_pk > 1e-6,
+         f"block peak {mono_blk:.4f}, stereo buffer peak {mono_pk:.3g}")
+    sb_scale = mono_pk / 0.3 if mono_pk > 0 else 1.0             # the stereo buffer's gain (the mono 0.3 tri)
     # the voice that sounds: its L and R through the stereo note and the retrigger
     st_blocks = [b for ph, b in sb if ph in ("stereo", "stereo-off", "retrig", "retrig-off")]
     voices = sorted({v for blk in st_blocks for v in blk})
@@ -283,7 +294,7 @@ def main() -> int:
     rs = [x for blk in st_blocks for x in (blk[best_v][1] if best_v in blk else [0.0] * 32)]
     pk_l = max((abs(x) for x in ls if x == x), default=0.0)
     pk_r = max((abs(x) for x in rs if x == x), default=0.0)
-    first = next((i for i, x in enumerate(ls) if abs(x) > 1e-3), None)
+    first = next((i for i, x in enumerate(ls) if abs(x) > 0.05 * sb_scale), None)
     want_l = [wave_l(k) for k in range(N)]
     want_r = [wave_r(k) for k in range(N)]
     win = 1024
@@ -296,7 +307,9 @@ def main() -> int:
                                 "peak_r": pk_r, "first_sound": first, "corr_l": corr_l, "lag_l": lag_l,
                                 "corr_r": corr_r, "lag_r": lag_r, "r_vs_l_wave": cross}
     link(f"3a. track {T}'s note sounds in its stereo buffer, both sides (what the main bus and the sends read)",
-         pk_l > 0.05 and pk_r > 0.05, f"voice {best_v}: peak L {pk_l:.3f}, R {pk_r:.3f}; first sound at sample {first}")
+         pk_l > 0.25 * sb_scale and pk_r > 0.2 * sb_scale,
+         f"voice {best_v}: peak L {pk_l:.3g}, R {pk_r:.3g} (half the sample's 0.5 and 0.4 at the mono's gain: "
+         f"{0.25 * sb_scale:.3g}, {0.2 * sb_scale:.3g}); first sound at sample {first}")
     link("3b. L is the sample's L and R the sample's R (correlation > 0.98 at the best lag), R not L's wave",
          corr_l > 0.98 and corr_r > 0.98 and cross < 0.5 and lag_l is not None and lag_r is not None
          and abs(lag_l - lag_r) <= 2, f"L {corr_l:.4f} at {lag_l}, R {corr_r:.4f} at {lag_r}; R against L's wave {cross:.3f}")
@@ -320,8 +333,9 @@ def main() -> int:
     rt_peak = max((abs(x) for blk in rt for v in blk for x in blk[v][0] + blk[v][1] if x == x), default=0.0)
     rep["numbers"]["jumps"] = {"own_largest": own, "l": jl, "r": jr, "nan": nan, "retrig_peak": rt_peak}
     link("5. the retrigger: it sounds, no click (no jump past the sample's own largest step x 1.5), no NaN",
-         rt_peak > 0.05 and jl <= 1.5 * own and jr <= 1.5 * own and nan == 0,
-         f"retrigger peak {rt_peak:.3f}; largest jump L {jl:.3f}, R {jr:.3f}; the sample's own {own:.3f}; NaN {nan}")
+         rt_peak > 0.2 * sb_scale and jl <= 1.5 * own * sb_scale and jr <= 1.5 * own * sb_scale and nan == 0,
+         f"retrigger peak {rt_peak:.3g}; largest jump L {jl:.3g}, R {jr:.3g}; the sample's own x the gain "
+         f"{own * sb_scale:.3g}; NaN {nan}")
     alive = [e["status"] for e in log[-10:]]
     link("6. the DSP's status alive to the end", all(s & 0xFF00 == 0x5A00 for s in alive),
          f"the last statuses {[hex(s) for s in alive[-3:]]}")
