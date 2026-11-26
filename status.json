@@ -1,19 +1,15 @@
 {
  "gates": [
   {
-   "label": "v0.76 \u00b7 step runs, part 2 (rebuilt: FLEX first-step fix)",
-   "done": 20,
+   "label": "v0.76 \u00b7 step runs, part 3",
+   "done": 0,
    "total": 0,
-   "last": [
-    "+DRIVE keys and long names (ColdFire)",
-    "DIRECT JUMP (ColdFire)",
-    "parameter slides (ColdFire)"
-   ],
+   "last": [],
    "state": "run",
-   "frac": 0.5,
-   "status": "running: flexcore"
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix: its first ColdFire steps passed again, the rest run now; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
- "updated": "2026-11-26T21:22:27+00:00"
+ "note": "v0.76: the ColdFire steps continue (FLEX recorder through the dead link); the FLEX timing check runs beside them on both processors. Then the remaining steps on both processors, the full gate and the release.",
+ "updated": "2026-11-26T21:23:18+00:00"
 }
