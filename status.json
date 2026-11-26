@@ -11,5 +11,5 @@
   }
  ],
  "note": "v0.76: the ColdFire steps continue (FLEX recorder through the dead link); the FLEX timing check runs beside them on both processors. Then the remaining steps on both processors, the full gate and the release.",
- "updated": "2026-11-26T21:23:18+00:00"
+ "updated": "2026-11-26T21:23:51+00:00"
 }
