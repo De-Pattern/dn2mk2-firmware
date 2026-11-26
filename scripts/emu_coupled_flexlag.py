@@ -13,8 +13,8 @@ too quiet to measure, every voice under 1e-4 -- measured, not assumed.)
 
   direct: track 1 FLEX (smp_machine_commit), the pattern's length 2, track 1's SRC IN and R.LEN
           (fx_set), the input (the noise)
-  UI:     [TRK] + [TRIG 2], GRID RECORD [TRIG 1] (track 1's note, if step 1 has none: the
-          snapshot's pattern has one); FUNC + VOICE (the FLEX REC
+  UI:     [TRK] + [TRIG 2], GRID RECORD [TRIG 1] (track 1's note; twice when step 1 has one, as
+          the snapshot's pattern does, locks and all: taken away, then a plain one); FUNC + VOICE (the FLEX REC
           panel), [TRIG 1] (the one-shot recorder trig), NO; PLAY
 
 Links: 1 the take recorded in pass 1 (rt_fired, the DSP's status recording then done); 2 track 1
@@ -43,6 +43,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from emu_coupled import Coupled                                 # noqa: E402
 import emu_coupled_flex as F                                    # noqa: E402
+from dnfw.waverider import dsp as WD                            # noqa: E402
 _OSV = __import__("os").environ.get("DN2_OS", "1.11")
 
 SLOT_TRACK = 0x80005308
@@ -141,13 +142,14 @@ def main() -> int:
         return bool(c.call(A(0x4004F0F4), ptk, st)[0] & 0xFF)
     track(T)
     had = has_note(T, 0)
-    if not had:                                                  # a note on step 1 (GRID RECORD); a tap on a
-        tap(19)                                                  # step holding one takes it away (the snapshot's
-        tap(25)                                                  # pattern has one there: measured 2026-11-26)
-        tap(19)
-        c.periods(4)
-    if not link("0. track 1 has a note on step 1", has_note(T, 0),
-                "the snapshot's own" if had else "UI: GRID RECORD [TRIG 1]"):
+    tap(19)                                                      # GRID RECORD: a fresh note on step 1, no locks.
+    if had:                                                      # The snapshot's pattern has one there, with the
+        tap(25)                                                  # synth's locks (a FLEX note on it played
+    tap(25)                                                      # silence, 2026-11-26): a tap takes it away, the
+    tap(19)                                                      # next places a plain one
+    c.periods(4)
+    if not link("0. track 1 has a fresh note on step 1", has_note(T, 0),
+                "UI: GRID RECORD [TRIG 1]" + (" twice (the snapshot's own taken away first)" if had else "")):
         return finish()
     held(17, True)                                               # FUNC + VOICE: FLEX REC
     held(49, True)
@@ -181,14 +183,17 @@ def main() -> int:
         blk.append(c.blocks)
         fr = c.last_frame
         trigw = struct.unpack(">4H", fr[34:42]) if fr else (0, 0, 0, 0)
-        if any(trigw):
-            sounds.append({"n": n, "trig": trigw, "vt": vt[:4]})
+        if any(trigw) or n % 50 == 0:                            # the FLEX voices' sampler state (words 0..13)
+            sounds.append({"n": n, "trig": trigw, "vt": vt[:6],
+                           "smp": {v: [c.dsp_word(WD.SMP_STATE_DM + 128 * v + 4 * k) for k in range(14)]
+                                   for v in range(16) if vt[v] == T}})
         log.append({"n": n, "step": c.read(F.TRACK_CUR + T, 1)[0], "fired": c.long(lay["rt_fired"]) != fired0,
                     "rec": rec})
         if n % 200 == 0:
             print(f"  [play] period {n}/{n_periods}, {time.perf_counter() - t0:.0f} s", flush=True)
-    rep["numbers"]["trigs"] = sounds[:40]
-    print("  trigs:", sounds[:12], flush=True)
+    rep["numbers"]["trigs"] = sounds[:60]
+    for e in sounds[:60]:
+        print("  trig", e, flush=True)
     fired_at = next((e["n"] for e in log if e["fired"]), None)
     changes = [e["n"] for i, e in enumerate(log) if i and log[i - 1]["step"] != e["step"]]
     rep["numbers"]["play"] = {"fired_at": fired_at, "step_changes": changes[:8], "rec_seen": rec_seen,
