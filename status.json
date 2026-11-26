@@ -1,7 +1,7 @@
 {
  "gates": [
   {
-   "label": "v0.76 \u00b7 step runs, part 3",
+   "label": "v0.76 \u00b7 ColdFire steps, part 3",
    "done": 20,
    "total": 0,
    "last": [
@@ -12,8 +12,17 @@
    "state": "run",
    "frac": 0.5,
    "status": "running: inkey_arp_on"
+  },
+  {
+   "label": "v0.76 \u00b7 steps on both processors",
+   "done": 0,
+   "total": 0,
+   "last": [],
+   "state": "run",
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "v0.76: the ColdFire steps continue (FLEX recorder through the dead link); the FLEX timing check runs beside them on both processors. Then the remaining steps on both processors, the full gate and the release.",
- "updated": "2026-11-26T21:48:07+00:00"
+ "note": "v0.76: the ColdFire steps continue; beside them the steps that run both processors, the new FLEX timing check first. Then the SHARC parts, the full gate and the release.",
+ "updated": "2026-11-26T21:50:39+00:00"
 }
