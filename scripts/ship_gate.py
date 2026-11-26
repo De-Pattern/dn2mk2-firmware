@@ -238,6 +238,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("thres", "THRES on both processors (coupled)"),
        ("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)"),
        ("flexplay", "FLEX buffers played by a ONESHOT track, on both processors (coupled)"),
+       ("flexlag", "FLEX: a take plays back on the step, the sequencer's own notes, on both processors (coupled)"),
        ("mute", "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)"),
        ("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"),
        ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
@@ -3121,6 +3122,28 @@ def main() -> int:
             later("flexplay", "FLEX buffers played by a ONESHOT track, on both processors (coupled)",
                   "FLEX buffers played by a ONESHOT track, on both processors (coupled)",
                   [fp_cmd, sorted(EMU_ENV.items())], fp_body)
+
+        # v0.76 (Dubmaster: FLEX takes a tick late on playback): a two-step pattern, track 2's note
+        # recorded by track 1's one-shot recorder trig in pass 1 and played by track 1's own note in
+        # pass 2; track 1's pass-2 audio correlated with track 2's: on time within 3 ms
+        # (scripts/emu_coupled_flexlag.py; v0.75, its negative control, a tick late)
+        if "rt_late" in lay:
+            fl_js = work / "flexlag.json"
+            fl_cmd = [a.coupled_py, "-u", "scripts/emu_coupled_flexlag.py", "--build", a.build, "--stock", a.stock,
+                      "--snapshot", snap, "--json", fl_js]
+
+            def fl_body(tdir):
+                rc, out = run("flexlag coupled", fl_cmd, logs, env=EMU_ENV, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, out[-900:]
+                lag = json.loads(fl_js.read_text())["numbers"].get("lag", {}) if fl_js.exists() else {}
+                return True, (f"on the ColdFire and the DSP together: a take of track 2's note, recorded by a "
+                              f"one-shot recorder trig, plays back on the step: lag {lag.get('samples')} samples "
+                              f"({lag.get('ms')} ms), correlation {lag.get('corr')}")
+            later("flexlag", "FLEX: a take plays back on the step, the sequencer's own notes, on both processors (coupled)",
+                  "FLEX: a take plays back on the step, the sequencer's own notes, on both processors (coupled)",
+                  [fl_cmd, sorted(EMU_ENV.items())], fl_body)
 
         # v0.52 FLEX MUTE SRC (owner, option B): knob H on REC SETUP turns it ON; a note on the SRC
         # track: its voices' frame LEVEL and FX sends 0 (the DSP's LEVEL too), the other voices' as
