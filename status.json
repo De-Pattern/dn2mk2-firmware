@@ -14,19 +14,15 @@
    "status": "running: fuzz"
   },
   {
-   "label": "v0.76 \u00b7 steps on both processors",
-   "done": 18,
+   "label": "v0.76 \u00b7 FLEX timing on both processors",
+   "done": 0,
    "total": 0,
-   "last": [
-    "THRES on both processors (coupled)",
-    "FLEX",
-    "FLEX buffers played by a ONESHOT track, on both processors (coupled)"
-   ],
+   "last": [],
    "state": "run",
-   "frac": 0.45,
-   "status": "running: flexlag"
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "v0.76: the last ColdFire steps (the UI fuzz, the dead link) and the steps on both processors. Then the FLEX timing check, the SHARC parts, the full gate and the release.",
- "updated": "2026-11-26T23:40:17+00:00"
+ "note": "v0.76: THRES, FLEX and FLEX playback passed on both processors; now the new FLEX timing check, beside the last ColdFire steps. Then MUTE SRC, the SHARC parts, the full gate and the release.",
+ "updated": "2026-11-26T23:51:08+00:00"
 }
