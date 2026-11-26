@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs",
-   "done": 22,
+   "done": 25,
    "total": 0,
    "last": [
-    "KEYBOARD HOLD",
-    "the arp on MIDI tracks (ColdFire)",
-    "the arp's offsets and the track's transpose in key"
+    "microtuning",
+    "microtuning",
+    "the voice/load guardrail"
    ],
    "state": "run",
-   "frac": 0.55,
-   "status": "running: tune"
+   "frac": 0.625,
+   "status": "running: waverider_menu"
   }
  ],
  "note": "Plan: v0.76 (PERFORM fixes, FLEX step lag) gets its full gate once its step runs pass, then publishes.",
- "updated": "2026-11-26T13:48:34+00:00"
+ "updated": "2026-11-26T13:51:37+00:00"
 }
