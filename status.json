@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs, part 3",
-   "done": 19,
+   "done": 20,
    "total": 0,
    "last": [
-    "RECORDER text inside its places, every state and R.LEN value (ColdFire)",
     "KEYBOARD kept through grid recording (ColdFire)",
-    "KEYBOARD HOLD"
+    "KEYBOARD HOLD",
+    "the arp on MIDI tracks (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.475,
-   "status": "running: midiarp_midi_off"
+   "frac": 0.5,
+   "status": "running: inkey_arp_on"
   }
  ],
  "note": "v0.76: the ColdFire steps continue (FLEX recorder through the dead link); the FLEX timing check runs beside them on both processors. Then the remaining steps on both processors, the full gate and the release.",
- "updated": "2026-11-26T21:45:04+00:00"
+ "updated": "2026-11-26T21:48:07+00:00"
 }
