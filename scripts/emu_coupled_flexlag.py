@@ -173,12 +173,15 @@ def main() -> int:
     tap(20)                                                      # PLAY
     a_t, blk, log, sounds, flex = [], [], [], [], []
     rec_seen = rec_done = False
+    rec_block = None
     n_periods = (4 * step) // 32 + 40                            # two passes and a margin
     for n in range(n_periods):
         if not c.period():
             break
         st = c.last_status[0]
         rec = st & 0xFF00 == 0x5A00 and st & 3 == 2
+        if rec and not rec_seen:
+            rec_block = c.blocks                                 # the DSP's first block recording
         rec_seen |= rec
         rec_done |= rec_seen and not rec
         vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
@@ -225,13 +228,18 @@ def main() -> int:
     # the playback's start, from the DSP's own state: the first block a voice of track 1 plays the
     # take (on, its base) after pass 1; its position then is the samples it has played
     base = frames = None
-    play_start = None
-    for k, (b, fv) in enumerate(flex):
-        if 32 * k < p2 - step // 2:
-            continue
+    starts = []                                                  # every fresh start of a track-1 voice
+    for b, fv in flex:
         for v, on, pos, bs, fr in fv:
-            if on & 1 and 0 < pos <= 64 and play_start is None:   # a start (pass 1's note may still play)
-                play_start, base, frames = 32 * (b + 1) - pos, bs, fr   # block b: samples 32b..32b+31
+            if on & 1 and 0 < pos <= 32:
+                starts.append((32 * (b + 1 - (pos + 31) // 32), bs, fr))   # its first block's first sample
+                # (a voice's position reads 1 after its first block, 1 + 32k after k more: measured)
+    play_start = None
+    if rec_block is not None:                                    # the start a pattern after the take's
+        want = 32 * rec_block + P
+        cand = [st for st in starts if abs(st[0] - want) < step // 2]
+        if cand:
+            play_start, base, frames = min(cand, key=lambda st: abs(st[0] - want))
     # the take's start, from its own samples: the take (int16, two to a DSP word) against the input
     take = []
     if base is not None:
@@ -259,13 +267,20 @@ def main() -> int:
                 best[0] > 0.9 and play_start is not None,
                 f"take corr {best[0]:.4f} from sample {rec_start}; playback from sample {play_start}"):
         return finish()
-    lag = play_start - rec_start - P                             # what a user hears: a source event reappears
-    tick = step / 6                                              # lag samples after its own next pass
-    rep["numbers"]["lag"] = {"samples": lag, "ms": round(lag / 48, 2), "ticks": round(lag / tick, 3),
-                             "P": P, "peak": round(pk_t, 5)}
-    link(f"4. the take plays on time: play's start less the take's, less the pattern, within {ON_TIME} samples (3 ms)",
+    # The lag is the sequencer's: the playback's first block less the take's (the DSP's first block
+    # recording), less the pattern. (The take's samples hold the input from rec_start: the emulator's
+    # input path adds its own offset there, rec_start - 32 x rec_block, reported, not judged: the
+    # field measurements that set LATE_LESS were of MAIN, not of the input.)
+    lag = play_start - 32 * rec_block - P
+    tick = step / 6
+    rep["numbers"]["lag"] = {"samples": lag, "ms": round(lag / 48, 2), "ticks": round(lag / tick, 3), "P": P,
+                             "rec_block": rec_block, "input_path": rec_start - 32 * rec_block,
+                             "by_content": play_start - rec_start - P, "starts": [st[0] for st in starts][:12],
+                             "peak": round(pk_t, 5)}
+    link(f"4. the take plays on time: play's first sample less the take's, less the pattern, within {ON_TIME} samples (3 ms)",
          abs(lag) <= ON_TIME, f"lag {lag} samples ({lag / 48:.1f} ms, {lag / tick:.2f} ticks): play from {play_start}, "
-         f"take from {rec_start}, pattern {P}")
+         f"take from block {rec_block} (sample {32 * rec_block}), pattern {P}; by the take's content "
+         f"{play_start - rec_start - P}")
     return finish()
 
 
