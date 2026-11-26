@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 ColdFire steps, part 3",
-   "done": 33,
+   "done": 34,
    "total": 0,
    "last": [
-    "PROJECT RAM banks B..D",
     "per-project pools (ColdFire)",
-    "ERASE MOD DATA (ColdFire)"
+    "ERASE MOD DATA (ColdFire)",
+    "engine + LOAD/SAVE"
    ],
    "state": "run",
-   "frac": 0.825,
-   "status": "running: boot_engine"
+   "frac": 0.85,
+   "status": "running: boot_check"
   },
   {
    "label": "v0.76 \u00b7 steps on both processors",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76: the ColdFire steps continue; beside them the steps that run both processors, the new FLEX timing check first. Then the SHARC parts, the full gate and the release.",
- "updated": "2026-11-26T22:54:17+00:00"
+ "updated": "2026-11-26T23:03:19+00:00"
 }
