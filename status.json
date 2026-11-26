@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs (rebuilt: FLEX first-step fix)",
-   "done": 25,
+   "done": 26,
    "total": 0,
    "last": [
-    "recorder screen (ColdFire)",
     "Monomachine pages and detents (ColdFire)",
-    "PLAY two detents a choice (ColdFire)"
+    "PLAY two detents a choice (ColdFire)",
+    "stock questions and held keys (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.625,
-   "status": "running: question"
+   "frac": 0.65,
+   "status": "running: mnmdefaults"
   }
  ],
  "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix, so its ColdFire steps run again; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
- "updated": "2026-11-26T18:05:44+00:00"
+ "updated": "2026-11-26T18:08:47+00:00"
 }
