@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs (rebuilt: FLEX first-step fix)",
-   "done": 19,
+   "done": 20,
    "total": 0,
    "last": [
-    "DSP load meter (ColdFire)",
     "SAMP kept across sample machines (ColdFire)",
-    "FUNC + turn (ColdFire)"
+    "FUNC + turn (ColdFire)",
+    "FLEX buffers in every sample machine's SAMP (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.475,
-   "status": "running: flexpool"
+   "frac": 0.5,
+   "status": "running: aniz_check"
   }
  ],
  "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix, so its ColdFire steps run again; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
- "updated": "2026-11-26T17:50:29+00:00"
+ "updated": "2026-11-26T17:53:32+00:00"
 }
