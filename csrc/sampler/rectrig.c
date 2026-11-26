@@ -422,6 +422,23 @@ static u8 *pat_table(void)
     return p ? p + PAT_LOCK_TABLE : 0;
 }
 
+/* v0.76 (Dubmaster, 2026-11-25: a FLEX take played back 41 ms late at 60 BPM, 25 at 90, 18 at
+ * 120; microtime -4/24 put it right): one sequencer tick (a sixth of a step) less some 2 ms, at
+ * every tempo -- so it scales with the step, not a fixed latency. A take started as the track's
+ * step (TRACK_CUR) changes is heard a tick late on playback, wherever in the chain that tick is
+ * lost; starting the take that much later moves what it holds back onto the step. So a recorder
+ * trig now starts its take one tick after the step changes, less the 2 ms (3 frames) the field
+ * measurements leave over: in frames (1,500 a second, 32 samples each) */
+#define LATE_LESS 3u
+static u32 rt_dl_at[16] D;                      /* when each track's waiting trig starts its take */
+static u8 rt_dl_step[16] D, rt_dl_v[16] D;
+static u16 rt_dl_on D = 0;                      /* bit t: track t's trig waits for its tick */
+u32 rt_late(void)
+{
+    u32 f = frames_a_step() / 6u / 32u;         /* a tick, in frames */
+    return f > LATE_LESS ? f - LATE_LESS : 0u;
+}
+
 /* every frame (link.c smp_mod_apply, the audio interrupt): the recorder trigs of each BOUNCE
  * track at its new step, the master steps, the QPLAY switches and the QREC start that fall
  * on this step's boundary */
@@ -431,6 +448,7 @@ void rt_frame(void)
         req_fire();
     if (!SEQ_PLAYING) {
         rt_pos = -1;
+        rt_dl_on = 0;                           /* v0.76: a trig still waiting for its tick: dropped */
         for (int t = 0; t < 16; t++)
             rt_last_step[t] = 0xFF;             /* PLAY: the first step fires */
         if (q_gen != q_cancel && q_gen != q_fire) {   /* no clock to wait for: at once */
@@ -451,11 +469,21 @@ void rt_frame(void)
         if (!table || cur > 127 || !rt_is_bounce(t) || !fx_get(t, FX_ARM))   /* v0.51: the track's ARM */
             continue;
         u32 v = sl_lock_get(table, t, cur, 2);
-        if (v == RT_TRIG || v == RT_ONESHOT) {
-            int took = rt_trig(t, cur, rt_buf_of(t));
-            if (v == RT_ONESHOT && took)        /* recorded once: spent until YES YES (a refusal keeps it armed) */
-                sl_lock_set(table, t, cur, 2, RT_SPENT);
+        if (v == RT_TRIG || v == RT_ONESHOT) {  /* v0.76: started one tick on (rt_late) */
+            rt_dl_step[t] = cur;
+            rt_dl_v[t] = (u8)v;
+            rt_dl_at[t] = FRAMES + rt_late();
+            rt_dl_on |= (u16)(1u << t);
         }
+    }
+    for (u32 t = 0; rt_dl_on && t < 16; t++) {
+        if (!(rt_dl_on >> t & 1u) || (int)(FRAMES - rt_dl_at[t]) < 0)
+            continue;
+        rt_dl_on &= (u16)~(1u << t);
+        u32 st = rt_dl_step[t];
+        int took = rt_trig(t, st, rt_buf_of(t));
+        if (rt_dl_v[t] == RT_ONESHOT && took && table)   /* recorded once: spent until YES YES (a refusal keeps it armed) */
+            sl_lock_set(table, t, st, 2, RT_SPENT);
     }
     int p = master_pos();
     if (p < 0 || p == rt_pos)
