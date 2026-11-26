@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76: the ColdFire steps continue; beside them the steps that run both processors, the new FLEX timing check first. Then the SHARC parts, the full gate and the release.",
- "updated": "2026-11-26T22:39:11+00:00"
+ "updated": "2026-11-26T22:51:14+00:00"
 }
