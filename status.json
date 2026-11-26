@@ -11,18 +11,22 @@
    ],
    "state": "run",
    "frac": 0.5,
-   "status": "running: inkey_arp_on"
+   "status": "running: inkey_arp_off"
   },
   {
    "label": "v0.76 \u00b7 steps on both processors",
-   "done": 0,
+   "done": 15,
    "total": 0,
-   "last": [],
+   "last": [
+    "ColdFire",
+    "ColdFire",
+    "Overbridge's code untouched"
+   ],
    "state": "run",
-   "frac": 0.0,
-   "status": "running"
+   "frac": 0.375,
+   "status": "running: thres"
   }
  ],
  "note": "v0.76: the ColdFire steps continue; beside them the steps that run both processors, the new FLEX timing check first. Then the SHARC parts, the full gate and the release.",
- "updated": "2026-11-26T21:50:39+00:00"
+ "updated": "2026-11-26T21:53:42+00:00"
 }
