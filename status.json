@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs (last ColdFire steps)",
-   "done": 18,
+   "done": 19,
    "total": 0,
    "last": [
-    "ERASE MOD DATA (ColdFire)",
     "engine + LOAD/SAVE",
-    "boot from reset"
+    "boot from reset",
+    "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.45,
-   "status": "running: fuzz"
+   "frac": 0.475,
+   "status": "running: waverider_menu"
   }
  ],
  "note": "Plan: v0.76 (PERFORM fixes, FLEX step lag) gets its full gate once its step runs pass, then publishes. 47 of its ColdFire steps passed so far today.",
- "updated": "2026-11-26T15:38:13+00:00"
+ "updated": "2026-11-26T15:50:16+00:00"
 }
