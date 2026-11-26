@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs, part 3",
-   "done": 16,
+   "done": 17,
    "total": 0,
    "last": [
-    "ColdFire",
     "Overbridge's code untouched",
-    "FLEX on the ColdFire"
+    "FLEX on the ColdFire",
+    "RECORDER text inside its places, every state and R.LEN value (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.4,
-   "status": "running: rectext"
+   "frac": 0.425,
+   "status": "running: kbrec"
   }
  ],
  "note": "v0.76: the ColdFire steps continue (FLEX recorder through the dead link); the FLEX timing check runs beside them on both processors. Then the remaining steps on both processors, the full gate and the release.",
- "updated": "2026-11-26T21:29:56+00:00"
+ "updated": "2026-11-26T21:35:58+00:00"
 }
