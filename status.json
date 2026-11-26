@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs (rebuilt: FLEX first-step fix)",
-   "done": 27,
+   "done": 28,
    "total": 0,
    "last": [
-    "PLAY two detents a choice (ColdFire)",
     "stock questions and held keys (ColdFire)",
-    "Monomachine start values (ColdFire)"
+    "Monomachine start values (ColdFire)",
+    "GRID allocate slice locks (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.675,
-   "status": "running: alloc"
+   "frac": 0.7,
+   "status": "running: multisel"
   }
  ],
  "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix, so its ColdFire steps run again; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
- "updated": "2026-11-26T18:11:49+00:00"
+ "updated": "2026-11-26T18:17:52+00:00"
 }
