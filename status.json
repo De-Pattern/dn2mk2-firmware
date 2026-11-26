@@ -1,19 +1,15 @@
 {
  "gates": [
   {
-   "label": "v0.76 \u00b7 step runs (rebuilt: FLEX first-step fix)",
-   "done": 36,
+   "label": "v0.76 \u00b7 step runs, part 2 (rebuilt: FLEX first-step fix)",
+   "done": 0,
    "total": 0,
-   "last": [
-    "SLICE menus and SLICES keys (ColdFire)",
-    "sample list, browser, playhead (ColdFire)",
-    "MACHINE SEL columns, SYN held (ColdFire)"
-   ],
+   "last": [],
    "state": "run",
-   "frac": 0.9,
-   "status": "running: machines"
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix, so its ColdFire steps run again; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
- "updated": "2026-11-26T19:21:23+00:00"
+ "note": "v0.76 rebuilt with a refinement to the FLEX step-lag fix: its first ColdFire steps passed again, the rest run now; the FLEX timing check runs beside them on both processors. Then the full gate and the release.",
+ "updated": "2026-11-26T19:24:47+00:00"
 }
