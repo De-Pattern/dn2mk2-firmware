@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 ColdFire steps, part 3",
-   "done": 26,
+   "done": 28,
    "total": 0,
    "last": [
-    "PERFORM",
-    "PERFORM",
-    "the voice/load guardrail"
+    "the voice/load guardrail",
+    "SLICE editor",
+    "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.65,
-   "status": "running: waverider_menu"
+   "frac": 0.7,
+   "status": "running: fineknob"
   },
   {
    "label": "v0.76 \u00b7 steps on both processors",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76: the ColdFire steps continue; beside them the steps that run both processors, the new FLEX timing check first. Then the SHARC parts, the full gate and the release.",
- "updated": "2026-11-26T22:08:55+00:00"
+ "updated": "2026-11-26T22:11:58+00:00"
 }
