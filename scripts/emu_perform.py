@@ -359,6 +359,10 @@ def run(cx):
                     nm = rd32(0x401F7F94 + 60 * rid + 0x30)
                     row.append((s_, rid, hex(mk), cstr(nm) if nm else ""))
         dests[t] = row
+    # (2026-11-26, this probe on v0.76: FREQ, records 36 and 41, carries the LFOs' bits 0x1e00 on
+    # every track, so it is on the list; the list follows the machine's own page, slot 67)
+    facts["11 the filter's cutoff (FREQ) is a destination on tracks 1..4 (stock's LFO bit 0x200)"] = (
+        len(dests) == 4 and all(any(r[3] == "FREQ" and int(r[2], 16) & 0x200 for r in row) for row in dests.values()))
     io.pop("log", None)
     return {"dests": dests, "facts": facts, "ok": all(facts.values()), "voices": voices, "writes": [hex(s) for s, _ in wlog],
             "outside": outside[:20], "offsets": offsets, "glide": glide_info, "pf_reads": i32("pf_reads"), "pf_writes": i32("pf_writes")}
