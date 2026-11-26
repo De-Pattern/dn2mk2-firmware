@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.76 \u00b7 steps on both processors",
-   "done": 17,
+   "done": 18,
    "total": 0,
    "last": [
-    "Overbridge's code untouched",
     "THRES on both processors (coupled)",
-    "FLEX"
+    "FLEX",
+    "FLEX buffers played by a ONESHOT track, on both processors (coupled)"
    ],
    "state": "run",
-   "frac": 0.425,
-   "status": "running: flexplay"
+   "frac": 0.45,
+   "status": "running: flexlag"
   }
  ],
  "note": "v0.76: the last ColdFire steps (the UI fuzz, the dead link) and the steps on both processors. Then the FLEX timing check, the SHARC parts, the full gate and the release.",
- "updated": "2026-11-26T23:34:14+00:00"
+ "updated": "2026-11-26T23:40:17+00:00"
 }
