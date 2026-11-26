@@ -230,7 +230,11 @@ def main() -> int:
             if not c.period():
                 break
             syn = max((abs(x) for x in (c.last_bufs[synth] or []) if x == x), default=0.0)
-            log.append({"phase": name, "synth": syn, "status": c.last_status[0]})
+            trk = max((abs(x) for x in (c.last_bufs[T] or []) if x == x), default=0.0)
+            vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
+            log.append({"phase": name, "synth": syn, "trk": trk, "status": c.last_status[0],
+                        "voices_t": [v for v in range(16) if vt[v] == T],
+                        "voices_s": [v for v in range(16) if vt[v] == synth]})
         print(f"  [{name}] {len(log)} periods, {time.perf_counter() - t0:.0f} s", flush=True)
     track(synth)
     run("synth1", 90, True)
@@ -243,7 +247,33 @@ def main() -> int:
     track(synth)
     run("synth2", 90, True)
     run("synth2-off", 10, False)
+    # the control: the mono sample (slot 1) on the same track, read the same way
+    if "smp_set_samp_word" in lay:
+        c.call(lay["smp_set_samp_word"], T, 2 << 8)
+    else:
+        c.poke(kit + 52 + STRIDE * T + 20 + 2 * SLOT_SAMP, struct.pack(">H", 2 << 8))
+    c.periods(4)
+    track(T)
+    run("mono", 100, True)
+    run("mono-off", 10, False)
     rep["numbers"]["play_periods"] = len(log)
+    ph_stats = {}
+    for e in log:
+        d = ph_stats.setdefault(e["phase"], {"trk": 0.0, "synth": 0.0, "voices_t": set(), "voices_s": set()})
+        d["trk"] = max(d["trk"], e["trk"])
+        d["synth"] = max(d["synth"], e["synth"])
+        d["voices_t"] |= set(e["voices_t"])
+        d["voices_s"] |= set(e["voices_s"])
+    for ph, b in sb:
+        d = ph_stats.setdefault(ph, {})
+        d["sbuf_any"] = max(d.get("sbuf_any", 0.0), max((abs(x) for v in b for x in b[v][0] + b[v][1] if x == x), default=0.0))
+    rep["numbers"]["phases"] = {k: {kk: (sorted(vv) if isinstance(vv, set) else vv) for kk, vv in d.items()}
+                                for k, d in ph_stats.items()}
+    print("  phases:", json.dumps(rep["numbers"]["phases"]), flush=True)
+    mono_b = [b for ph, b in sb if ph == "mono"]
+    mono_pk = max((abs(x) for blk in mono_b for v in blk for x in blk[v][0] if x == x), default=0.0)
+    link("0. the control: the mono sample on the same track sounds in its stereo buffer (the harness reads the right place)",
+         mono_pk > 0.02, f"peak {mono_pk:.3f}")
     # the voice that sounds: its L and R through the stereo note and the retrigger
     st_blocks = [b for ph, b in sb if ph in ("stereo", "stereo-off", "retrig", "retrig-off")]
     voices = sorted({v for blk in st_blocks for v in blk})
