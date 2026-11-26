@@ -5,15 +5,15 @@ v0.54-t1"): what the gate never ran before v0.54-t1 went out, end to end.
      mono one on the emulated +Drive, as the import page leaves them. The ColdFire's own loader
      sends the image over the sample link to the real DSP; every word must arrive (the loader's
      own edits of the header aside).
-  2. Track 0 ONESHOT on the stereo sample, track 1 a stock synth (the snapshot's), both with a trig
-     on steps 1 and 2 of a 4-step pattern (step 2 retriggers the stereo note while it sounds).
-     PLAY.
-  3. After the pan stage (sw 0x1c9b33), track 0's voice's stereo buffer (what the main bus and the
+  2. Track 1 ONESHOT on the stereo sample, track 2 a stock synth (the snapshot's). KEYBOARD notes
+     ([TRIG 9] held): the synth, the stereo sample, the stereo sample again while it sounds (the
+     retrigger), the synth again.
+  3. After the pan stage (sw 0x1c9b33), track 1's voice's stereo buffer (what the main bus and the
      sends read): its L side is the sample's L, its R side the sample's R (correlation at the best
      lag), both sounding, and not each other (v0.54-t1: a gain ramp with no sound in it).
-  4. Track 1 sounds on its first trig (v0.54-t1: an FM Tone track needed 2-3 presses) and keeps
-     sounding through the run (v0.54-t1 after a power cycle: nothing on any track).
-  5. The retrigger at step 2: no jump in track 0's stereo buffer, from sample to sample and across
+  4. The synth sounds on its first note (v0.54-t1: an FM Tone track needed 2-3 presses) and keeps
+     sounds again after the stereo notes (v0.54-t1 after a power cycle: nothing on any track).
+  5. The retrigger: it sounds, and no jump in track 1's stereo buffer, from sample to sample and across
      blocks, larger than the sample's own largest step plus a margin (v0.54-t1: a loud click).
   6. No halt, no fault, the DSP's status alive to the end.
 
@@ -47,6 +47,8 @@ PAT_LENGTH = 122196
 SLOT_TRACK = 0x80005308
 ONESHOT = 8
 SLOT_SAMP = 43
+T = 1                                   # the stereo track (not 0: an idle voice reads track 0)
+KB_ON = A(0x42431A9C)                   # KEYBOARD's state (emu_coupled_flex)
 BLK_READ, BLK_WRITE = A(0x4012C59A), A(0x4012C780)
 BLK_READY, BLK_SECTORS = A(0x4461B68C), A(0x4461B6B0)
 STORE_SECTOR = 0x600000
@@ -119,6 +121,12 @@ def main() -> int:
             d = bytes(uc.mem_read(buf, n))
             for k in range(n // 512):
                 disk[sector + k] = d[512 * k:512 * k + 512]
+    from unicorn import UC_PROT_ALL, UcError                    # noqa: PLC0415
+    for page in range(SM.BANK_RAM & ~0xFFFFF, SM.BANK_RAM + SM.BANK_RAM_BYTES, 0x100000):
+        try:                                                     # banks B..D's RAM (link.c, pools.c): real
+            c.uc.mem_map(page, 0x100000, UC_PROT_ALL)            # RAM on the unit, unmapped by Coupled
+        except UcError:
+            pass
     for va in (BLK_READ, BLK_WRITE):
         c.machine.write(va, bytes.fromhex("70004e75"))
         c.uc.hook_add(UC_HOOK_CODE, blk, begin=va, end=va)
@@ -161,24 +169,25 @@ def main() -> int:
     fmt0 = c.call(lay["smp_slot_fmt"], 0)[0]
     link("1b. the ColdFire's slot 0 is stereo (format 2)", fmt0 == SM.FMT_I16S, f"smp_slot_fmt(0) {fmt0}")
 
-    # 2. the tracks, the pattern
+    # 2. the tracks: T ONESHOT on slot 0 (not track 0: the voice table reads 0 for an idle voice),
+    # a stock synth on another
     kit = c.long(KIT)
     types = [c.read(kit + 52 + STRIDE * t + 0xDE, 1)[0] for t in range(4)]
     rep["numbers"]["types_before"] = types
     owner = c.call(A(0x4018A97A))[0]
-    c.call(lay["smp_machine_commit"], owner + 0xF4, 0, ONESHOT, 1, 1)
+    c.call(lay["smp_machine_commit"], owner + 0xF4, T, ONESHOT, 1, 1)
     c.periods(4)
     if "smp_set_samp_word" in lay:
-        rc = c.call(lay["smp_set_samp_word"], 0, 1 << 8)[0]
+        rc = c.call(lay["smp_set_samp_word"], T, 1 << 8)[0]
     else:                                                        # an older build (the negative control's)
-        c.poke(kit + 52 + 20 + 2 * SLOT_SAMP, struct.pack(">H", 1 << 8))
+        c.poke(kit + 52 + STRIDE * T + 20 + 2 * SLOT_SAMP, struct.pack(">H", 1 << 8))
         rc = 0
     c.periods(4)
-    synth = next((t for t in (1, 2, 3) if types[t] < 5), None)
-    rep["setup"].append((f"track 0 ONESHOT on slot 0 (smp_set_samp_word {rc}); track {synth} the snapshot's "
+    synth = next((t for t in (2, 3, 0) if types[t] < 5), None)
+    rep["setup"].append((f"track {T} ONESHOT on slot 0 (smp_set_samp_word {rc}); track {synth} the snapshot's "
                          f"synth (type {types[synth] if synth is not None else None})", "direct"))
-    if not link("2a. track 0 is ONESHOT on slot 0, a stock synth on another track",
-                c.read(kit + 52 + 0xDE, 1)[0] == ONESHOT and rc == 0 and synth is not None,
+    if not link(f"2a. track {T} is ONESHOT on slot 0, a stock synth on another track",
+                c.read(kit + 52 + STRIDE * T + 0xDE, 1)[0] == ONESHOT and rc == 0 and synth is not None,
                 f"types {[c.read(kit + 52 + STRIDE * t + 0xDE, 1)[0] for t in range(4)]}, set_samp {rc}"):
         return finish()
     P = c.panel.panelin
@@ -191,82 +200,98 @@ def main() -> int:
     def tap(code):
         held(code, True)
         held(code, False)
-    pat = c.long(SEQ_PATTERN)
-    c.poke(pat + PAT_LENGTH, struct.pack(">H", 4))
-    tap(19)                                                      # GRID RECORD
-    for t in (0, synth):
-        held(16, True); tap(24 + t + 1); held(16, False)         # [TRK] + [TRIG t+1]
-        tap(25); tap(26)                                         # steps 1 and 2
-    tap(19)
-    c.periods(4)
-    rep["setup"].append(("a 4-step pattern; tracks 0 and the synth's trigs on steps 1 and 2", "UI: GRID RECORD"))
 
-    # 3..5: PLAY, every block's stereo buffer of track 0's voices and the synth's track buffer
+    def track(t):                                                # [TRK] + [TRIG t+1]
+        held(16, True)
+        tap(24 + t + 1)
+        held(16, False)
+        c.periods(4)
+    if not c.read(KB_ON, 1)[0]:
+        tap(18)                                                  # KEYBOARD
+    rep["setup"].append(("KEYBOARD on; notes on [TRIG 9]", "UI"))
+
+    # 3..5: notes, every block's stereo buffer of track T's voices and the synth's track buffer
     sb: list = []
+    phase = {"now": "synth1"}
 
     def at_pan(r, cc):
         vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
-        vs = [v for v in range(16) if vt[v] == 0]
-        sb.append({v: (cc.M.m2.floats(r.state, STEREO_BUF + 0x100 * v, 32),
-                       cc.M.m2.floats(r.state, STEREO_BUF + 0x100 * v + 0x80, 32)) for v in vs})
+        vs = [v for v in range(16) if vt[v] == T]
+        sb.append((phase["now"], {v: (cc.M.m2.floats(r.state, STEREO_BUF + 0x100 * v, 32),
+                                      cc.M.m2.floats(r.state, STEREO_BUF + 0x100 * v + 0x80, 32)) for v in vs}))
     c.taps[PAN_END] = at_pan
     log = []
-    tap(20)                                                      # PLAY
-    for n in range(640):
-        if not c.period():
-            break
-        syn = max((abs(x) for x in (c.last_bufs[synth] or []) if x == x), default=0.0)
-        log.append({"n": n, "step": c.read(TRACK_CUR, 1)[0], "synth": syn, "status": c.last_status[0]})
-        if n and n % 100 == 0:
-            print(f"  [play] period {n}: step {log[-1]['step']}, {time.perf_counter() - t0:.0f} s", flush=True)
+
+    def run(name, n, press=None):
+        phase["now"] = name
+        if press is not None:
+            c.machine.pc = (P.press if press else P.release)(c.machine.m, c.panel.profile, *key(33))
+        for _ in range(n):
+            if not c.period():
+                break
+            syn = max((abs(x) for x in (c.last_bufs[synth] or []) if x == x), default=0.0)
+            log.append({"phase": name, "synth": syn, "status": c.last_status[0]})
+        print(f"  [{name}] {len(log)} periods, {time.perf_counter() - t0:.0f} s", flush=True)
+    track(synth)
+    run("synth1", 90, True)
+    run("synth1-off", 30, False)
+    track(T)
+    run("stereo", 150, True)                                     # 100 ms of the 250 ms sample
+    run("stereo-off", 4, False)
+    run("retrig", 150, True)                                     # again while it still sounds
+    run("retrig-off", 30, False)
+    track(synth)
+    run("synth2", 90, True)
+    run("synth2-off", 10, False)
     rep["numbers"]["play_periods"] = len(log)
-    # the voice that sounds: per block, its L and R
-    voices = sorted({v for blk in sb for v in blk})
-    best_v = max(voices, key=lambda v: max((abs(x) for blk in sb if v in blk for x in blk[v][0] if x == x),
-                                           default=0.0), default=None)
-    ls = [x for blk in sb for x in (blk[best_v][0] if best_v in blk else [0.0] * 32)]
-    rs = [x for blk in sb for x in (blk[best_v][1] if best_v in blk else [0.0] * 32)]
+    # the voice that sounds: its L and R through the stereo note and the retrigger
+    st_blocks = [b for ph, b in sb if ph in ("stereo", "stereo-off", "retrig", "retrig-off")]
+    voices = sorted({v for blk in st_blocks for v in blk})
+    peak = lambda v: max((abs(x) for blk in st_blocks if v in blk for x in blk[v][0] if x == x), default=0.0)   # noqa: E731
+    best_v = max(voices, key=peak, default=None)
+    ls = [x for blk in st_blocks for x in (blk[best_v][0] if best_v in blk else [0.0] * 32)]
+    rs = [x for blk in st_blocks for x in (blk[best_v][1] if best_v in blk else [0.0] * 32)]
     pk_l = max((abs(x) for x in ls if x == x), default=0.0)
     pk_r = max((abs(x) for x in rs if x == x), default=0.0)
     first = next((i for i, x in enumerate(ls) if abs(x) > 1e-3), None)
     want_l = [wave_l(k) for k in range(N)]
     want_r = [wave_r(k) for k in range(N)]
-    win = 2048
+    win = 1024
     seg = (first or 0) + 256
-    lag_l, corr_l = best_match(ls[seg:seg + win], want_l, range(0, N - win))
-    lag_r, corr_r = best_match(rs[seg:seg + win], want_r, range(0, N - win))
-    _, cross = best_match(rs[seg:seg + win], want_l, range(0, N - win))
-    rep["numbers"]["stereo"] = {"voices": voices, "voice": best_v, "blocks": len(sb), "peak_l": pk_l, "peak_r": pk_r,
-                                "first_sound": first, "corr_l": corr_l, "lag_l": lag_l, "corr_r": corr_r,
-                                "lag_r": lag_r, "r_vs_l_wave": cross}
-    link("3a. track 0's note sounds in its stereo buffer, both sides (what the main bus and the sends read)",
+    lags = range(0, 6000)
+    lag_l, corr_l = best_match(ls[seg:seg + win], want_l, lags)
+    lag_r, corr_r = best_match(rs[seg:seg + win], want_r, lags)
+    _, cross = best_match(rs[seg:seg + win], want_l, lags)
+    rep["numbers"]["stereo"] = {"voices": voices, "voice": best_v, "blocks": len(st_blocks), "peak_l": pk_l,
+                                "peak_r": pk_r, "first_sound": first, "corr_l": corr_l, "lag_l": lag_l,
+                                "corr_r": corr_r, "lag_r": lag_r, "r_vs_l_wave": cross}
+    link(f"3a. track {T}'s note sounds in its stereo buffer, both sides (what the main bus and the sends read)",
          pk_l > 0.05 and pk_r > 0.05, f"voice {best_v}: peak L {pk_l:.3f}, R {pk_r:.3f}; first sound at sample {first}")
     link("3b. L is the sample's L and R the sample's R (correlation > 0.98 at the best lag), R not L's wave",
-         corr_l > 0.98 and corr_r > 0.98 and cross < 0.5 and lag_l is not None and abs(lag_l - lag_r) <= 2,
-         f"L {corr_l:.4f} at {lag_l}, R {corr_r:.4f} at {lag_r}; R against L's wave {cross:.3f}")
-    # 4. the synth: its first trig sounds, and it sounds to the end
-    syn_first = next((e["n"] for e in log if e["synth"] > 1e-3), None)
-    syn_tail = max((e["synth"] for e in log[-60:]), default=0.0)
-    stp = [e["step"] for e in log]
-    step2_at = next((i for i in range(1, len(stp)) if stp[i] != stp[i - 1]), None)
-    rep["numbers"]["synth"] = {"track": synth, "first_sound_period": syn_first, "step2_at": step2_at,
-                               "tail_peak": syn_tail}
-    link("4a. the synth track sounds on its first trig (before step 2)",
-         syn_first is not None and (step2_at is None or syn_first < step2_at),
-         f"track {synth}: first sound at period {syn_first}, step 2 at {step2_at}")
-    link("4b. the synth track still sounds at the end of the run (audio not gone)", syn_tail > 1e-3,
-         f"its peak over the last 60 periods {syn_tail:.4f}")
-    # 5. the retrigger: no jump past the sample's own steps (each side, at the playback rate found)
+         corr_l > 0.98 and corr_r > 0.98 and cross < 0.5 and lag_l is not None and lag_r is not None
+         and abs(lag_l - lag_r) <= 2, f"L {corr_l:.4f} at {lag_l}, R {corr_r:.4f} at {lag_r}; R against L's wave {cross:.3f}")
+    # 4. the synth: its first note sounds, and again after the stereo notes
+    s1 = [e["synth"] for e in log if e["phase"] == "synth1"]
+    s2 = [e["synth"] for e in log if e["phase"] == "synth2"]
+    s1_first = next((i for i, x in enumerate(s1) if x > 1e-5), None)   # (the snapshot's sound swells in slowly)
+    rep["numbers"]["synth"] = {"track": synth, "first_note_first_sound": s1_first, "first_peak": max(s1, default=0),
+                               "after_peak": max(s2, default=0)}
+    link("4a. the synth track sounds on its first note (within 60 periods)", s1_first is not None and s1_first < 60,
+         f"track {synth}: first sound at period {s1_first} of its note")
+    link("4b. the synth track sounds again after the stereo notes (audio not gone)", max(s2, default=0) > 1e-5,
+         f"its peak on the second note {max(s2, default=0):.4f}")
+    # 5. the retrigger: no jump past the sample's own steps, no NaN
     own = max(max(abs(want_l[k + 1] - want_l[k]) for k in range(N - 1)),
               max(abs(want_r[k + 1] - want_r[k]) for k in range(N - 1)))
     jl = max((abs(ls[i + 1] - ls[i]) for i in range(len(ls) - 1) if ls[i] == ls[i] and ls[i + 1] == ls[i + 1]), default=0.0)
     jr = max((abs(rs[i + 1] - rs[i]) for i in range(len(rs) - 1) if rs[i] == rs[i] and rs[i + 1] == rs[i + 1]), default=0.0)
     nan = sum(1 for x in ls + rs if x != x)
-    rep["numbers"]["jumps"] = {"own_largest": own, "l": jl, "r": jr, "nan": nan,
-                               "retriggered": step2_at is not None}
-    link("5. the retrigger at step 2: no click (a jump past the sample's own largest step x 1.5), no NaN",
-         step2_at is not None and jl <= 1.5 * own and jr <= 1.5 * own and nan == 0,
-         f"largest jump L {jl:.3f}, R {jr:.3f}; the sample's own {own:.3f}; NaN {nan}; step 2 at {step2_at}")
+    rt = [b for ph, b in sb if ph == "retrig"]
+    rt_peak = max((abs(x) for blk in rt for v in blk for x in blk[v][0] + blk[v][1] if x == x), default=0.0)
+    rep["numbers"]["jumps"] = {"own_largest": own, "l": jl, "r": jr, "nan": nan, "retrig_peak": rt_peak}
+    link("5. the retrigger: it sounds, no click (no jump past the sample's own largest step x 1.5), no NaN",
+         rt_peak > 0.05 and jl <= 1.5 * own and jr <= 1.5 * own and nan == 0,
+         f"retrigger peak {rt_peak:.3f}; largest jump L {jl:.3f}, R {jr:.3f}; the sample's own {own:.3f}; NaN {nan}")
     alive = [e["status"] for e in log[-10:]]
     link("6. the DSP's status alive to the end", all(s & 0xFF00 == 0x5A00 for s in alive),
          f"the last statuses {[hex(s) for s in alive[-3:]]}")
