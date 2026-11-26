@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 step runs",
-   "done": 19,
+   "done": 20,
    "total": 0,
    "last": [
-    "+DRIVE keys and long names (ColdFire)",
     "parameter slides (ColdFire)",
-    "KEYBOARD kept through grid recording (ColdFire)"
+    "KEYBOARD kept through grid recording (ColdFire)",
+    "KEYBOARD HOLD"
    ],
    "state": "run",
-   "frac": 0.475,
-   "status": "running: kbhold"
+   "frac": 0.5,
+   "status": "running: midiarp_midi_arp"
   }
  ],
  "note": "Plan: v0.76 (PERFORM fixes, FLEX step lag) gets its full gate once its step runs pass, then publishes.",
- "updated": "2026-11-26T13:27:19+00:00"
+ "updated": "2026-11-26T13:30:22+00:00"
 }
