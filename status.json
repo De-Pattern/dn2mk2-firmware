@@ -11,9 +11,9 @@
    ],
    "state": "run",
    "frac": 0.475,
-   "status": "running: waverider_menu"
+   "status": "running: kbhold"
   }
  ],
  "note": "Plan: v0.76 (PERFORM fixes, FLEX step lag) gets its full gate once its step runs pass, then publishes.",
- "updated": "2026-11-26T13:26:57+00:00"
+ "updated": "2026-11-26T13:27:12+00:00"
 }
