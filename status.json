@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 ColdFire steps, part 3",
-   "done": 20,
+   "done": 21,
    "total": 0,
    "last": [
-    "KEYBOARD kept through grid recording (ColdFire)",
     "KEYBOARD HOLD",
-    "the arp on MIDI tracks (ColdFire)"
+    "the arp on MIDI tracks (ColdFire)",
+    "the arp's offsets and the track's transpose in key"
    ],
    "state": "run",
-   "frac": 0.5,
-   "status": "running: inkey_arp_off"
+   "frac": 0.525,
+   "status": "running: tune"
   },
   {
    "label": "v0.76 \u00b7 steps on both processors",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76: the ColdFire steps continue; beside them the steps that run both processors, the new FLEX timing check first. Then the SHARC parts, the full gate and the release.",
- "updated": "2026-11-26T21:56:44+00:00"
+ "updated": "2026-11-26T21:59:47+00:00"
 }
