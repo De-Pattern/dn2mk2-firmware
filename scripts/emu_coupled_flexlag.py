@@ -274,6 +274,7 @@ def main() -> int:
     lag = play_start - 32 * rec_block - P
     tick = step / 6
     rep["numbers"]["lag"] = {"samples": lag, "ms": round(lag / 48, 2), "ticks": round(lag / tick, 3), "P": P,
+                             "corr": round(best[0], 4),          # the take against the input (ship_gate's detail)
                              "rec_block": rec_block, "input_path": rec_start - 32 * rec_block,
                              "by_content": play_start - rec_start - P, "starts": [st[0] for st in starts][:12],
                              "peak": round(pk_t, 5)}
