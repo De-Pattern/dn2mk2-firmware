@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 22,
+   "done": 23,
    "total": 0,
    "last": [
-    "FLEX buffers in every sample machine's SAMP (ColdFire)",
     "start-up animation, every frame",
-    "the instrument's own depacker on every repacked section"
+    "the instrument's own depacker on every repacked section",
+    "recorder screen (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.55,
-   "status": "running: recorder"
+   "frac": 0.575,
+   "status": "running: mnmpages"
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build) rebuilt: the SHARC runner's stress part found eleven sample voices a little over their time under the voice guardrail; fixed (they fit again, measured). Its steps run again now: those whose inputs did not change are reused. What it holds is announced when it is released.",
- "updated": "2026-11-27T19:59:09+00:00"
+ "updated": "2026-11-27T20:02:12+00:00"
 }
