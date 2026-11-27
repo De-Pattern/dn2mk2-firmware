@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build), rebuilt after the SHARC runner's stress part: its new check on both processors and THRES passed again; FLEX next, beside the ColdFire steps. Then MUTE SRC, the FLEX timing, the SHARC parts and the full gate. What it holds is announced when it is released.",
- "updated": "2026-11-27T21:46:32+00:00"
+ "updated": "2026-11-27T21:58:34+00:00"
 }
