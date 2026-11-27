@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 15,
+   "done": 17,
    "total": 0,
    "last": [
-    "ColdFire",
-    "ColdFire",
-    "Overbridge's code untouched"
+    "Overbridge's code untouched",
+    "unit tests",
+    "DSP load meter (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.375,
-   "status": "running: a step"
+   "frac": 0.425,
+   "status": "running: keepsamp"
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build) rebuilt: the SHARC runner's stress part found eleven sample voices a little over their time under the voice guardrail; fixed (they fit again, measured). Its steps run again now: those whose inputs did not change are reused. What it holds is announced when it is released.",
- "updated": "2026-11-27T19:43:55+00:00"
+ "updated": "2026-11-27T19:46:58+00:00"
 }
