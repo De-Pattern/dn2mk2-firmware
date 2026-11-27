@@ -385,3 +385,44 @@ silent the L side the mono run's and the R side silent; the table stock's after 
 **Still to do before a test build:** the coupled field-route step (a stereo WAV through the
 import, the link, the pool and the DSP's load; preview, a note beside an FM Tone track, slice,
 save and load), the sends heard in stereo, CHAN STEREO on the recorder, the gate.
+
+## The field route on both processors (2026-11-27): a stereo note against its two halves
+
+**What the first route step got wrong.** Its failures (a silent first note, R silent, NaN) were the
+harness's, not the build's:
+- **The coupled emulator silences a track's later voices on every build.** Each voice after the
+  first on a track reaches the chain's dispatch (sw `0x1c950e`) and leaves it zero. Measured with
+  plain mono samples on v0.76, the released build, so this is the emulator's own limit (a unit plays
+  chords). The track's third voice there also carries huge values (1e29) into the track buffer,
+  which a stereo voice turns into NaN. So a coupled check can hear only the first note after boot.
+- **It read the track buffer before the stereo hook ran.** It read at the sum's end
+  (`0x1c2557`), the patched instruction itself, so the R half still held stock's g L. The hook
+  returns at `0x1c255a`.
+
+**Now** (`emu_coupled_stereo.py`, the gate's `stroute`). Three runs, each from the power-on load
+and each playing one note as the first note after boot, so on voice 0:
+- the stereo sample (L a 200 Hz saw, R a 330 Hz sine);
+- the same note as a mono sample of its L channel;
+- the same note as a mono sample of its R channel.
+
+Stereo is right when it is exactly those two halves. Measured on v0.76-t1 (2026-11-27):
+- **Track buffer, L half:** the L run's, bit for bit, every block.
+- **Track buffer, R half:** the R run's to float rounding (1e-8; the hook adds g R - g L onto
+  stock's g L).
+- **Every stage of the chain:** each stage's input for the R pass, and the amp's R output, are the
+  R run's bit for bit (`diag8`, `diag9` in the hunt).
+- **The voice's stereo buffer** (the pan stage's output, read by the main bus and the sends): the L
+  side is the L run's and the R side the R run's, exactly from the second block on. The note's
+  first block takes the mix first and then L, so it is within 2.5e-7.
+- **Faults:** no NaN anywhere.
+
+The negative control is v0.54-t1, with its own layout.
+
+**The runner, too:** `sharc_stereo_leak.py` finds no register and no engine-memory word
+(`0x240000..0x260000`) that differs, at any stage call of the voices after a stereo voice, between
+a stereo run and a mono run. That holds with one slot or two, in DUP or not.
+`sharc_stereo_slots.py` cannot drive a second voice through the chain on the runner: its frames
+carry no voice allocation.
+
+**Still not checked by any emulator:** two or more stereo voices at once, a retrigger, and voice
+stealing. The coupled emulator silences every voice after the first, so these are for the unit.
