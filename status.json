@@ -24,9 +24,9 @@
    ],
    "state": "run",
    "frac": 0.4,
-   "status": "running: stroute_stereo"
+   "status": "running: stroute_L"
   }
  ],
  "note": "v0.76-t1 (TEST build) rebuilt: the SHARC runner's stress part found eleven sample voices a little over their time under the voice guardrail; fixed (they fit again, measured). Its steps run again now: those whose inputs did not change are reused. What it holds is announced when it is released.",
- "updated": "2026-11-27T19:53:04+00:00"
+ "updated": "2026-11-27T19:56:06+00:00"
 }
