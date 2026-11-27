@@ -241,6 +241,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("flexplay", "FLEX buffers played by a ONESHOT track, on both processors (coupled)"),
        ("flexlag", "FLEX: a take plays back on the step, the sequencer's own notes, on both processors (coupled)"),
        ("mute", "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)"),
+       ("stroute", "stereo: a stereo note is its L and R halves, on both processors (coupled)"),
        ("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"),
        ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
@@ -3211,6 +3212,34 @@ def main() -> int:
             later("mute", "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)",
                   "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)",
                   [mu_cmd, sorted(EMU_ENV.items())], mu_body)
+
+        # stereo test builds (docs/stereo-assessment.md, "Field reports on v0.54-t1"): a stereo note
+        # (format 2) from the power-on load on, as the first note after boot, then the same note made
+        # mono from its L channel, then from its R: track 1's buffer after the sum and the stereo hook
+        # is the L run's in its L half, bit for bit, and the R run's in its R half to float rounding;
+        # no NaN anywhere (scripts/emu_coupled_stereo.py; v0.54-t1, its negative control, fails 3)
+        if "smp_slot_fmt" in lay:
+            sr_js = {pl: work / f"stroute_{pl}.json" for pl in ("stereo", "L", "R")}
+            sr_cmds = [[a.coupled_py, "-u", "scripts/emu_coupled_stereo.py", "--build", a.build, "--stock", a.stock,
+                        "--snapshot", snap, "--pool", pl, "--json", sr_js[pl]] for pl in ("stereo", "L", "R")]
+            sr_cmp = [a.coupled_py, "-u", "scripts/emu_coupled_stereo.py", "--compare",
+                      sr_js["stereo"], sr_js["L"], sr_js["R"]]
+
+            def sr_body(tdir):
+                for pl, cmd in zip(("stereo", "L", "R"), sr_cmds):
+                    rc, out = run(f"stroute {pl} coupled", cmd, logs, env=EMU_ENV, trace=tdir)
+                    if not sr_js[pl].exists():
+                        return False, out[-900:]
+                rc, out = run("stroute compare", sr_cmp, logs, env=EMU_ENV, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, out[-900:]
+                l3 = next((ln for ln in out.splitlines() if "  ok    3." in ln), "")
+                return True, ("on the ColdFire and the DSP together: a stereo note from the power-on load, against "
+                              "the same note made mono from each channel: " + l3.split(" -- ", 1)[-1])
+            later("stroute", "stereo: a stereo note is its L and R halves, on both processors (coupled)",
+                  "stereo: a stereo note is its L and R halves, on both processors (coupled)",
+                  [*sr_cmds, sr_cmp, sorted(EMU_ENV.items())], sr_body)
 
         # v0.48 (impbox, the owner: "exact dt2"): STRT, LEN, LOOP's fine records (fmt.c
         # smp_fine), on the ColdFire emulator: swapped in on ONESHOT/STRETCH/REPITCH/BOUNCE,

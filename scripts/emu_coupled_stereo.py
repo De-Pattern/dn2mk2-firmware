@@ -1,25 +1,26 @@
-"""Stereo, the field route on both processors (docs/stereo-assessment.md, "Field reports on
-v0.54-t1"): what the gate never ran before v0.54-t1 went out, end to end.
+"""Stereo on both processors, against its own two halves (docs/stereo-assessment.md, "Field
+reports on v0.54-t1"; the route rewritten 2026-11-27).
 
-  1. The power-on load (the power cycle): a stereo sample (format 2, L and R different waves) and a
-     mono one on the emulated +Drive, as the import page leaves them. The ColdFire's own loader
-     sends the image over the sample link to the real DSP; every word must arrive (the loader's
-     own edits of the header aside).
-  2. Track 1 ONESHOT on the stereo sample, track 2 a stock synth (the snapshot's). KEYBOARD notes
-     ([TRIG 9] held): the synth, the stereo sample, the stereo sample again while it sounds (the
-     retrigger), the synth again.
-  3. After the pan stage (sw 0x1c9b33), track 1's voice's stereo buffer (what the main bus and the
-     sends read): its L side is the sample's L, its R side the sample's R (correlation at the best
-     lag), both sounding, and not each other (v0.54-t1: a gain ramp with no sound in it).
-  4. The synth sounds on its first note (v0.54-t1: an FM Tone track needed 2-3 presses) and keeps
-     sounds again after the stereo notes (v0.54-t1 after a power cycle: nothing on any track).
-  5. The retrigger: it sounds, and no jump in track 1's stereo buffer, from sample to sample and across
-     blocks, larger than the sample's own largest step plus a margin (v0.54-t1: a loud click).
-  6. No halt, no fault, the DSP's status alive to the end.
+One stereo note (format 2, L a 200 Hz saw, R a 330 Hz sine) is played on track 1, ONESHOT, from
+the power-on load onwards, as the first note after boot (so on voice 0: the coupled emulator leaves
+a track's later voices silent on every build, v0.76's mono ones included, a limit of its own). The
+same run is made twice more with a MONO sample in the stereo one's place: its L channel alone
+(--pool L), then its R alone (--pool R). Stereo is right when it is exactly those two:
 
-A negative control: v0.54-t1's build (with its own layout) must fail it, at 3 at least.
+  1. The power-on load: the image reached the DSP over the sample link, every frame's word.
+  1b. (--pool stereo) the ColdFire's slot 0 is stereo (format 2).
+  2a. Track 1 ONESHOT on slot 0, a stock synth on another track.
+  3. (--compare) Every block, track 1's buffer after the voices' sum and the stereo hook
+     (sw 0x1c255a): its L half is the L run's, bit for bit; its R half is the R run's, to the
+     float rounding of g L + (g R - g L) (relative 1e-6 of the block's peak); both sound
+     (the twins' peak > 0.01); R is not L.
+  4. (--compare) No NaN or infinity in any track's buffer, in any of the three runs.
+  5. No halt, no fault, the DSP's status alive to the end.
 
-Usage: emu_coupled_stereo.py --build BUILD.syx [--layout waverider_code.json] [--json OUT]"""
+A negative control: v0.54-t1's build (with its own layout) must fail 3.
+
+Usage: emu_coupled_stereo.py --build BUILD.syx --pool stereo|L|R --json OUT
+       emu_coupled_stereo.py --compare STEREO.json L.json R.json"""
 
 from __future__ import annotations
 
@@ -55,7 +56,10 @@ BLK_READY, BLK_SECTORS = A(0x4461B68C), A(0x4461B6B0)
 STORE_SECTOR = 0x600000
 PAN_END = 0x1C9B33                      # the pan stage's end: each voice's stereo buffer written
 STEREO_BUF = 0x257EE8                   # a voice's: L 32 floats, R 32 at +0x80, 0x100 a voice
-N = 12000                               # the stereo sample's frames (250 ms: longer than a step)
+TRACK_BUF = 0x259F68                    # 16 tracks x 64 words: L half, R half
+SUM_AFTER = 0x1C255A                    # just after the voices' sum and the stereo hook (stereo.py)
+NOTE_ON, NOTE_OFF = 30, 4
+N = 3000                                # the stereo sample's frames (62 ms; a short load)
 
 
 def wave_l(k):                          # a 200 Hz saw, 0.5
@@ -81,7 +85,11 @@ def main() -> int:
     p.add_argument("--stock", default=str(HERE.parent.parent / f"Digitone_II_OS{_OSV}.syx"))
     p.add_argument("--snapshot", default=str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
     p.add_argument("--json", default=None)
+    p.add_argument("--pool", choices=("stereo", "L", "R"), default="stereo")
+    p.add_argument("--compare", nargs=3, default=None, metavar=("STEREO", "L", "R"))
     a = p.parse_args()
+    if a.compare:
+        return compare(*a.compare)
     lay = json.loads(pathlib.Path(a.layout).read_text())["layout"]
     from unicorn import UC_HOOK_CODE                            # noqa: PLC0415
     from unicorn import m68k_const as K                         # noqa: PLC0415
@@ -137,7 +145,12 @@ def main() -> int:
     st = [(wave_l(k), wave_r(k)) for k in range(N)]
     mono = [0.3 * ((k % 50) / 25 - 1) for k in range(700)]
     base = WD.SMP_POOL_DDR
-    img = SL.pool_bytes([st, mono], base, [1.0, 1.0], [SM.FMT_I16S, SM.FMT_I16], ["WIDE", "TRI"])
+    if a.pool == "stereo":
+        img = SL.pool_bytes([st, mono], base, [1.0, 1.0], [SM.FMT_I16S, SM.FMT_I16], ["WIDE", "TRI"])
+    else:                                                        # the note's one side, a mono sample
+        side = [x[0] if a.pool == "L" else x[1] for x in st]
+        img = SL.pool_bytes([side, mono], base, [1.0, 1.0], [SM.FMT_I16, SM.FMT_I16], ["SIDE", "TRI"])
+    rep["pool"] = a.pool
     img = bytearray(img + bytes((-len(img)) % 512))
     hdr = bytes(img[:SM.DATA_OFFSET])
     magic, nb, ck = 0x444E3251, len(img), adler(hdr)
@@ -169,7 +182,8 @@ def main() -> int:
                 f"{len(frames_wrong)} frame words differ ({len(wrong)} words in all, the header's own edits aside)"):
         return finish()
     fmt0 = c.call(lay["smp_slot_fmt"], 0)[0]
-    link("1b. the ColdFire's slot 0 is stereo (format 2)", fmt0 == SM.FMT_I16S, f"smp_slot_fmt(0) {fmt0}")
+    if a.pool == "stereo":
+        link("1b. the ColdFire's slot 0 is stereo (format 2)", fmt0 == SM.FMT_I16S, f"smp_slot_fmt(0) {fmt0}")
 
     # 2. the tracks: T ONESHOT on slot 0 (not track 0: the voice table reads 0 for an idle voice),
     # a stock synth on another
@@ -218,128 +232,67 @@ def main() -> int:
         tap(18)                                                  # KEYBOARD
     rep["setup"].append(("KEYBOARD on; notes on [TRIG 9]", "UI"))
 
-    # 3..5: notes, every block's stereo buffer of track T's voices and the synth's track buffer
-    sb: list = []
-    phase = {"now": "synth1"}
+    # 3: the note, held NOTE_ON periods and let go NOTE_OFF more; every block, every track's buffer
+    # after the voices' sum and the stereo hook after it (sw 0x1c255a: the sum hook returns there)
+    blocks: list = []
 
-    def at_pan(r, cc):
-        vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
-        vs = [v for v in range(16) if vt[v] == T]
-        sb.append((phase["now"], {v: (cc.M.m2.floats(r.state, STEREO_BUF + 0x100 * v, 32),
-                                      cc.M.m2.floats(r.state, STEREO_BUF + 0x100 * v + 0x80, 32)) for v in vs}))
-    c.taps[PAN_END] = at_pan
-    log = []
-
-    def run(name, n, press=None):
-        phase["now"] = name
-        if press is not None:
-            c.machine.pc = (P.press if press else P.release)(c.machine.m, c.panel.profile, *key(33))
-        for _ in range(n):
-            if not c.period():
-                break
-            vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))   # c.last_bufs is per VOICE
-            syn = max((abs(x) for v in range(16) if vt[v] == synth for x in (c.last_bufs[v] or []) if x == x), default=0.0)
-            trk = max((abs(x) for v in range(16) if vt[v] == T for x in (c.last_bufs[v] or []) if x == x), default=0.0)
-            log.append({"phase": name, "synth": syn, "trk": trk, "status": c.last_status[0],
-                        "voices_t": [v for v in range(16) if vt[v] == T],
-                        "voices_s": [v for v in range(16) if vt[v] == synth]})
-        print(f"  [{name}] {len(log)} periods, {time.perf_counter() - t0:.0f} s", flush=True)
-    track(synth)
-    run("synth1", 90, True)
-    run("synth1-off", 30, False)
+    def after_sum(r, cc):
+        blocks.append([(cc.M.m2.word(r.state, TRACK_BUF + 4 * i) or 0) & 0xFFFFFFFF for i in range(16 * 64)])
+    c.taps[SUM_AFTER] = after_sum
     track(T)
-    run("stereo", 150, True)                                     # 100 ms of the 250 ms sample
-    run("stereo-off", 4, False)
-    run("retrig", 150, True)                                     # again while it still sounds
-    run("retrig-off", 30, False)
-    track(synth)
-    run("synth2", 90, True)
-    run("synth2-off", 10, False)
-    # the control: the mono sample (slot 1) on the same track, read the same way
-    if "smp_set_samp_word" in lay:
-        c.call(lay["smp_set_samp_word"], T, 2 << 8)
-    else:
-        c.poke(kit + 52 + STRIDE * T + 20 + 2 * SLOT_SAMP, struct.pack(">H", 2 << 8))
-    c.periods(4)
-    track(T)
-    run("mono", 100, True)
-    run("mono-off", 10, False)
-    rep["numbers"]["play_periods"] = len(log)
-    ph_stats = {}
-    for e in log:
-        d = ph_stats.setdefault(e["phase"], {"trk": 0.0, "synth": 0.0, "voices_t": set(), "voices_s": set()})
-        d["trk"] = max(d["trk"], e["trk"])
-        d["synth"] = max(d["synth"], e["synth"])
-        d["voices_t"] |= set(e["voices_t"])
-        d["voices_s"] |= set(e["voices_s"])
-    for ph, b in sb:
-        d = ph_stats.setdefault(ph, {})
-        d["sbuf_any"] = max(d.get("sbuf_any", 0.0), max((abs(x) for v in b for x in b[v][0] + b[v][1] if x == x), default=0.0))
-    rep["numbers"]["phases"] = {k: {kk: (sorted(vv) if isinstance(vv, set) else vv) for kk, vv in d.items()}
-                                for k, d in ph_stats.items()}
-    print("  phases:", json.dumps(rep["numbers"]["phases"]), flush=True)
-    mono_b = [b for ph, b in sb if ph == "mono"]
-    mono_pk = max((abs(x) for blk in mono_b for v in blk for x in blk[v][0] if x == x), default=0.0)
-    mono_blk = max((e["trk"] for e in log if e["phase"] == "mono"), default=0.0)
-    link("0. the control: the mono sample on the same track sounds, in its voice's block and its stereo buffer "
-         "(the harness plays and reads the right place)", mono_blk > 0.01 and mono_pk > 1e-6,
-         f"block peak {mono_blk:.4f}, stereo buffer peak {mono_pk:.3g}")
-    sb_scale = mono_pk / 0.3 if mono_pk > 0 else 1.0             # the stereo buffer's gain (the mono 0.3 tri)
-    # the voice that sounds: its L and R through the stereo note and the retrigger
-    st_blocks = [b for ph, b in sb if ph in ("stereo", "stereo-off", "retrig", "retrig-off")]
-    voices = sorted({v for blk in st_blocks for v in blk})
-    peak = lambda v: max((abs(x) for blk in st_blocks if v in blk for x in blk[v][0] if x == x), default=0.0)   # noqa: E731
-    best_v = max(voices, key=peak, default=None)
-    ls = [x for blk in st_blocks for x in (blk[best_v][0] if best_v in blk else [0.0] * 32)]
-    rs = [x for blk in st_blocks for x in (blk[best_v][1] if best_v in blk else [0.0] * 32)]
-    pk_l = max((abs(x) for x in ls if x == x), default=0.0)
-    pk_r = max((abs(x) for x in rs if x == x), default=0.0)
-    first = next((i for i, x in enumerate(ls) if abs(x) > 0.05 * sb_scale), None)
-    want_l = [wave_l(k) for k in range(N)]
-    want_r = [wave_r(k) for k in range(N)]
-    win = 1024
-    seg = (first or 0) + 256
-    lags = range(0, 6000)
-    lag_l, corr_l = best_match(ls[seg:seg + win], want_l, lags)
-    lag_r, corr_r = best_match(rs[seg:seg + win], want_r, lags)
-    _, cross = best_match(rs[seg:seg + win], want_l, lags)
-    rep["numbers"]["stereo"] = {"voices": voices, "voice": best_v, "blocks": len(st_blocks), "peak_l": pk_l,
-                                "peak_r": pk_r, "first_sound": first, "corr_l": corr_l, "lag_l": lag_l,
-                                "corr_r": corr_r, "lag_r": lag_r, "r_vs_l_wave": cross}
-    link(f"3a. track {T}'s note sounds in its stereo buffer, both sides (what the main bus and the sends read)",
-         pk_l > 0.25 * sb_scale and pk_r > 0.2 * sb_scale,
-         f"voice {best_v}: peak L {pk_l:.3g}, R {pk_r:.3g} (half the sample's 0.5 and 0.4 at the mono's gain: "
-         f"{0.25 * sb_scale:.3g}, {0.2 * sb_scale:.3g}); first sound at sample {first}")
-    link("3b. L is the sample's L and R the sample's R (correlation > 0.98 at the best lag), R not L's wave",
-         corr_l > 0.98 and corr_r > 0.98 and cross < 0.5 and lag_l is not None and lag_r is not None
-         and abs(lag_l - lag_r) <= 2, f"L {corr_l:.4f} at {lag_l}, R {corr_r:.4f} at {lag_r}; R against L's wave {cross:.3f}")
-    # 4. the synth: its first note sounds, and again after the stereo notes
-    s1 = [e["synth"] for e in log if e["phase"] == "synth1"]
-    s2 = [e["synth"] for e in log if e["phase"] == "synth2"]
-    s1_first = next((i for i, x in enumerate(s1) if x > 1e-5), None)   # (the snapshot's sound swells in slowly)
-    rep["numbers"]["synth"] = {"track": synth, "first_note_first_sound": s1_first, "first_peak": max(s1, default=0),
-                               "after_peak": max(s2, default=0)}
-    link("4a. the synth track sounds on its first note (within 60 periods)", s1_first is not None and s1_first < 60,
-         f"track {synth}: first sound at period {s1_first} of its note")
-    link("4b. the synth track sounds again after the stereo notes (audio not gone)", max(s2, default=0) > 1e-5,
-         f"its peak on the second note {max(s2, default=0):.4f}")
-    # 5. the retrigger: no jump past the sample's own steps, no NaN
-    own = max(max(abs(want_l[k + 1] - want_l[k]) for k in range(N - 1)),
-              max(abs(want_r[k + 1] - want_r[k]) for k in range(N - 1)))
-    jl = max((abs(ls[i + 1] - ls[i]) for i in range(len(ls) - 1) if ls[i] == ls[i] and ls[i + 1] == ls[i + 1]), default=0.0)
-    jr = max((abs(rs[i + 1] - rs[i]) for i in range(len(rs) - 1) if rs[i] == rs[i] and rs[i + 1] == rs[i + 1]), default=0.0)
-    nan = sum(1 for x in ls + rs if x != x)
-    rt = [b for ph, b in sb if ph == "retrig"]
-    rt_peak = max((abs(x) for blk in rt for v in blk for x in blk[v][0] + blk[v][1] if x == x), default=0.0)
-    rep["numbers"]["jumps"] = {"own_largest": own, "l": jl, "r": jr, "nan": nan, "retrig_peak": rt_peak}
-    link("5. the retrigger: it sounds, no click (no jump past the sample's own largest step x 1.5), no NaN",
-         rt_peak > 0.2 * sb_scale and jl <= 1.5 * own * sb_scale and jr <= 1.5 * own * sb_scale and nan == 0,
-         f"retrigger peak {rt_peak:.3g}; largest jump L {jl:.3g}, R {jr:.3g}; the sample's own x the gain "
-         f"{own * sb_scale:.3g}; NaN {nan}")
-    alive = [e["status"] for e in log[-10:]]
-    link("6. the DSP's status alive to the end", all(s & 0xFF00 == 0x5A00 for s in alive),
-         f"the last statuses {[hex(s) for s in alive[-3:]]}")
+    c.machine.pc = P.press(c.machine.m, c.panel.profile, *key(33))
+    held_ok = c.periods(NOTE_ON)
+    c.machine.pc = P.release(c.machine.m, c.panel.profile, *key(33))
+    c.periods(NOTE_OFF)
+    rep["track"] = T
+    rep["blocks"] = blocks
+    st_ = [c.last_status[k] for k in range(3)] if c.last_status else []
+    rep["numbers"]["status"] = [hex(x) for x in st_]
+    link("5. the DSP's status alive to the end", bool(st_) and all(x == 0x5A00 for x in st_),
+         f"the last statuses {[hex(x) for x in st_]}")
     return finish()
+
+
+def compare(sj: str, lj: str, rj: str) -> int:
+    """links 3 and 4 over the three runs' JSONs"""
+    S, L, R = (json.loads(pathlib.Path(x).read_text()) for x in (sj, lj, rj))
+    f = lambda w: struct.unpack("<f", struct.pack("<I", w))[0]        # noqa: E731
+    bad = []
+
+    def link(name, ok, detail=""):
+        print(("  ok    " if ok else "  FAIL  ") + name + (f" -- {detail}" if detail else ""), flush=True)
+        if not ok:
+            bad.append(name)
+    for nm, run in (("stereo", S), ("L", L), ("R", R)):
+        link(f"the {nm} run passed its own links", all(v["ok"] for v in run["links"].values()) and not run.get("halt"),
+             ", ".join(k for k, v in run["links"].items() if not v["ok"]) or "all ok")
+    t = S.get("track", 1)
+    n = min(len(S.get("blocks", [])), len(L.get("blocks", [])), len(R.get("blocks", [])))
+    l_exact = r_close = sounding = 0
+    worst, diff, peaks = 0.0, 0, [0.0, 0.0]
+    for b in range(n):
+        s, l_, r_ = S["blocks"][b], L["blocks"][b], R["blocks"][b]
+        sl, sr = s[64 * t:64 * t + 32], s[64 * t + 32:64 * t + 64]
+        ll, rr = l_[64 * t:64 * t + 32], r_[64 * t + 32:64 * t + 64]
+        l_exact += sl == ll
+        pk = max(abs(f(w)) for w in rr)
+        e = max(abs(f(x) - f(y)) for x, y in zip(sr, rr))
+        worst = max(worst, e / pk if pk else (0.0 if e == 0 else math.inf))
+        r_close += e <= 1e-6 * pk or e == 0
+        diff += sl != sr
+        peaks = [max(peaks[0], max(abs(f(w)) for w in ll)), max(peaks[1], pk)]
+    link("3. track 1's L half is the L run's, bit for bit, every block; its R half the R run's (relative "
+         "1e-6); both sound; R is not L",
+         n > 20 and l_exact == n and r_close == n and min(peaks) > 0.01 and diff > n // 2,
+         f"{n} blocks: L exact {l_exact}, R within rounding {r_close} (worst relative {worst:.2g}); peaks L "
+         f"{peaks[0]:.4f} R {peaks[1]:.4f}; blocks where R differs from L {diff}")
+    nonfinite = {nm: sum(1 for blk in run.get("blocks", []) for w in blk if (w >> 23) & 0xFF == 0xFF)
+                 for nm, run in (("stereo", S), ("L", L), ("R", R))}
+    link("4. no NaN or infinity in any track's buffer, in any of the three runs", not any(nonfinite.values()),
+         str(nonfinite))
+    print(("PASS" if not bad else "FAIL") + (f": the first broken link: {bad[0]}" if bad else
+          ": stereo is its two halves on both processors"), flush=True)
+    return 0 if not bad else 1
 
 
 if __name__ == "__main__":
