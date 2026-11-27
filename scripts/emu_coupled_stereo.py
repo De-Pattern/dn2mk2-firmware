@@ -14,6 +14,9 @@ same run is made twice more with a MONO sample in the stereo one's place: its L 
      (sw 0x1c255a): its L half is the L run's, bit for bit; its R half is the R run's, to the
      float rounding of g L + (g R - g L) (relative 1e-6 of the block's peak); both sound
      (the twins' peak > 0.01); R is not L.
+  3b. (--compare) The voice's stereo buffer, what the main bus and the sends read (the pan stage's
+     output, where v0.54-t1 sent a gain ramp instead of sound): L side the L run's, R side the R
+     run's, within 1e-6.
   4. (--compare) No NaN or infinity in any track's buffer, in any of the three runs.
   5. No halt, no fault, the DSP's status alive to the end.
 
@@ -235,18 +238,31 @@ def main() -> int:
     # 3: the note, held NOTE_ON periods and let go NOTE_OFF more; every block, every track's buffer
     # after the voices' sum and the stereo hook after it (sw 0x1c255a: the sum hook returns there)
     blocks: list = []
+    sbufs: list = []
 
     def after_sum(r, cc):
         blocks.append([(cc.M.m2.word(r.state, TRACK_BUF + 4 * i) or 0) & 0xFFFFFFFF for i in range(16 * 64)])
+        vt = struct.unpack(">16I", c.read(SLOT_TRACK, 64))
+        v0 = next((v for v in range(16) if vt[v] == T), None)   # the note's voice: its stereo buffer
+        sbufs.append([(cc.M.m2.word(r.state, STEREO_BUF + 0x100 * v0 + 4 * i) or 0) & 0xFFFFFFFF
+                      for i in range(64)] if v0 is not None else None)
     c.taps[SUM_AFTER] = after_sum
     track(T)
+    statuses = []
+
+    def go(n):
+        for _ in range(n):
+            if not c.period():
+                return
+            statuses.append(c.last_status[0] if c.last_status else None)
     c.machine.pc = P.press(c.machine.m, c.panel.profile, *key(33))
-    held_ok = c.periods(NOTE_ON)
+    go(NOTE_ON)
     c.machine.pc = P.release(c.machine.m, c.panel.profile, *key(33))
-    c.periods(NOTE_OFF)
+    go(NOTE_OFF)
     rep["track"] = T
     rep["blocks"] = blocks
-    st_ = [c.last_status[k] for k in range(3)] if c.last_status else []
+    rep["sbufs"] = sbufs
+    st_ = [x for x in statuses[-3:] if x is not None]
     rep["numbers"]["status"] = [hex(x) for x in st_]
     link("5. the DSP's status alive to the end", bool(st_) and all(x == 0x5A00 for x in st_),
          f"the last statuses {[hex(x) for x in st_]}")
@@ -286,6 +302,23 @@ def compare(sj: str, lj: str, rj: str) -> int:
          n > 20 and l_exact == n and r_close == n and min(peaks) > 0.01 and diff > n // 2,
          f"{n} blocks: L exact {l_exact}, R within rounding {r_close} (worst relative {worst:.2g}); peaks L "
          f"{peaks[0]:.4f} R {peaks[1]:.4f}; blocks where R differs from L {diff}")
+    # the voice's stereo buffer (the pan stage's: what the main bus and the sends read; v0.54-t1 sent a
+    # gain ramp there): L side the L run's, R side the R run's, to 1e-6 of the run's peak (the note's
+    # first block takes the mix first, then L: within that)
+    sb_ok = sb_n = 0
+    sb_worst = 0.0
+    for b in range(min(len(S.get("sbufs", [])), len(L.get("sbufs", [])), len(R.get("sbufs", [])))):
+        s_, l_, r_ = S["sbufs"][b], L["sbufs"][b], R["sbufs"][b]
+        if s_ is None or l_ is None or r_ is None:
+            continue
+        sb_n += 1
+        pk = max(max(abs(f(w)) for w in l_[:32]), max(abs(f(w)) for w in r_[32:]), 1e-9)
+        e = max(max(abs(f(x) - f(y)) for x, y in zip(s_[:32], l_[:32])),
+                max(abs(f(x) - f(y)) for x, y in zip(s_[32:], r_[32:])))
+        sb_worst = max(sb_worst, e)
+        sb_ok += e <= 1e-6 * max(pk, 1.0) or e <= 1e-6
+    link("3b. the voice's stereo buffer (the main bus and the sends): L side the L run's, R side the R run's",
+         sb_n > 20 and sb_ok == sb_n, f"{sb_n} blocks, {sb_ok} within 1e-6 (worst {sb_worst:.2g})")
     nonfinite = {nm: sum(1 for blk in run.get("blocks", []) for w in blk if (w >> 23) & 0xFF == 0xFF)
                  for nm, run in (("stereo", S), ("L", L), ("R", R))}
     link("4. no NaN or infinity in any track's buffer, in any of the three runs", not any(nonfinite.values()),
