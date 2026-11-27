@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 31,
+   "done": 32,
    "total": 0,
    "last": [
-    "GRID allocate slice locks (ColdFire)",
     "multi-select delete (ColdFire)",
-    "SELECT UNUSED (ColdFire)"
+    "SELECT UNUSED (ColdFire)",
+    "overlays let go (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.775,
-   "status": "running: hooks"
+   "frac": 0.8,
+   "status": "running: recflow"
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build) rebuilt: the SHARC runner's stress part found eleven sample voices a little over their time under the voice guardrail; fixed (they fit again, measured). Its steps run again now: those whose inputs did not change are reused. What it holds is announced when it is released.",
- "updated": "2026-11-27T20:20:25+00:00"
+ "updated": "2026-11-27T20:23:28+00:00"
 }
