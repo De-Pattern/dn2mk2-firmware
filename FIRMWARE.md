@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.76 | 2026-11-26 | **FLEX takes on their step** (they started a sixth of a step late: Dubmaster's 41 ms at 60 BPM, 18 at 120; now within ~2 ms) and **PERFORM macros that glide** (fine offsets moved smoothly, no zipper; D4) | `builds/v0.76-FLOW/` | yes |
 | v0.75 | 2026-11-25 | **Lighter P-I machines** (their block memory in the DSP's fast L1, bit-identical: PI-SD/PI-RS -47 %, PI-CC/RC/HH -36 %) and **FLEX takes of a track follow its LEVEL** (NiKo: they were recorded before it) | `builds/v0.75-PILEVEL/` | yes |
 | v0.74 | 2026-11-25 | **Live recording no longer drags the sequencer** (REC + PLAY with 6-7 keys: each recorded key cleared its step's slide locks in three passes; now one) | `builds/v0.74-LIVEREC/` | yes |
 | ~~v0.73-t1 (TEST)~~ PULLED | 2026-11-25 | **pulled (2026-11-25): crashed at start-up on a unit.** TEST build: the mod on OS 1.12, for Outbox 8 (main outputs through it, FUNC + UP/DOWN in its menus); v0.72 otherwise unchanged | `builds/test/v0.73-t1-OS112/` | yes |
@@ -113,6 +114,43 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.76 — FLOW (FLEX takes on their step, PERFORM macros that glide)
+
+`DN2mod_v0.76_FLOW_OS1.11.syx`
+sha256 `7e8ba30828cab8634b4d140f69c8219b3dc5e4b63a2d1fffdd6c3f0791fb1daf`
+Gate: CLEARED TO FLASH, 2026-11-26 (every step: preflight, DSP identity and hardware rules, ColdFire, unit, all ColdFire emulator steps, the coupled thres/flex/flexplay/mute and the new flexlag (a take's playback on its step), boot from reset, fuzz, dead link; SHARC runner types 0-4 bit-identical to stock). Source: commit `26c6653` (branch `pi`).
+
+v0.75 PILEVEL, plus:
+
+**FLEX takes start on their step** (spknfx, NiKo; measured by Dubmaster: 41 ms late at 60 BPM,
+25 at 90, 18 at 120, put right by microtime -4/24). That is one sequencer tick, a sixth of a
+step. When the pattern reaches a step while it plays, the step's notes go out about a tick after
+the step changes; the recorder trig started its take at the change, so the take held a tick of
+what came before the notes, and played back that much late. A recorder trig now starts its take
+one tick after the step changes, less 2 ms (what the field numbers leave over). On PLAY's own
+first step the notes go out at once, and so does the take. Measured in the coupled emulator
+(`emu_coupled_flexlag.py`, now the gate's `flexlag` step): the take played back 80 samples
+(1.7 ms) from its step; v0.75 on the same check, 1,456 samples (30 ms at 81 BPM).
+
+**PERFORM macros glide** (D4: a macro moved its targets in steps, with a zipper). A macro's
+offset is now kept in the parameter's fine units (1/256 of a step) and moves an eighth of the
+way there each frame, so a turn is smooth. The filter cutoff is on every track's destination
+list as FREQ.
+
+**Tests**
+1. FLEX: a recorder trig and a playback trig on the same step (not step 1), the pattern playing:
+   the take plays in time with its source, no flam. At 60, 90 and 120 BPM.
+2. The same with the recorder trig on step 1, started with PLAY: in time as well.
+3. Trigs you had set to microtime -4/24: back to 0, in time.
+4. PERFORM: a macro on FREQ of a synth track, turned slowly and quickly: smooth, no zipper.
+5. A macro on several targets, PERF MUTE on and off: as in v0.75.
+6. The regression check (top of this file).
+
+**Known issues**
+- A 1.11 build. The 1.12 test build (v0.73-t1) is pulled; use 1.11 builds for now.
+- The 2 ms left off the tick comes from Dubmaster's measurements, not the emulator.
+- Everything listed for v0.72.
 
 ## v0.75 — PILEVEL (lighter P-I machines, FLEX takes follow the track's LEVEL)
 

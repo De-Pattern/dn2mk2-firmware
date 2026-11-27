@@ -40,6 +40,7 @@ PF_AT, PF_END = 0x6E0500, 0x6E0600
 MIRROR = 0x800068E4
 VOICE_SOUND = 0x800052A8
 VOICE_TRACK = 0x80005308
+GLIDE = 160                                     # frames for an offset to arrive (v0.76: it glides)
 MACRO = 26                                      # sizeof(struct pf_macro): name 9, bip, val, 5 x (trk, slot, depth)
 
 
@@ -136,6 +137,10 @@ def run(cx):
     boot()
     facts["1 power-on, no record: eight empty macros, PERF MUTE off, nothing written"] = macros() == empty and not wlog
 
+    def arrive():                              # v0.76: the offsets glide; enough frames to arrive
+        for _ in range(GLIDE):
+            call("pf_apply")
+
     # 2. the offset, on track 1's slot 20 (an LFO destination on every machine: the mirror's own cell)
     sound_ok = struct.unpack(">I", m.read(VOICE_SOUND, 4))[0] != 0
     T, S = 0, 20
@@ -143,36 +148,39 @@ def run(cx):
     set_cell(T, S, 0x2300)
     set_macro(0, b"", 0, 127, [(T, S, 30)])
     call("pf_publish")
-    call("pf_apply")
+    glide = []
+    for _ in range(GLIDE):                     # v0.76 (D4): the offset glides there, no jump
+        call("pf_apply")
+        glide.append(cell(T, S))
     a1 = cell(T, S)
-    call("pf_apply")
+    arrive()
     a2 = cell(T, S)                            # stock did not rewrite: still +30, not +60
     set_cell(T, S, 0x1000)                     # stock rewrote it (an LFO moved): +30 on the new value
-    call("pf_apply")
+    arrive()
     a3 = cell(T, S)
     set_macro(1, b"", 1, -32, [(T, S, 20)])    # a second macro on the same cell, bipolar, half down
     call("pf_publish")
-    call("pf_apply")
+    arrive()
     a4 = cell(T, S)                            # 0x10 + 30 - 10
     put("pf_mute", 1)
     call("pf_publish")
-    call("pf_apply")
+    arrive()
     a5 = cell(T, S)                            # PERF MUTE: as it was
     put("pf_mute", 0)
     set_macro(0, b"", 0, 0, [(T, S, 30)])
     set_macro(1, b"", 1, 0, [(T, S, 20)])
     call("pf_publish")
-    call("pf_apply")
+    arrive()
     a6 = cell(T, S)                            # both at 0: as it was
     set_cell(T, S, 0x7000)
     set_macro(0, b"", 0, 127, [(T, S, 63)])
     call("pf_publish")
-    call("pf_apply")
+    arrive()
     a7 = cell(T, S)                            # clamped at the top
     set_macro(0, b"", 0, 0, [(0xFF, 0, 0)])
     set_macro(1, b"", 0, 0, [(0xFF, 0, 0)])
     call("pf_publish")
-    call("pf_apply")
+    arrive()
     a8 = cell(T, S)                            # the target gone: put back
     sound_after = m.read(struct.unpack(">I", m.read(VOICE_SOUND, 4))[0], 256) if sound_ok else b""
     facts["2 the offset: +depth x value / 127 on what was there, no piling up, two macros add, "
@@ -181,6 +189,14 @@ def run(cx):
         and a4 == 0x1000 + (30 - 10) * 256 and a5 == 0x1000 and a6 == 0x1000 and a7 == 0x7FFF
         and a8 == 0x7000 and sound_before == sound_after)
     offsets = [hex(x) for x in (a1, a2, a3, a4, a5, a6, a7, a8)]
+    steps = [y - x for x, y in zip([0x2300] + glide, glide)]
+    near = next((k for k, x in enumerate(glide) if 0x2300 + 30 * 256 - x < 256), None)
+    facts["2b the glide (v0.76, D4's zipper): the first frame moves an eighth of the way, every frame "
+          "after moves on and never back, no frame more than an eighth of the range, within a step of "
+          "the target in at most 60 frames, then exactly on it"] = (
+        0x2300 < glide[0] < 0x2300 + 30 * 256 and all(d >= 0 for d in steps)
+        and max(steps) <= 30 * 256 // 8 + 1 and near is not None and near < 60 and glide[-1] == 0x2300 + 30 * 256)
+    glide_info = {"first": [hex(x) for x in glide[:8]], "near": near, "largest_step": max(steps)}
 
     # 10. voices, not tracks (v0.70): the voice -> track table set, every voice given a sound
     vt_saved, vs_saved = m.read(VOICE_TRACK, 64), m.read(VOICE_SOUND, 64)
@@ -195,14 +211,14 @@ def run(cx):
     set_macro(0, b"", 0, 127, [(2, S, 30)])
     set_macro(1, b"", 0, 0, [(0xFF, 0, 0)])
     call("pf_publish")
-    call("pf_apply")
+    arrive()
     r1 = [cell(v, S) for v in range(16)]
     route({4: 2, 6: 9, 3: 7})                 # voice 6 gone to track 10, voice 4 now plays track 3
-    call("pf_apply")
+    arrive()
     r2 = [cell(v, S) for v in range(16)]
     set_macro(0, b"", 0, 0, [(0xFF, 0, 0)])
     call("pf_publish")
-    call("pf_apply")
+    arrive()
     r3 = [cell(v, S) for v in range(16)]
     m.write(VOICE_TRACK, vt_saved)
     m.write(VOICE_SOUND, vs_saved)
@@ -315,6 +331,38 @@ def run(cx):
     outside = [hex(s) for s, _ in wlog if not PF_AT <= s < PF_END]
     facts["9 every sector written lies in 0x6E0500..0x6E05FF"] = not outside and len(wlog) >= 5
 
+    # 11. the destinations (v0.76, D4: "the filter cutoff may be missing"): every slot of tracks 1..4
+    # that the LFO's destination list offers (stock's mask, bit 0x200), with stock's names
+    def rd32(a_):
+        return struct.unpack(">I", m.read(a_, 4))[0]
+
+    def cstr(a_):
+        b_ = m.read(a_, 24)
+        return b_.split(b"\0")[0].decode("latin1")
+    dests = {}
+    guest_call(0x4018A97A)
+    ua = guest_call.returned["d0"]
+    guest_call(0x4003E41A, ua)
+    ub = guest_call.returned["d0"]
+    for t in range(4):
+        guest_call(0x400312FE, ub, t)
+        pset = guest_call.returned["d0"]
+        row = []
+        if pset:
+            fn = rd32(rd32(pset) + 0x50)
+            for s_ in range(101):
+                guest_call(fn, pset, s_)
+                rid = guest_call.returned["d0"]
+                if 0 < rid < 321:
+                    guest_call(0x400DC30E, rid)
+                    mk = guest_call.returned["d0"]
+                    nm = rd32(0x401F7F94 + 60 * rid + 0x30)
+                    row.append((s_, rid, hex(mk), cstr(nm) if nm else ""))
+        dests[t] = row
+    # (2026-11-26, this probe on v0.76: FREQ, records 36 and 41, carries the LFOs' bits 0x1e00 on
+    # every track, so it is on the list; the list follows the machine's own page, slot 67)
+    facts["11 the filter's cutoff (FREQ) is a destination on tracks 1..4 (stock's LFO bit 0x200)"] = (
+        len(dests) == 4 and all(any(r[3] == "FREQ" and int(r[2], 16) & 0x200 for r in row) for row in dests.values()))
     io.pop("log", None)
-    return {"facts": facts, "ok": all(facts.values()), "voices": voices, "writes": [hex(s) for s, _ in wlog],
-            "outside": outside[:20], "offsets": offsets, "pf_reads": i32("pf_reads"), "pf_writes": i32("pf_writes")}
+    return {"dests": dests, "facts": facts, "ok": all(facts.values()), "voices": voices, "writes": [hex(s) for s, _ in wlog],
+            "outside": outside[:20], "offsets": offsets, "glide": glide_info, "pf_reads": i32("pf_reads"), "pf_writes": i32("pf_writes")}

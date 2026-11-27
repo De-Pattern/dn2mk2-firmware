@@ -96,8 +96,13 @@ int pf_col D = 0;                               /* SETUP's target */
 int pf_owner D = -2;
 u32 pf_opens D = 0, pf_frames D = 0, pf_writes D = 0, pf_reads D = 0, pf_bad D = 0;
 
-/* what the interrupt applies: a list of (track, slot, offset), published as a pair of tables */
-struct pf_apply { u8 trk, slot; short off; };
+/* what the interrupt applies: a list of (track, slot, offset), published as a pair of tables.
+ * v0.76 (D4, 2026-11-25: a macro move jumped and zippered): the offset is in the cell's own
+ * units (1/256 of a step, the cell's fine byte), not whole steps, and the interrupt glides the
+ * applied offset to it (SLEW, below) instead of jumping: stock's smoother is before us, so a
+ * move needs a smoother of its own */
+struct pf_apply { u8 trk, slot; short pad; int off; int pad2; };   /* 12 bytes: an 8-byte stride is a
+                                                                   * scaled index of 8, which the V4e lacks */
 struct pf_pub { int n; struct pf_apply a[PF_N * PF_T]; };
 struct pf_pub pf_tab[2] D;
 volatile int pf_tsel D = 0;
@@ -107,6 +112,16 @@ static u16 wrote[PF_N * PF_T][16] D;            /* v0.70: per voice (the mirror'
 static u16 base[PF_N * PF_T][16] D;
 static u16 held[PF_N * PF_T] D;                 /* bit v: voice v's cell holds our offset now */
 static struct pf_apply live[PF_N * PF_T] D;
+static int cur[PF_N * PF_T] D;                  /* v0.76: the offset applied now, gliding to live[i].off */
+static int ncur[PF_N * PF_T] D;
+/* the glide: each frame an eighth of the way left (at least what is left under 8: 1/32 of a
+ * step), so a jump of a whole range settles in about 50 frames (some 35 ms) with no steps in it */
+#define SLEW 8
+static int glide(int c, int target)
+{
+    int d = target - c, st = d / SLEW;
+    return c + (st ? st : d);
+}
 static int nlive D = 0;
 static u32 seen_gen D = 0xFFFFFFFFu;
 
@@ -147,17 +162,19 @@ void pf_publish(void)
             const struct pf_target *t = &pf[m].t[k];
             if (t->trk >= 16 || t->slot >= NSLOTS || !t->depth)
                 continue;
-            int off = pf_mute ? 0 : pf[m].bip ? t->depth * pf[m].val / 64 : t->depth * pf[m].val / 127;
+            int off = pf_mute ? 0 : pf[m].bip ? t->depth * pf[m].val * 256 / 64 : t->depth * pf[m].val * 256 / 127;
             int j = 0;                          /* one entry a cell: two macros on one add */
             while (j < n && !(p->a[j].trk == t->trk && p->a[j].slot == t->slot))
                 j++;
             if (j == n) {
                 p->a[n].trk = t->trk;
                 p->a[n].slot = t->slot;
+                p->a[n].pad = 0;
+                p->a[n].pad2 = 0;
                 p->a[n].off = 0;
                 n++;
             }
-            p->a[j].off = (short)(p->a[j].off + off);
+            p->a[j].off += off;
         }
     p->n = n;
     pf_tsel ^= 1;
@@ -215,17 +232,27 @@ void pf_apply(void)
         int same = p->n == nlive;
         for (int i = 0; same && i < nlive; i++)
             same = p->a[i].trk == live[i].trk && p->a[i].slot == live[i].slot;
+        for (int i = 0; i < p->n; i++) {         /* a cell still moved keeps its glide */
+            ncur[i] = 0;
+            for (int j = 0; j < nlive; j++)
+                if (live[j].trk == p->a[i].trk && live[j].slot == p->a[i].slot)
+                    ncur[i] = cur[j];
+        }
         if (!same) {
             for (int i = 0; i < nlive; i++)
                 put_back(i);
             nlive = p->n;
         }
-        for (int i = 0; i < p->n; i++)
-            live[i] = p->a[i];
+        for (int i = 0; i < p->n; i++) {
+            live[i].trk = p->a[i].trk;          /* (field by field: a 12-byte copy is a memcpy call) */
+            live[i].slot = p->a[i].slot;
+            live[i].off = p->a[i].off;
+            cur[i] = ncur[i];
+        }
         seen_gen = g;
     }
     for (int i = 0; i < nlive; i++) {
-        int t = live[i].trk, off = live[i].off;
+        int t = live[i].trk, off = cur[i] = glide(cur[i], live[i].off);
         for (int v = 0; v < 16; v++) {
             if (t > 15 || !off || VOICE_TRACK[v] != (u32)t || !VOICE_SOUND(v)) {
                 put_back_voice(i, v);
@@ -234,7 +261,7 @@ void pf_apply(void)
             volatile u16 *cell = MIRROR_CELL(v, live[i].slot);
             u16 now = *cell;
             u16 was = (held[i] >> v & 1u) && now == wrote[i][v] ? base[i][v] : now;
-            int nv = clamp((int)was + off * 256, 0, 0x7FFF);
+            int nv = clamp((int)was + off, 0, 0x7FFF);
             *cell = (u16)nv;
             base[i][v] = was;
             wrote[i][v] = (u16)nv;
