@@ -3123,10 +3123,11 @@ def main() -> int:
                   "FLEX buffers played by a ONESHOT track, on both processors (coupled)",
                   [fp_cmd, sorted(EMU_ENV.items())], fp_body)
 
-        # v0.76 (Dubmaster: FLEX takes a tick late on playback): a two-step pattern, track 2's note
-        # recorded by track 1's one-shot recorder trig in pass 1 and played by track 1's own note in
-        # pass 2; track 1's pass-2 audio correlated with track 2's: on time within 3 ms
-        # (scripts/emu_coupled_flexlag.py; v0.75, its negative control, a tick late)
+        # v0.76 (Dubmaster: FLEX takes a tick late on playback): SRC IN fed a known noise, a fresh
+        # note on track 1's step 2 and a recorder trig on the same step, the pattern playing (a step
+        # reached while it plays); the take is the input (correlation), and its playback a pattern
+        # on starts on the step within 3 ms (scripts/emu_coupled_flexlag.py; v0.75, its negative
+        # control, fails with +1,456 samples, 0.98 tick)
         if "rt_late" in lay:
             fl_js = work / "flexlag.json"
             fl_cmd = [a.coupled_py, "-u", "scripts/emu_coupled_flexlag.py", "--build", a.build, "--stock", a.stock,
@@ -3138,8 +3139,8 @@ def main() -> int:
                 if rc != 0 or not last.startswith("PASS"):
                     return False, out[-900:]
                 lag = json.loads(fl_js.read_text())["numbers"].get("lag", {}) if fl_js.exists() else {}
-                return True, (f"on the ColdFire and the DSP together: a take of track 2's note, recorded by a "
-                              f"one-shot recorder trig, plays back on the step: lag {lag.get('samples')} samples "
+                return True, (f"on the ColdFire and the DSP together: a take of IN, recorded by a recorder trig "
+                              f"on step 2 while the pattern plays, plays back on the step: lag {lag.get('samples')} samples "
                               f"({lag.get('ms')} ms), correlation {lag.get('corr')}")
             later("flexlag", "FLEX: a take plays back on the step, the sequencer's own notes, on both processors (coupled)",
                   "FLEX: a take plays back on the step, the sequencer's own notes, on both processors (coupled)",
