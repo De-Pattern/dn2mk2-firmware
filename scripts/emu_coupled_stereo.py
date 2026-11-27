@@ -20,7 +20,9 @@ same run is made twice more with a MONO sample in the stereo one's place: its L 
   4. (--compare) No NaN or infinity in any track's buffer, in any of the three runs.
   5. No halt, no fault, the DSP's status alive to the end.
 
-A negative control: v0.54-t1's build (with its own layout) must fail 3.
+A negative control: v0.54-t1's build (with its own layout) fails 3b (measured 2026-11-27: its track
+buffers are right, link 3 passes; its stereo buffer is off by up to 0.11, the gain ramp it sent
+the main bus and the sends).
 
 Usage: emu_coupled_stereo.py --build BUILD.syx --pool stereo|L|R --json OUT
        emu_coupled_stereo.py --compare STEREO.json L.json R.json"""
