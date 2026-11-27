@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76: THRES, FLEX and FLEX playback passed on both processors; now the new FLEX timing check, beside the last ColdFire steps. Then MUTE SRC, the SHARC parts, the full gate and the release.",
- "updated": "2026-11-26T23:54:11+00:00"
+ "updated": "2026-11-27T00:06:13+00:00"
 }
