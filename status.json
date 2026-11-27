@@ -28,5 +28,5 @@
   }
  ],
  "note": "A test build, v0.76-t1, is in its gate: every step on both processors has passed; the last ColdFire steps and the SHARC runner's parts run now, then the full gate. What it holds is announced when it is released.",
- "updated": "2026-11-27T19:03:56+00:00"
+ "updated": "2026-11-27T19:15:58+00:00"
 }
