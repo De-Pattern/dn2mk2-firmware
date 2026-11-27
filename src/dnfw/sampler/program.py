@@ -3733,7 +3733,35 @@ def stereo_voice(p: Prog, L: Layout) -> None:
         return
     C = L.C
     _slot_of_t(p, L)
-    _own(p, L, ST.SNAP_PRE, back=False)
+
+    # the voice's words before its run, for a second run from the same start (L again, R). Only a
+    # voice that can need one copies them (v0.76-t1: the 48-word copy on every sample voice every
+    # block cost eleven ONESHOTs their place under the guardrail's limit): one with a stereo slot,
+    # one whose note starts this block (its sample's format is not known yet), or one playing a
+    # stereo sample (past the cap it may claim a slot). A mono voice playing on: none of them
+    def snap():
+        _own(p, L, ST.SNAP_PRE, back=False)
+
+    def no_slot():
+        p.ld(0, PP.TRIG_WORD)
+        p.lsh(0, 0, -16)
+        p.iconst(1, 1)
+        p.ld(9, C["t"])
+        PP._shift_by(p, 1, 9)
+        p.iop(0, 0, "AND", 1)
+
+        def playing_on():                         # this voice's fmt word
+            p.ld(9, C["t"])
+            p.lsh(12, 9, 7)
+            p.iconst(11, L.state)
+            p.iop(12, 11, "+", 12)
+            p.seti(2, 12)
+            v(p, 0, "fmt")
+            p.iconst(12, SM.FMT_I16S)
+            p.if_(0, "EQ", 12, snap, kind="i")
+        p.ifz(0, "NE", snap, playing_on)
+    p.ld(0, ST.STSL)
+    p.ifz(0, "GE", snap, no_slot)
     _weights(p, 0.0, 0.0)
     p.iconst(0, 1)
     p.st(ST.STMIX, 0)
