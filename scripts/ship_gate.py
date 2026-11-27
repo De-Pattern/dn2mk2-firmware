@@ -239,6 +239,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("flex", "FLEX: a recorder trig's take played by a note, on both processors (coupled)"),
        ("flexplay", "FLEX buffers played by a ONESHOT track, on both processors (coupled)"),
        ("flexlag", "FLEX: a take plays back on the step, the sequencer's own notes, on both processors (coupled)"),
+       ("flexlag0", "FLEX: a take on PLAY's own first step plays back on it, on both processors (coupled)"),
        ("mute", "FLEX MUTE SRC: the SRC track out of the mix, still recorded, on both processors (coupled)"),
        ("fineswap", "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"),
        ("fineknob", "STRT's knob against stock's fine FREQ (ColdFire)"),
@@ -248,6 +249,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
        ("engine", "engine + LOAD/SAVE"),
        ("boot", "boot from reset"),
+       ("bootpoison", "boot from reset, the mod's RAM full of garbage"),
        ("fuzz", "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)"),
        ("link16-dead", "sample link, dead link (ColdFire)"))
 EMU_ID = {n: i for i, n in EMU}
@@ -667,6 +669,21 @@ def main() -> int:
             return good, ("booted and drew its UI, no fault" + ("; the start-up animation's first frame, "
                           "his" if anim else "") if good else out[-800:])
         later("boot", "boot from reset", "boot from reset", [boot_cmd], boot_body)
+
+        # 5a. v0.77 (the pulled v0.73-t1 crashed at start-up on a unit; the emulator maps RAM
+        # zeroed, a unit's DRAM powers up with garbage): the same boot with the mod's own RAM
+        # (0x46000000..0x48000000) full of seeded random bytes, against stock booted the same way
+        bp_cmd = [*boot_cmd, "--poison", "1"]
+
+        def bp_body(tdir):
+            rc, out = run("boot_check_poison", bp_cmd, logs, trace=tdir)
+            good = rc == 0 and "booted and drew its UI" in out
+            if anim:
+                good = good and ", 0 not his" in out
+            return good, ("booted and drew its UI, no fault, with the mod's RAM (0x46000000..0x48000000) full "
+                          "of garbage at power-on (stock booted the same way)" if good else out[-800:])
+        later("bootpoison", "boot from reset, the mod's RAM full of garbage",
+              "boot from reset, the mod's RAM full of garbage", [bp_cmd], bp_body)
 
         # 5b. v0.37: the start-up animation, every frame. From reset the intro stops after its
         # first frame under the emulator (stock too), so from the snapshot taken just before
@@ -3145,6 +3162,25 @@ def main() -> int:
             later("flexlag", "FLEX: a take plays back on the step, the sequencer's own notes, on both processors (coupled)",
                   "FLEX: a take plays back on the step, the sequencer's own notes, on both processors (coupled)",
                   [fl_cmd, sorted(EMU_ENV.items())], fl_body)
+
+            # v0.77: PLAY's own first step (its notes go out at once, so the take starts at once:
+            # v0.76's exception, measured by hand on v0.76 before; now gated)
+            f0_js = work / "flexlag0.json"
+            f0_cmd = [a.coupled_py, "-u", "scripts/emu_coupled_flexlag.py", "--build", a.build, "--stock", a.stock,
+                      "--snapshot", snap, "--step", "0", "--json", f0_js]
+
+            def f0_body(tdir):
+                rc, out = run("flexlag0 coupled", f0_cmd, logs, env=EMU_ENV, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, out[-900:]
+                lag = json.loads(f0_js.read_text())["numbers"].get("lag", {}) if f0_js.exists() else {}
+                return True, (f"on the ColdFire and the DSP together: a take of IN, recorded by a recorder trig "
+                              f"on step 1 as PLAY starts it, plays back on the step: lag {lag.get('samples')} "
+                              f"samples ({lag.get('ms')} ms), correlation {lag.get('corr')}")
+            later("flexlag0", "FLEX: a take on PLAY's own first step plays back on it, on both processors (coupled)",
+                  "FLEX: a take on PLAY's own first step plays back on it, on both processors (coupled)",
+                  [f0_cmd, sorted(EMU_ENV.items())], f0_body)
 
         # v0.52 FLEX MUTE SRC (owner, option B): knob H on REC SETUP turns it ON; a note on the SRC
         # track: its voices' frame LEVEL and FX sends 0 (the DSP's LEVEL too), the other voices' as

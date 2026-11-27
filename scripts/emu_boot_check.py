@@ -87,7 +87,23 @@ def stock_path():
     return os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin")
 
 
-def run(image_path, limit, frame_at, entries=(), aniz=None):
+# v0.77: the mod's own RAM (0x46000000..0x48000000: its appended code and data, the banks' RAM)
+# holds whatever the DRAM powered up with on a unit; the emulator maps it zeroed. With --poison
+# SEED it is filled with seeded random bytes before the first instruction, the stock control too
+# (stock boots that way: measured 2026-11-27, as do v0.76 and the pulled 1.12 build)
+POISON_LO, POISON_HI = 0x46000000, 0x48000000
+
+
+def poison_ram(m, seed):
+    import random                                               # noqa: PLC0415
+    rnd = random.Random(seed)
+    for page in range(POISON_LO, POISON_HI, 0x100000):
+        m.ensure(page)
+        for a in range(page, page + 0x100000, 0x10000):
+            m.uc.mem_write(a, rnd.randbytes(0x10000))
+
+
+def run(image_path, limit, frame_at, entries=(), aniz=None, poison=None):
     """Boot from reset. -> (instructions, frames, the fault or None, reached).
 
     `entries` are the build's own routines. Whether they ran is as much a part
@@ -98,6 +114,8 @@ def run(image_path, limit, frame_at, entries=(), aniz=None):
 
     def pre_start(m):
         st = holder["st"]
+        if poison is not None:
+            poison_ram(m, poison)
 
         def at_frame(uc, address, size, user):
             state["frames"] += 1
@@ -143,7 +161,7 @@ def run(image_path, limit, frame_at, entries=(), aniz=None):
     return st["n"], state["frames"], state["fault"], reached
 
 
-def control(limit, frame_at, refresh=False):
+def control(limit, frame_at, refresh=False, poison=None):
     """-> what a stock boot does here, cached: stock does not change.
 
     The emulator does, though, so a cache measured under a different `emu/`
@@ -152,18 +170,19 @@ def control(limit, frame_at, refresh=False):
     did not is a wrong answer.
     """
     now = emulator_fingerprint()
-    if CACHE.exists() and not refresh:
-        row = json.loads(CACHE.read_text())
+    cache = CACHE if poison is None else CACHE.with_name(CACHE.stem + f"-poison{poison}" + CACHE.suffix)
+    if cache.exists() and not refresh:
+        row = json.loads(cache.read_text())
         if row.get("emulator") == now:
             return row
         print(f"  the emulator changed since this control was measured "
               f"({row.get('emulator')} -> {now}); re-measuring it")
     started = time.time()
-    ran, frames, fault, _ = run(stock_path(), limit, frame_at)
+    ran, frames, fault, _ = run(stock_path(), limit, frame_at, poison=poison)
     row = {"ran": ran, "frames": frames, "fault": fault, "limit": limit,
-           "seconds": round(time.time() - started, 1), "emulator": now}
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    CACHE.write_text(json.dumps(row, indent=1) + "\n")
+           "seconds": round(time.time() - started, 1), "emulator": now, "poison": poison}
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps(row, indent=1) + "\n")
     return row
 
 
@@ -175,13 +194,16 @@ def main() -> int:
     p.add_argument("--aniz", action="store_true",
                    help="v0.37: the build plays the start-up animation (dnfw.bootanim): every frame the "
                         "stamp shows is checked against his (s!Rwa²'s), and every frame must show")
+    p.add_argument("--poison", type=int, default=None, metavar="SEED",
+                   help="v0.77: the mod's own RAM (0x46000000..0x48000000) full of seeded random bytes "
+                        "before the first instruction, as a unit's DRAM powers up (the control too)")
     args = p.parse_args()
 
     stock_img = open(stock_path(), "rb").read()
     profile = symbols.resolve(stock_img)
     frame_at = found(profile.panel_diff, stock_img)     # v0.73: found in this OS's own image
 
-    base = control(args.limit, frame_at, args.refresh_control)
+    base = control(args.limit, frame_at, args.refresh_control, poison=args.poison)
     print(f"  control (stock 1.11): {base['frames']} frame(s) in {base['ran']:,} "
           f"instruction(s){'' if base['seconds'] is None else f', {base['seconds']}s'}"
           f"{'  [cached]' if not args.refresh_control else ''}")
@@ -226,7 +248,7 @@ def main() -> int:
         # the intro's timers do not run on (stock too stops at one frame), so here the first
         # frame is checked, and scripts/emu_aniz_check.py checks every frame from `boot400M`
         args.limit = max(args.limit, ANIZ_LIMIT)
-    ran, frames, fault, reached = run(args.image, args.limit, frame_at, entries, aniz)
+    ran, frames, fault, reached = run(args.image, args.limit, frame_at, entries, aniz, poison=args.poison)
     print(f"  {os.path.basename(os.path.dirname(args.image))}: {frames} frame(s) in "
           f"{ran:,} instruction(s), {round(time.time() - started, 1)}s\n")
 
