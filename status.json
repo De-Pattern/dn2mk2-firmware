@@ -14,19 +14,15 @@
    "status": "running: boot_check"
   },
   {
-   "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
-   "done": 15,
+   "label": "v0.76-t1 TEST build \u00b7 SHARC runner",
+   "done": 0,
    "total": 0,
-   "last": [
-    "ColdFire",
-    "ColdFire",
-    "Overbridge's code untouched"
-   ],
+   "last": [],
    "state": "run",
-   "frac": 0.375,
-   "status": "running: mute"
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "A test build, v0.76-t1, is in its gate: earlier ColdFire parts and the steps on both processors have passed, these finish the rest; then the SHARC parts and the full gate. What it holds is announced when it is released.",
- "updated": "2026-11-27T18:27:55+00:00"
+ "note": "A test build, v0.76-t1, is in its gate: every step on both processors has passed; the last ColdFire steps and the SHARC runner's parts run now, then the full gate. What it holds is announced when it is released.",
+ "updated": "2026-11-27T18:33:45+00:00"
 }
