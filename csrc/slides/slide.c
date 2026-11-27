@@ -88,6 +88,9 @@ struct slide {
 };
 
 struct slide sl_v[NV] D;
+/* v0.77 (oksami: features that cost every frame when nothing uses them): bit v set while voice v
+ * slides (sl_v[v].n > 0), so the frame's smoother does nothing more than stock's without one */
+static u32 sl_on D = 0;
 u16 sl_cap[NV][NS] D;                           /* per track: the values before the trig */
 u32 sl_cap_frame[NV] D = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
                           0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
@@ -114,6 +117,7 @@ void sl_pre(u32 v, u32 t)
     if (v >= NV || t >= NV)
         return;
     sl_v[v].n = 0;
+    sl_on &= ~(1u << v);
     u32 f = FRAMES;
     if (sl_cap_frame[t] != f) {
         sl_cap_frame[t] = f;
@@ -248,6 +252,8 @@ static void trigger(u32 v, u32 t, u8 *list)
     sl->prog = 0;
     sl->mul = (6u << 8) / ticks_a_step(t);
     sl->n = (u16)n;
+    if (n)
+        sl_on |= 1u << v;
     sl_started++;
 }
 
@@ -271,6 +277,7 @@ void sl_apply(u32 v, u8 *list, void *mirror)
         sl_lastv[t] = (s8)v;
     }
     sl_v[v].n = 0;
+    sl_on &= ~(1u << v);
     sl_apply_stock(v, list, mirror);
     trigger(v, t, list);
     /* (v0.41..v0.43 fired a REC trig from here, so a step with no note never recorded; v0.44:
@@ -284,14 +291,18 @@ u32 sl_smooth(void *src)
 {
     u32 base = SMOOTHER(src);
     sl_ticks++;
+    if (!sl_on)
+        return base;                            /* v0.77: no slide running */
     u32 w = TEMPO;
     if (w < 1200 || w > 60000)
         w = 120 * 120;
     u32 inc = (w << 16) / 112500u;              /* 1/24 steps a frame, 16.16, at 1x */
     for (u32 v = 0; v < NV; v++) {
         struct slide *sl = &sl_v[v];
-        if (!sl->n)
+        if (!sl->n) {
+            sl_on &= ~(1u << v);
             continue;
+        }
         sl->prog += (inc * sl->mul) >> 8;
         u32 frac = sl->prog / (2u * sl->units); /* 0..32768 */
         int done = frac >= 32768u;
@@ -314,6 +325,8 @@ u32 sl_smooth(void *src)
         }
         if (done)
             sl->n = 0;
+        if (!sl->n)
+            sl_on &= ~(1u << v);
     }
     return base;
 }

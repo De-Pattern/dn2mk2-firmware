@@ -684,6 +684,12 @@ int rt_mute_knob(int delta)
 u32 ms_mask D = 0;                                    /* the tracks muted now (bit t), for tests and the screen */
 static u16 ms_gain[16] D = {256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256};
 static u8 ms_track[16] D = {0};                       /* each voice's track at its last frame */
+/* v0.77 (oksami: features that cost every frame when nothing uses them): with no FLEX track in the
+ * kit, nothing muted and every voice's gain back at 256, the frame's voice pass is skipped; it
+ * picks each voice's track up again, without a fade, the first frame it runs after */
+static u8 ms_flex D = 0;                               /* a FLEX track in the kit (ms_mask_now) */
+static u8 ms_idle D = 0;                               /* the last pass left every gain at 256 */
+static u8 ms_skipped D = 0;                            /* frames were skipped since it ran */
 /* v0.75: each track's LEVEL as the frame had it before MUTE SRC (coarse << 8 | fine; 100 until a
  * voice has played the track): a FLEX take of a track follows it (rt_lvl_bits, the DSP's settings) */
 static u16 rt_lvl[16] D = {0x6400, 0x6400, 0x6400, 0x6400, 0x6400, 0x6400, 0x6400, 0x6400,
@@ -731,10 +737,14 @@ static u32 ms_mask_now(void)
     u32 m = 0, playing = 0;
     volatile u16 *f = CTL_FRAME;
     ms_gate = (ms_gate & ~(u32)f[FRAME_NOTE_OFF]) | f[FRAME_NOTE_ON];
+    ms_flex = 0;
     if (!KIT_POINTER)
         return 0;
     for (u32 t = 0; t < 16; t++) {
-        if (!rt_is_bounce(t) || !fx_valid(t) || !fx_get(t, FX_MUTE))
+        if (!rt_is_bounce(t))
+            continue;
+        ms_flex = 1;
+        if (!fx_valid(t) || !fx_get(t, FX_MUTE))
             continue;
         /* v0.55: no take in the track's buffer (its playing half), nothing to take over */
         if (!rt_buf_samp(rt_buf_of(t))) {
@@ -764,6 +774,16 @@ void ms_frame(void *dst, const void *src, u32 n)
     ms_frames++;
     u32 m = ms_mask_now();
     ms_mask = m;
+    if (!m && !ms_flex && ms_idle) {            /* v0.77: nothing to fade, no level to keep */
+        ms_skipped = 1;
+        return;
+    }
+    if (ms_skipped) {                           /* the voices' tracks as they are now: no fade over */
+        ms_skipped = 0;
+        for (u32 v = 0; v < 16; v++)
+            ms_track[v] = (u8)VOICE_TRACK[v];
+    }
+    u32 open = 1;
     for (u32 v = 0; v < 16; v++) {
         u32 t = VOICE_TRACK[v];
         u32 g = ms_gain[v];
@@ -780,11 +800,13 @@ void ms_frame(void *dst, const void *src, u32 n)
         ms_gain[v] = (u16)g;
         if (g >= 256u)
             continue;
+        open = 0;
         volatile u16 *f = CTL_FRAME;
         f[FRAME_LEVEL(v)] = (u16)((f[FRAME_LEVEL(v)] * g) >> 8);
         for (u32 s = 86; s <= 88; s++)
             f[FRAME_SLOT(v, s)] = (u16)((f[FRAME_SLOT(v, s)] * g) >> 8);
     }
+    ms_idle = (u8)open;
 }
 
 int rt_q_waiting(void)                          /* a QREC take not started yet */

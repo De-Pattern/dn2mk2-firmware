@@ -3302,11 +3302,13 @@ void smp_mod_apply(void *mirror)
     /* v0.49 FLEX: each FLEX voice hears its buffer (or OFF), with or without a pool directory.
      * v0.44..v0.48 did this after the return below, so with no pool image (a unit nothing was
      * sent to) a BOUNCE voice never got its buffer: SAMP 0, silence (emu_coupled_flex) */
+    u32 smpm = 0;                               /* v0.77: the sample machines' voices, for the pass below */
     for (u32 b = 0; b < 16; b++) {
         u8 *snd = VOICE_SOUND(b);
         if (!snd)
             continue;
         if (snd[SOUND_TYPE] >= 8 && snd[SOUND_TYPE] <= 13) {
+            smpm |= 1u << b;
             /* v0.55: a sample machine on a FLEX buffer (its SAMP the buffer's code, the sound's
              * or a lock's) hears the buffer's playing half, or OFF while it is empty */
             extern int rt_samp_buf(u32 samp);
@@ -3332,7 +3334,7 @@ void smp_mod_apply(void *mirror)
         if ((u32)(*cell >> 8) != want)
             *cell = (u16)(want << 8);
     }
-    if (!dir_ok)
+    if (!dir_ok || !smpm)                       /* v0.77: no sample machine playing: nothing below */
         return;
     /* v0.33: the loaded slots, listed once a frame and only if a voice needs them (this runs
      * in the audio interrupt, 1,500 times a second: v0.25..v0.32 walked the 128 slots twice
@@ -3341,6 +3343,8 @@ void smp_mod_apply(void *mirror)
     u8 loaded[POOL_SLOTS];
     int nl = -1, lbank = -1;
     for (u32 b = 0; b < 16; b++) {
+        if (!(smpm >> b & 1u))
+            continue;
         u8 *snd = VOICE_SOUND(b);
         if (!snd)
             continue;
