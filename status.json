@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 60,
+   "done": 61,
    "total": 0,
    "last": [
-    "PROJECT RAM banks B..D",
     "per-project pools (ColdFire)",
-    "ERASE MOD DATA (ColdFire)"
+    "ERASE MOD DATA (ColdFire)",
+    "engine + LOAD/SAVE"
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: boot_engine"
+   "status": "running: boot_check"
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "A test build, v0.76-t1, is in its gate: earlier ColdFire parts and the steps on both processors have passed, these finish the rest; then the SHARC parts and the full gate. What it holds is announced when it is released.",
- "updated": "2026-11-27T18:18:52+00:00"
+ "updated": "2026-11-27T18:27:55+00:00"
 }
