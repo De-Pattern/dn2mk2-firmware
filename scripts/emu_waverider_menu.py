@@ -558,13 +558,18 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         for k in range(len(img) // 512):
             disk[STORE_SECTOR + 1 + k] = bytes(img[512 * k:512 * k + 512])
         periods = 0
+        # (the scenarios run in turn on one machine: the one before leaves the loader done, state 4,
+        # with its own pool; this +Drive and this DSP are new, and the loader starts again once it
+        # sees them. Loaded is state 4 again after that restart, not the state left over)
+        restarted = long("smp_lstate") != 4
         while periods < 6000:
             period()
             call("smp_boot")
             periods += 1
-            if long("smp_lstate") == 4:
+            restarted = restarted or long("smp_lstate") != 4
+            if restarted and long("smp_lstate") == 4:
                 break
-        loaded = long("smp_lstate") == 4
+        loaded = restarted and long("smp_lstate") == 4
         frames_wrong, dir_wrong = 0, 0
         for slot in range(2):
             addr, fr, _r, fmt = struct.unpack_from("<IIfI", img, 8 + 16 * slot)
