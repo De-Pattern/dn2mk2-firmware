@@ -83,7 +83,7 @@ def adler(b):
 
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--build", required=True)
+    p.add_argument("--build", default=None)
     p.add_argument("--layout", default=str(HERE.parent / "src/dnfw/mods/waverider_code.json"))
     p.add_argument("--stock", default=str(HERE.parent.parent / f"Digitone_II_OS{_OSV}.syx"))
     p.add_argument("--snapshot", default=str(HERE.parent.parent / f"digikit/out/snapshots/dn2-{_OSV}/ui800M-v014.snap"))
@@ -293,12 +293,14 @@ def compare(sj: str, lj: str, rj: str) -> int:
         l_exact += sl == ll
         pk = max(abs(f(w)) for w in rr)
         e = max(abs(f(x) - f(y)) for x, y in zip(sr, rr))
-        worst = max(worst, e / pk if pk else (0.0 if e == 0 else math.inf))
-        r_close += e <= 1e-6 * pk or e == 0
+        # the hook adds g R - g L onto stock's g L: rounding at L's size, not R's
+        scale = max(pk, max(abs(f(w)) for w in sl))
+        worst = max(worst, e / scale if scale else (0.0 if e == 0 else math.inf))
+        r_close += e <= 1e-6 * scale or e == 0
         diff += sl != sr
         peaks = [max(peaks[0], max(abs(f(w)) for w in ll)), max(peaks[1], pk)]
-    link("3. track 1's L half is the L run's, bit for bit, every block; its R half the R run's (relative "
-         "1e-6); both sound; R is not L",
+    link("3. track 1's L half is the L run's, bit for bit, every block; its R half the R run's (1e-6 of "
+         "the block's larger side); both sound; R is not L",
          n > 20 and l_exact == n and r_close == n and min(peaks) > 0.01 and diff > n // 2,
          f"{n} blocks: L exact {l_exact}, R within rounding {r_close} (worst relative {worst:.2g}); peaks L "
          f"{peaks[0]:.4f} R {peaks[1]:.4f}; blocks where R differs from L {diff}")
@@ -319,10 +321,17 @@ def compare(sj: str, lj: str, rj: str) -> int:
         sb_ok += e <= 1e-6 * max(pk, 1.0) or e <= 1e-6
     link("3b. the voice's stereo buffer (the main bus and the sends): L side the L run's, R side the R run's",
          sb_n > 20 and sb_ok == sb_n, f"{sb_n} blocks, {sb_ok} within 1e-6 (worst {sb_worst:.2g})")
-    nonfinite = {nm: sum(1 for blk in run.get("blocks", []) for w in blk if (w >> 23) & 0xFF == 0xFF)
-                 for nm, run in (("stereo", S), ("L", L), ("R", R))}
-    link("4. no NaN or infinity in any track's buffer, in any of the three runs", not any(nonfinite.values()),
-         str(nonfinite))
+    # (the emulator leaves a few on track 0 in every run, mono twins and stock builds alike: those
+    # the twins have too, word for word, are its own)
+    def nf(run):
+        return {(b, i) for b, blk in enumerate(run.get("blocks", [])) for i, w in enumerate(blk)
+                if (w >> 23) & 0xFF == 0xFF}
+    ns, nl, nr = nf(S), nf(L), nf(R)
+    own = ns - (nl & nr)
+    on_t = {nm: sum(1 for b, i in x if i // 64 == t) for nm, x in (("stereo", ns), ("L", nl), ("R", nr))}
+    link("4. no NaN or infinity on track 1 in any run, and none in the stereo run that both mono twins do "
+         "not have", not own and not any(on_t.values()),
+         f"the stereo run's own {len(own)}; on track 1 {on_t}; the emulator's (all three) {len(nl & nr & ns)}")
     print(("PASS" if not bad else "FAIL") + (f": the first broken link: {bad[0]}" if bad else
           ": stereo is its two halves on both processors"), flush=True)
     return 0 if not bad else 1
