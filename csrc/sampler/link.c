@@ -3258,12 +3258,18 @@ static int mod_scale(int k, int n)              /* a stock offset (+-127) -> +-n
  * stock apply adds on top is the modulation alone. */
 #define SMOOTH_STATE(b, s) ((volatile u32 *)(0x8000DE60u + 4u * (101u * (u32)(b) + 17u + (u32)(s))))
 
-static void snap_slots(void)
+static u32 snap_slots(void)                     /* v0.77: returns the sample and FLEX voices */
 {
+    u32 vm = 0;
     for (u32 b = 0; b < 16; b++) {
         u8 *snd = VOICE_SOUND(b);
-        if (!snd || snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
+        if (!snd)
             continue;
+        if (snd[SOUND_TYPE] == BOUNCE_TYPE)
+            vm |= 1u << b;
+        if (snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
+            continue;
+        vm |= 1u << b;
         u16 s = *TARGET_CELL(b, SAMP_SLOT);
         *MIRROR_CELL(b, SAMP_SLOT) = s;
         *SMOOTH_STATE(b, SAMP_SLOT) = (u32)s << 16;
@@ -3273,6 +3279,7 @@ static void snap_slots(void)
             *SMOOTH_STATE(b, SLCE_SLOT) = (u32)c << 16;
         }
     }
+    return vm;
 }
 
 /* v0.65 (hooks.S smp_lfo_hook, after the LFOs): a sample voice's SAMP keeps its bank -- the LFOs
@@ -3293,7 +3300,7 @@ void smp_lfo_fix(void)
 
 void smp_mod_apply(void *mirror)
 {
-    snap_slots();
+    u32 vm = snap_slots();
     MOD_APPLY(mirror);
     extern void pf_apply(void);
     pf_apply();                                 /* v0.69: PERFORM's offsets on top (perf.c) */
@@ -3304,6 +3311,10 @@ void smp_mod_apply(void *mirror)
      * sent to) a BOUNCE voice never got its buffer: SAMP 0, silence (emu_coupled_flex) */
     u32 smpm = 0;                               /* v0.77: the sample machines' voices, for the pass below */
     for (u32 b = 0; b < 16; b++) {
+        if (!(vm >> b & 1u))                    /* v0.77: only the voices snap_slots found (one scan
+                                                 * a frame, not two; the modulation, PERFORM and
+                                                 * rt_frame between allocate no voice) */
+            continue;
         u8 *snd = VOICE_SOUND(b);
         if (!snd)
             continue;

@@ -740,8 +740,9 @@ static u32 ms_mask_now(void)
     ms_flex = 0;
     if (!KIT_POINTER)
         return 0;
-    for (u32 t = 0; t < 16; t++) {
-        if (!rt_is_bounce(t))
+    const u8 *ty = KIT_POINTER + SOUND_BASE + SOUND_TYPE;   /* v0.77: rt_is_bounce, the kit read once */
+    for (u32 t = 0; t < 16; t++, ty += SOUND_STRIDE) {
+        if (*ty != BOUNCE_TYPE)
             continue;
         ms_flex = 1;
         if (!fx_valid(t) || !fx_get(t, FX_MUTE))
