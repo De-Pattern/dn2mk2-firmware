@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 48,
+   "done": 50,
    "total": 0,
    "last": [
-    "KEYBOARD HOLD",
-    "the arp on MIDI tracks (ColdFire)",
-    "the arp's offsets and the track's transpose in key"
+    "the arp's offsets and the track's transpose in key",
+    "microtuning",
+    "microtuning"
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: tune"
+   "status": "running: perform"
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "A test build, v0.76-t1, is in its gate: earlier ColdFire parts and the steps on both processors have passed, these finish the rest; then the SHARC parts and the full gate. What it holds is announced when it is released.",
- "updated": "2026-11-27T17:39:33+00:00"
+ "updated": "2026-11-27T17:45:36+00:00"
 }
