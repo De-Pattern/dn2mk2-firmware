@@ -1,32 +1,15 @@
 {
  "gates": [
   {
-   "label": "v0.76 \u00b7 ColdFire steps, last part",
-   "done": 17,
+   "label": "v0.76 \u00b7 MUTE SRC on both processors",
+   "done": 0,
    "total": 0,
-   "last": [
-    "Overbridge's code untouched",
-    "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)",
-    "sample link, dead link (ColdFire)"
-   ],
-   "state": "ok",
-   "frac": 1,
-   "status": "finished (partial run: passes recorded)"
-  },
-  {
-   "label": "v0.76 \u00b7 FLEX timing on both processors",
-   "done": 16,
-   "total": 0,
-   "last": [
-    "ColdFire",
-    "Overbridge's code untouched",
-    "FLEX"
-   ],
-   "state": "ok",
-   "frac": 1,
-   "status": "finished (partial run: passes recorded)"
+   "last": [],
+   "state": "run",
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "v0.76: THRES, FLEX and FLEX playback passed on both processors; now the new FLEX timing check, beside the last ColdFire steps. Then MUTE SRC, the SHARC parts, the full gate and the release.",
- "updated": "2026-11-27T00:51:29+00:00"
+ "note": "v0.76: every ColdFire step and the new FLEX timing check passed; MUTE SRC on both processors now. Then the full gate and the release.",
+ "updated": "2026-11-27T00:52:11+00:00"
 }
