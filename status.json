@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 SHARC runner",
-   "done": 15,
+   "done": 18,
    "total": 0,
    "last": [
-    "ColdFire",
-    "ColdFire",
-    "Overbridge's code untouched"
+    "SHARC runner",
+    "SHARC runner",
+    "SHARC runner"
    ],
-   "state": "run",
-   "frac": 0.375,
-   "status": "running: sharc_waverider_m5"
+   "state": "bad",
+   "frac": 1,
+   "status": "stopped: SHARC runner failed (fixing, then a new run)"
   }
  ],
  "note": "A test build, v0.76-t1, is in its gate: every step on both processors has passed; the last ColdFire steps and the SHARC runner's parts run now, then the full gate. What it holds is announced when it is released.",
- "updated": "2026-11-27T18:36:48+00:00"
+ "updated": "2026-11-27T18:48:50+00:00"
 }
