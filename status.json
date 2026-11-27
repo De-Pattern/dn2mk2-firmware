@@ -2,14 +2,18 @@
  "gates": [
   {
    "label": "v0.76 \u00b7 MUTE SRC on both processors",
-   "done": 0,
+   "done": 15,
    "total": 0,
-   "last": [],
+   "last": [
+    "ColdFire",
+    "ColdFire",
+    "Overbridge's code untouched"
+   ],
    "state": "run",
-   "frac": 0.0,
-   "status": "running"
+   "frac": 0.375,
+   "status": "running: mute"
   }
  ],
  "note": "v0.76: every ColdFire step and the new FLEX timing check passed; MUTE SRC on both processors now. Then the full gate and the release.",
- "updated": "2026-11-27T00:52:11+00:00"
+ "updated": "2026-11-27T00:55:20+00:00"
 }
