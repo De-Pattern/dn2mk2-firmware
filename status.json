@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.76 \u00b7 FLEX timing on both processors",
-   "done": 15,
+   "done": 16,
    "total": 0,
    "last": [
     "ColdFire",
-    "ColdFire",
-    "Overbridge's code untouched"
+    "Overbridge's code untouched",
+    "FLEX"
    ],
-   "state": "run",
-   "frac": 0.375,
-   "status": "running: flexlag"
+   "state": "ok",
+   "frac": 1,
+   "status": "finished (partial run: passes recorded)"
   }
  ],
  "note": "v0.76: THRES, FLEX and FLEX playback passed on both processors; now the new FLEX timing check, beside the last ColdFire steps. Then MUTE SRC, the SHARC parts, the full gate and the release.",
- "updated": "2026-11-27T00:48:27+00:00"
+ "updated": "2026-11-27T00:51:29+00:00"
 }
