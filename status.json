@@ -1,19 +1,32 @@
 {
  "gates": [
   {
-   "label": "v0.76 FLOW \u00b7 full gate",
-   "done": 69,
-   "total": 69,
+   "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
+   "done": 48,
+   "total": 0,
    "last": [
-    "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)",
-    "sample link, dead link (ColdFire)",
-    "SHARC runner"
+    "KEYBOARD HOLD",
+    "the arp on MIDI tracks (ColdFire)",
+    "the arp's offsets and the track's transpose in key"
    ],
-   "state": "ok",
-   "frac": 1,
-   "status": "CLEARED TO FLASH"
+   "state": "run",
+   "frac": 0.99,
+   "status": "running: tune"
+  },
+  {
+   "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
+   "done": 15,
+   "total": 0,
+   "last": [
+    "ColdFire",
+    "ColdFire",
+    "Overbridge's code untouched"
+   ],
+   "state": "run",
+   "frac": 0.375,
+   "status": "running: mute"
   }
  ],
- "note": "v0.76 FLOW: every step passed on its own; the full gate now (it reuses each step's pass only where nothing it read has changed). Then the release.",
- "updated": "2026-11-27T01:56:12+00:00"
+ "note": "A test build, v0.76-t1, is in its gate: earlier ColdFire parts and the steps on both processors have passed, these finish the rest; then the SHARC parts and the full gate. What it holds is announced when it is released.",
+ "updated": "2026-11-27T17:39:33+00:00"
 }
