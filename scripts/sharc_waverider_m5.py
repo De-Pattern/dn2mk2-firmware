@@ -1985,8 +1985,9 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
             return f.to_bytes()
         return fb
 
-    def run(words, fmt, cf=0, trig=(1,)):
+    def run(words, fmt, cf=0, trig=(1,), frames=None):
         fb = fb_of(cf, trig)
+        nfr = len(kpcm) if frames is None else frames
         tb, mix = [], []
         done = []
 
@@ -1995,11 +1996,14 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
                 for k, w in enumerate(words):
                     m2.poke(r.state, at + 4 * k, w)
                 done.append(1)
-            for k, w in enumerate((at, len(kpcm), rate_w, fmt)):
+            for k, w in enumerate((at, nfr, rate_w, fmt)):
                 m2.poke(r.state, dsp.SMP_POOL_DDR + 8 + 4 * k, w)
         sbuf, ptrs = [], []
 
+        anys = []
+
         def after_sum(r):
+            anys.append((m2.word(r.state, ST.ANY) or 0, m2.word(r.state, ST.laddr(0, 0)) or 0))
             tb.append([m2.word(r.state, ST.TRACK_BUF + 4 * i) or 0 for i in range(16 * 64)])
             ptrs.append([m2.word(r.state, ST.STEREO_PTR + 4 * i) or 0 for i in range(32)])
         hooks = {dsp.PERC_SW: poke,
@@ -2009,7 +2013,7 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
                                                   for i in range(16 * 64)]),
                  ST.SUM_POST_SITE + 3: after_sum}
         r = run_blocks(init, fb, blocks, extra_hooks=hooks)
-        r["sbuf"], r["ptrs"] = sbuf, ptrs
+        r["sbuf"], r["ptrs"], r["anys"] = sbuf, ptrs, anys
         r["odd"] = (m2.word(r["state"].state, ST.ODD) or 0) if r.get("state") is not None else None
         r.pop("state", None)
         r["tb"] = tb
@@ -2026,7 +2030,10 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
             # while it sounds (a retrigger: the voice's second pass, the slot kept)
             "mono_rt": run(mono(kpcm), SM.FMT_I16, trig=(1, 4)),
             "same_rt": run(st(kpcm, kpcm), SM.FMT_I16S, trig=(1, 4)),
-            "half_rt": run(st(kpcm, rpcm), SM.FMT_I16S, trig=(1, 4))}
+            "half_rt": run(st(kpcm, rpcm), SM.FMT_I16S, trig=(1, 4)),
+            # v0.76-t2 (a tester on v0.76-t1: stereo at first, then mono): a stereo note that ends
+            # gives its slot back. KICK's first 64 frames as a stereo sample: it ends in a few blocks
+            "short": run(st(kpcm[:64], kpcm[:64]), SM.FMT_I16S, frames=64)}
     # every filter type (FR.FILTER_NAMES), R = L against mono: the stereo pass, or for the comb
     # filters (0xb81526, not wrapped) the fallback to mono, leaves every track buffer as mono's
     for cf in range(1, len(FR.FILTER_NAMES)):
@@ -2105,6 +2112,10 @@ def step_stereo(init, sound, machines, blocks: int = 8) -> dict:
             and all(not runs[b]["odd"] for a, b in pairs if "Comb" not in FR.FILTER_NAMES[int(b[-1]) if b[-1].isdigit() else 0]),
         "stereo: R silent leaves every track's L half the mono run's; track 0's R half differs (R's path is live)":
             ok and lh(lo["tb"]) == lh(m["tb"]) and n["lonly_r_half_words_differing"] > 0,
+        "stereo (v0.76-t2): a stereo note holds a slot while it plays and gives it back when its sample "
+        "ends (64 frames: in use, then free, the slot table cleared, before the run's last block)":
+            ok and any(a == 1 and l0 != 0 for a, l0 in runs["short"]["anys"])
+            and runs["short"]["anys"][-1] == (0, 0),
         "stereo: R = -L/2 renders R's slot block bit for bit the mono -L/2 sample (sounds, > 0.02)":
             ok and n["peak_r_half"] > 0.02 and smp_rseries(hf, 0) == smp_series(runs["mono_r"], 0)
             and smp_series(hf, 0) == smp_series(m, 0),

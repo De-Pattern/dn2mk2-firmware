@@ -3868,3 +3868,13 @@ def stereo_voice(p: Prog, L: Layout) -> None:
         p.e("COMP(R0, R12);")
         p.jump("NE", top)
     _weights(p, 0.0, 0.0)
+    # v0.76-t2 (a tester on v0.76-t1: stereo at first, then every sample mono): a slot was freed
+    # only when its voice changed to a mono sample or left the sample machines, so a stereo note
+    # that ended kept its slot, and with the voices rotating, four ended notes held all four
+    # slots. A voice whose sample stopped playing (its on word 0) frees its slot now
+    def ended():
+        state_i2()
+        v(p, 0, "on")
+        p.ifz(0, "EQ", lambda: _free(p))
+    p.ld(0, ST.STSL)
+    p.ifz(0, "GE", ended)
