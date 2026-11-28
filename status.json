@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 17,
+   "done": 19,
    "total": 0,
    "last": [
-    "Overbridge's code untouched",
-    "unit tests",
-    "DSP load meter (ColdFire)"
+    "DSP load meter (ColdFire)",
+    "SAMP kept across sample machines (ColdFire)",
+    "FUNC + turn (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.425,
-   "status": "running: keepsamp"
+   "frac": 0.475,
+   "status": "running: flexpool"
   }
  ],
  "note": "v0.76-t1 (TEST build): every ColdFire step and every SHARC runner part passed; the steps on both processors are running again. v0.77 LIGHTER (audio-frame cost 41,288 instructions against stock's 39,924, down from 41,732): its ColdFire steps started beside them.",
- "updated": "2026-11-28T09:48:57+00:00"
+ "updated": "2026-11-28T09:51:59+00:00"
 }
