@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 25,
+   "done": 26,
    "total": 0,
    "last": [
-    "recorder screen (ColdFire)",
     "Monomachine pages and detents (ColdFire)",
-    "PLAY two detents a choice (ColdFire)"
+    "PLAY two detents a choice (ColdFire)",
+    "stock questions and held keys (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.625,
-   "status": "running: question"
+   "frac": 0.65,
+   "status": "running: mnmdefaults"
   }
  ],
  "note": "v0.76-t1 (TEST build): every ColdFire step and every SHARC runner part passed; the steps on both processors are running again. v0.77 LIGHTER (audio-frame cost 41,288 instructions against stock's 39,924, down from 41,732): its ColdFire steps started beside them.",
- "updated": "2026-11-28T10:04:10+00:00"
+ "updated": "2026-11-28T10:07:12+00:00"
 }
