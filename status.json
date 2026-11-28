@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76-t2 TEST build \u00b7 ColdFire steps",
-   "done": 26,
+   "done": 28,
    "total": 0,
    "last": [
-    "Monomachine pages and detents (ColdFire)",
-    "PLAY two detents a choice (ColdFire)",
-    "stereo format 2 (ColdFire)"
+    "stereo format 2 (ColdFire)",
+    "stock questions and held keys (ColdFire)",
+    "Monomachine start values (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.65,
-   "status": "running: question"
+   "frac": 0.7,
+   "status": "running: alloc"
   }
  ],
  "note": "v0.76-t2 (TEST build): ColdFire steps now. v0.77 LIGHTER: held: one step on both processors (a FLEX take on PLAY's first step) did not pass; checking it against v0.76.",
- "updated": "2026-11-28T17:26:56+00:00"
+ "updated": "2026-11-28T17:29:58+00:00"
 }
