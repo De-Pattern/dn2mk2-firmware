@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.77 \u00b7 steps on both processors",
-   "done": 15,
+   "done": 16,
    "total": 0,
    "last": [
     "ColdFire",
-    "ColdFire",
-    "Overbridge's code untouched"
+    "Overbridge's code untouched",
+    "FLEX"
    ],
    "state": "run",
-   "frac": 0.375,
-   "status": "running: flexlag"
+   "frac": 0.4,
+   "status": "running: flexlag0"
   }
  ],
  "note": "v0.76-t1 STEREO (TEST build) published. v0.77 LIGHTER: ColdFire steps resumed after the two-hour job limit (62 passes kept; the UI fuzz and the dead link left); FLEX timing and MUTE SRC on both processors. Then the SHARC runner and the full gate.",
- "updated": "2026-11-28T16:14:25+00:00"
+ "updated": "2026-11-28T16:23:28+00:00"
 }
