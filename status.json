@@ -1,32 +1,19 @@
 {
  "gates": [
   {
-   "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 64,
+   "label": "v0.76-t2 TEST build \u00b7 ColdFire steps",
+   "done": 22,
    "total": 0,
    "last": [
-    "boot from reset, the mod's RAM full of garbage",
-    "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)",
-    "sample link, dead link (ColdFire)"
+    "FLEX buffers in every sample machine's SAMP (ColdFire)",
+    "start-up animation, every frame",
+    "the instrument's own depacker on every repacked section"
    ],
-   "state": "ok",
-   "frac": 1,
-   "status": "finished (partial run: passes recorded)"
-  },
-  {
-   "label": "v0.77 \u00b7 steps on both processors",
-   "done": 16,
-   "total": 0,
-   "last": [
-    "ColdFire",
-    "Overbridge's code untouched",
-    "FLEX"
-   ],
-   "state": "bad",
-   "frac": 1,
-   "status": "stopped: FLEX failed (fixing, then a new run)"
+   "state": "run",
+   "frac": 0.55,
+   "status": "running: recorder"
   }
  ],
- "note": "v0.76-t1 STEREO (TEST build) published. v0.77 LIGHTER: ColdFire steps resumed after the two-hour job limit (62 passes kept; the UI fuzz and the dead link left); FLEX timing and MUTE SRC on both processors. Then the SHARC runner and the full gate.",
- "updated": "2026-11-28T17:20:41+00:00"
+ "note": "v0.76-t2 (TEST build): ColdFire steps now. v0.77 LIGHTER: held: one step on both processors (a FLEX take on PLAY's first step) did not pass; checking it against v0.76.",
+ "updated": "2026-11-28T17:20:51+00:00"
 }
