@@ -2,27 +2,31 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
-   "done": 0,
+   "done": 15,
    "total": 0,
-   "last": [],
+   "last": [
+    "ColdFire",
+    "ColdFire",
+    "Overbridge's code untouched"
+   ],
    "state": "run",
-   "frac": 0.0,
-   "status": "running"
+   "frac": 0.375,
+   "status": "running: stroute_stereo"
   },
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 30,
+   "done": 31,
    "total": 0,
    "last": [
-    "GRID allocate slice locks (ColdFire)",
     "multi-select delete (ColdFire)",
-    "SELECT UNUSED (ColdFire)"
+    "SELECT UNUSED (ColdFire)",
+    "overlays let go (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.75,
-   "status": "running: hooks"
+   "frac": 0.775,
+   "status": "running: recflow"
   }
  ],
  "note": "v0.76-t1 (TEST build): THRES, FLEX and FLEX playback passed again on both processors; the last of them resumed after the two-hour job limit. Then FLEX timing, MUTE SRC and the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
- "updated": "2026-11-28T10:18:20+00:00"
+ "updated": "2026-11-28T10:21:22+00:00"
 }
