@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.77 \u00b7 steps on both processors",
-   "done": 16,
+   "done": 17,
    "total": 0,
    "last": [
-    "ColdFire",
     "Overbridge's code untouched",
-    "THRES on both processors (coupled)"
+    "THRES on both processors (coupled)",
+    "FLEX"
    ],
    "state": "run",
-   "frac": 0.4,
-   "status": "running: flex"
+   "frac": 0.425,
+   "status": "running: flexplay"
   }
  ],
  "note": "v0.76-t1 STEREO (TEST build): CLEARED TO FLASH and published (patcher, under TEST). v0.77 LIGHTER: ColdFire steps resumed after the two-hour job limit (54 passes kept), its steps on both processors beside them; then the SHARC runner and the full gate.",
- "updated": "2026-11-28T13:54:56+00:00"
+ "updated": "2026-11-28T14:06:59+00:00"
 }
