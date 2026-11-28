@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build): every SHARC runner part passed (13 of 13). Now the steps on both processors again (they use the same runner), beside the ColdFire steps. Then the full gate.",
- "updated": "2026-11-28T08:25:58+00:00"
+ "updated": "2026-11-28T08:38:00+00:00"
 }
