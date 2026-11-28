@@ -11,9 +11,9 @@
    ],
    "state": "run",
    "frac": 0.95,
-   "status": "running: drive"
+   "status": "running: drive_nest"
   }
  ],
  "note": "v0.76-t2 (TEST build): ColdFire steps resumed after the two-hour job limit (38 passes kept). v0.77 LIGHTER: held: one step on both processors (a FLEX take on PLAY's first step) did not pass; checking it against v0.76.",
- "updated": "2026-11-28T18:52:25+00:00"
+ "updated": "2026-11-28T18:58:28+00:00"
 }
