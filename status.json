@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 45,
+   "done": 46,
    "total": 0,
    "last": [
-    "RECORDER text inside its places, every state and R.LEN value (ColdFire)",
     "KEYBOARD kept through grid recording (ColdFire)",
-    "KEYBOARD HOLD"
+    "KEYBOARD HOLD",
+    "the arp on MIDI tracks (ColdFire)"
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: midiarp_midi_arp"
+   "status": "running: inkey_arp_on"
   }
  ],
  "note": "v0.76-t1 (TEST build): the stereo route check passed again (L exact 50/50 blocks, R within rounding). FLEX timing and MUTE SRC now, the last before the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
- "updated": "2026-11-28T12:48:43+00:00"
+ "updated": "2026-11-28T12:51:45+00:00"
 }
