@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 36,
+   "done": 37,
    "total": 0,
    "last": [
-    "SLICE menus and SLICES keys (ColdFire)",
     "sample list, browser, playhead (ColdFire)",
-    "MACHINE SEL columns, SYN held (ColdFire)"
+    "MACHINE SEL columns, SYN held (ColdFire)",
+    "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.9,
-   "status": "running: machines"
+   "frac": 0.925,
+   "status": "running: drive"
   }
  ],
  "note": "v0.76-t1 (TEST build): THRES, FLEX and FLEX playback passed again on both processors; the last of them resumed after the two-hour job limit. Then FLEX timing, MUTE SRC and the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
- "updated": "2026-11-28T11:09:43+00:00"
+ "updated": "2026-11-28T11:15:46+00:00"
 }
