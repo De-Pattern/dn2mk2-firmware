@@ -24,9 +24,9 @@
    ],
    "state": "run",
    "frac": 0.975,
-   "status": "running: on_odd_build"
+   "status": "running: rapid_pp_build"
   }
  ],
  "note": "v0.76-t1 (TEST build): the stereo route check passed again (L exact 50/50 blocks, R within rounding). FLEX timing and MUTE SRC now, the last before the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
- "updated": "2026-11-28T12:00:22+00:00"
+ "updated": "2026-11-28T12:03:25+00:00"
 }
