@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 44,
+   "done": 45,
    "total": 0,
    "last": [
-    "parameter slides (ColdFire)",
     "FLEX on the ColdFire",
-    "RECORDER text inside its places, every state and R.LEN value (ColdFire)"
+    "RECORDER text inside its places, every state and R.LEN value (ColdFire)",
+    "KEYBOARD kept through grid recording (ColdFire)"
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: kbrec"
+   "status": "running: kbhold"
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 SHARC runner",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build): every step on both processors passed (THRES, FLEX, FLEX playback, FLEX timing, MUTE SRC, the stereo route). The SHARC runner now, beside the ColdFire steps. Then the full gate.",
- "updated": "2026-11-28T06:45:18+00:00"
+ "updated": "2026-11-28T06:48:21+00:00"
 }
