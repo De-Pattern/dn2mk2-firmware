@@ -2,18 +2,27 @@
  "gates": [
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 54,
+   "done": 0,
+   "total": 0,
+   "last": [],
+   "state": "run",
+   "frac": 0.0,
+   "status": "running"
+  },
+  {
+   "label": "v0.77 \u00b7 steps on both processors",
+   "done": 15,
    "total": 0,
    "last": [
-    "the voice/load guardrail",
-    "SLICE editor",
-    "STRT/LEN/LOOP fine records swapped in and out (ColdFire)"
+    "ColdFire",
+    "ColdFire",
+    "Overbridge's code untouched"
    ],
    "state": "run",
-   "frac": 0.99,
-   "status": "running: fineknob"
+   "frac": 0.375,
+   "status": "running: thres"
   }
  ],
- "note": "v0.76-t1 STEREO (TEST build): CLEARED TO FLASH and published (patcher, under TEST). v0.77 LIGHTER: ColdFire steps now; then its steps on both processors, the SHARC runner and the full gate.",
- "updated": "2026-11-28T13:25:10+00:00"
+ "note": "v0.76-t1 STEREO (TEST build): CLEARED TO FLASH and published (patcher, under TEST). v0.77 LIGHTER: ColdFire steps resumed after the two-hour job limit (54 passes kept), its steps on both processors beside them; then the SHARC runner and the full gate.",
+ "updated": "2026-11-28T13:27:43+00:00"
 }
