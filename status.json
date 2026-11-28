@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 37,
+   "done": 38,
    "total": 0,
    "last": [
-    "sample list, browser, playhead (ColdFire)",
     "MACHINE SEL columns, SYN held (ColdFire)",
-    "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)"
+    "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)",
+    "+DRIVE browser (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.925,
-   "status": "running: drive_nest"
+   "frac": 0.95,
+   "status": "running: drivenav"
   }
  ],
  "note": "v0.76-t1 (TEST build): the stereo route check passed again (L exact 50/50 blocks, R within rounding). FLEX timing and MUTE SRC now, the last before the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
- "updated": "2026-11-28T11:51:14+00:00"
+ "updated": "2026-11-28T11:54:17+00:00"
 }
