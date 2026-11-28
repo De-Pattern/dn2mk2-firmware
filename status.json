@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build): THRES, FLEX and FLEX playback passed again on both processors; the last of them resumed after the two-hour job limit. Then FLEX timing, MUTE SRC and the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
- "updated": "2026-11-28T10:48:38+00:00"
+ "updated": "2026-11-28T11:00:41+00:00"
 }
