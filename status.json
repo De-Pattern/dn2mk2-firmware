@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 40,
+   "done": 41,
    "total": 0,
    "last": [
-    "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)",
     "+DRIVE browser (ColdFire)",
-    "+DRIVE keys and long names (ColdFire)"
+    "+DRIVE keys and long names (ColdFire)",
+    "DIRECT JUMP (ColdFire)"
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: rapid_pp_build"
+   "status": "running: slides-build"
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 SHARC runner",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build): every step on both processors passed (THRES, FLEX, FLEX playback, FLEX timing, MUTE SRC, the stereo route). The SHARC runner now, beside the ColdFire steps. Then the full gate.",
- "updated": "2026-11-28T06:06:06+00:00"
+ "updated": "2026-11-28T06:18:08+00:00"
 }
