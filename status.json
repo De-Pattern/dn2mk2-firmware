@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76-t2 TEST build \u00b7 ColdFire steps",
-   "done": 36,
+   "done": 37,
    "total": 0,
    "last": [
-    "stock NAME screen",
     "SLICE menus and SLICES keys (ColdFire)",
-    "sample list, browser, playhead (ColdFire)"
+    "sample list, browser, playhead (ColdFire)",
+    "MACHINE SEL columns, SYN held (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.9,
-   "status": "running: colsw"
+   "frac": 0.925,
+   "status": "running: machines-boot"
   }
  ],
  "note": "v0.76-t2 (TEST build): ColdFire steps now. v0.77 LIGHTER: held: one step on both processors (a FLEX take on PLAY's first step) did not pass; checking it against v0.76.",
- "updated": "2026-11-28T17:57:13+00:00"
+ "updated": "2026-11-28T18:00:16+00:00"
 }
