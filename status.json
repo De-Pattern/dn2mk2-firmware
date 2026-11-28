@@ -11,9 +11,9 @@
    ],
    "state": "run",
    "frac": 0.95,
-   "status": "running: drive"
+   "status": "running: drive_nest"
   }
  ],
  "note": "v0.76-t2 (TEST build): ColdFire steps now. v0.77 LIGHTER: held: one step on both processors (a FLEX take on PLAY's first step) did not pass; checking it against v0.76.",
- "updated": "2026-11-28T18:33:23+00:00"
+ "updated": "2026-11-28T18:39:26+00:00"
 }
