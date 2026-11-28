@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 38,
+   "done": 39,
    "total": 0,
    "last": [
-    "sample list, browser, playhead (ColdFire)",
     "MACHINE SEL columns, SYN held (ColdFire)",
-    "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)"
+    "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)",
+    "+DRIVE browser (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.95,
-   "status": "running: drive_nest"
+   "frac": 0.975,
+   "status": "running: drivenav"
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 SHARC runner",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build): every step on both processors passed (THRES, FLEX, FLEX playback, FLEX timing, MUTE SRC, the stereo route). The SHARC runner now, beside the ColdFire steps. Then the full gate.",
- "updated": "2026-11-28T05:41:55+00:00"
+ "updated": "2026-11-28T05:53:58+00:00"
 }
