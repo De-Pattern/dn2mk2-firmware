@@ -29,6 +29,13 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 #include "banks.h"                              /* v0.65: global slots, the banks */
+/* v0.78: the VOICE SETUP page's own calls (VoiceMenuView 0x400282c6): the pattern's VoiceConfig,
+ * a track's VOICES (0 DYN, n locked) and its setter (clamped to the free voices, then notified) */
+#define VC_UI ((u32 (*)(void))0x4018A97Au)
+#define VC_PATTERN ((u32 (*)(u32))0x4003E41Au)
+#define VC_OF ((u32 (*)(u32))0x40030AF8u)
+#define VC_VOICES ((int (*)(u32, u32))0x40029054u)
+#define VC_SET_VOICES ((void (*)(u32, u32, int))0x40029094u)
 
 #define FRAMES (*(volatile u32 *)0x4058E8D4u)                         /* frames since boot, 1,500 a second */
 #define REC_THR_FLOOR 33u                       /* v0.30: THRES 0's level, -60 dB, under any real input */
@@ -994,6 +1001,16 @@ int smp_set_samp(int track, int value)
     return 0;
 }
 
+/* v0.78: a track's VOICES as the VOICE SETUP page reads it (-1 without a pattern); the
+ * VoiceConfig it read kept in vc_cfg_seen (the gate's step "voices1" calls both) */
+u32 vc_cfg_seen __attribute__((section(".data"))) = 0;
+int vc_track_voices(u32 t)
+{
+    u32 c = VC_OF(VC_PATTERN(VC_UI()));
+    vc_cfg_seen = c;
+    return c && t < 16 ? VC_VOICES(c, t) : -1;
+}
+
 /* v0.30: MACHINE SEL's commit (its call at 0x4005bba0): from one sample machine to another
  * the sample stays (the owner: switching between DT2 machines lost it; the commit resets the
  * sound to the new machine's defaults, SAMP to OFF). Anything else is stock's. */
@@ -1055,6 +1072,18 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
             if (ps)
                 SET_VALUE(ps, mnm_rid[j], (u32)mnm_default[mi][j], track, 0, 0, 1);
         }
+    }
+    /* v0.78 (owner, 2026-11-28: "default all monomachine and PERC tracks to one voice, then allow
+     * the user to increase manually"): a track switched to PERC or a Monomachine machine from any
+     * other kind gets VOICES 1 on the VOICE SETUP page, through the page's own setter (it clamps
+     * to the voices still free, keeps the pattern's voice setup and its change notice). From one
+     * of these to another, and on a pattern load, the track's VOICES stay as they are */
+    int heavy = (int)type == 5 || mnm_index((int)type - 4) >= 0;
+    int was_heavy = was == 5 || (was >= 4 && mnm_index(was - 4) >= 0);
+    if (track < 16 && KIT && SOUND_TYPE(track) == (int)type && heavy && !was_heavy) {
+        u32 cfg = VC_OF(VC_PATTERN(VC_UI()));
+        if (cfg && VC_VOICES(cfg, track) != 1)
+            VC_SET_VOICES(cfg, track, 1);
     }
     return r;
 }

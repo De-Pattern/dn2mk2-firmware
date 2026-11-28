@@ -200,6 +200,7 @@ FIRST = (("preflight", "preflight (never reused)"),
 # hour-long dead link last
 EMU = (("meter", "DSP load meter (ColdFire)"),
        ("keepsamp", "SAMP kept across sample machines (ColdFire)"),
+       ("voices1", "PERC and Monomachine tracks start on one voice (ColdFire)"),
        ("functurn", "FUNC + turn (ColdFire)"),
        ("flexpool", "FLEX buffers in every sample machine's SAMP (ColdFire)"),
        ("aniz", "start-up animation, every frame"),
@@ -1925,6 +1926,45 @@ def main() -> int:
                     why = f"{facts} types={types} mem={m}"
                 return good, ("MACHINE SEL from ONESHOT to the next sample machine keeps SAMP" if good else why)
             later("keepsamp", "SAMP kept across sample machines (ColdFire)", "SAMP kept across sample machines (ColdFire)", [k_cmd, sorted(EMU_ENV.items())], k_body)
+
+        # 6k2. v0.78 (owner): a track switched to PERC or a Monomachine machine starts on VOICES 1
+        # (the VOICE SETUP page's own setter); one already there keeps what the user set. Track 1
+        # from a stock machine (type 3) to PERC (5) by MACHINE SEL: DYN (0) before, 1 after, track 2
+        # untouched; then VOICES set to 3 by the page's setter, and MACHINE SEL on to the next
+        # machine (6, a Monomachine one): still 3
+        if "vc_track_voices" in lay:
+            kit = 0x4210C08C
+            ty = kit + 52 + 0xDE
+            rv, cs, sv = lay["vc_track_voices"], lay["vc_cfg_seen"], 0x40029094
+            vs = (f"wait:3,poke:{ty:#x}:03,wait:4,tap:2,wait:6,call:{rv:#x}:0,call:{rv:#x}:1,"
+                  f"func-src,wait:20,down,wait:4,yes,wait:20,types,call:{rv:#x}:0,call:{rv:#x}:1,"
+                  f"call:{sv:#x}:long@{cs:#x}:0:3,call:{rv:#x}:0,"
+                  f"func-src,wait:20,down,wait:4,yes,wait:20,types,call:{rv:#x}:0")
+            vjs = work / "voices1.json"
+            v_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                     "--snapshot", snap, "--steps", vs, "--png-dir", work / "voices1", "--json", vjs]
+
+            def v_body(tdir):
+                rc, out = run("one voice", v_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and vjs.exists():
+                    r = json.loads(vjs.read_text())
+                    m = r["memory"]
+                    c = [x["d0"] for x in r.get("direct_calls", []) if x["fn"] == f"{rv:#x}"]
+                    t1 = (m.get("types@0") or [None])[0]
+                    t2 = (m.get("types@1") or [None])[0]
+                    c = c + [None] * (6 - len(c))
+                    facts = {"before: track 1 and 2 on DYN": c[0] == 0 and c[1] == 0,
+                             "MACHINE SEL to PERC": t1 == 5,
+                             "then track 1 on VOICES 1, track 2 still DYN": c[2] == 1 and c[3] == 0,
+                             "the page's setter: VOICES 3": c[4] == 3,
+                             "on to a Monomachine machine: VOICES 3 kept": t2 == 6 and c[5] == 3}
+                    good = all(facts.values())
+                    why = f"{facts} calls={c} t={t1},{t2}"
+                return good, ("a track switched to PERC starts on VOICES 1 (track 2 untouched); set to 3, "
+                              "it keeps 3 when switched on to a Monomachine machine" if good else why)
+            later("voices1", "PERC and Monomachine tracks start on one voice (ColdFire)",
+                  "PERC and Monomachine tracks start on one voice (ColdFire)", [v_cmd, sorted(EMU_ENV.items())], v_body)
 
         # 6m. v0.32: FUNC + turn on our machines' controls (a tester's list; the owner: a control
         # that jumps with FUNC goes on jumping to its next value, one that does not stays put).
