@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 60,
+   "done": 61,
    "total": 0,
    "last": [
-    "PROJECT RAM banks B..D",
     "per-project pools (ColdFire)",
-    "ERASE MOD DATA (ColdFire)"
+    "ERASE MOD DATA (ColdFire)",
+    "engine + LOAD/SAVE"
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: boot_engine"
+   "status": "running: boot_check"
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 SHARC runner",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build): the SHARC runner's link and MAIN recorder parts failed on a change to the runner's own model (they fail the same way on the released v0.76); the model is narrowed back to where it was measured and the SHARC runner runs again. The steps on both processors run again after it. ColdFire steps resumed.",
- "updated": "2026-11-28T07:58:08+00:00"
+ "updated": "2026-11-28T08:04:11+00:00"
 }
