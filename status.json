@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76-t2 TEST build \u00b7 ColdFire steps",
-   "done": 39,
+   "done": 40,
    "total": 0,
    "last": [
-    "MACHINE SEL columns, SYN held (ColdFire)",
     "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)",
-    "+DRIVE browser (ColdFire)"
+    "+DRIVE browser (ColdFire)",
+    "+DRIVE keys and long names (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.975,
-   "status": "running: drivenav"
+   "frac": 0.99,
+   "status": "running: off_pp_build"
   }
  ],
  "note": "v0.76-t2 (TEST build): ColdFire steps resumed after the two-hour job limit (38 passes kept). v0.77 LIGHTER: held: one step on both processors (a FLEX take on PLAY's first step) did not pass; checking it against v0.76.",
- "updated": "2026-11-28T19:13:33+00:00"
+ "updated": "2026-11-28T19:16:36+00:00"
 }
