@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76-t2 TEST build \u00b7 ColdFire steps",
-   "done": 22,
+   "done": 25,
    "total": 0,
    "last": [
-    "FLEX buffers in every sample machine's SAMP (ColdFire)",
-    "start-up animation, every frame",
-    "the instrument's own depacker on every repacked section"
+    "recorder screen (ColdFire)",
+    "Monomachine pages and detents (ColdFire)",
+    "PLAY two detents a choice (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.55,
-   "status": "running: recorder"
+   "frac": 0.625,
+   "status": "running: stfmt"
   }
  ],
  "note": "v0.76-t2 (TEST build): ColdFire steps now. v0.77 LIGHTER: held: one step on both processors (a FLEX take on PLAY's first step) did not pass; checking it against v0.76.",
- "updated": "2026-11-28T17:20:51+00:00"
+ "updated": "2026-11-28T17:23:53+00:00"
 }
