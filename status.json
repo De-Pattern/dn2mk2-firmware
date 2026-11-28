@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 62,
+   "done": 63,
    "total": 0,
    "last": [
-    "engine + LOAD/SAVE",
     "boot from reset",
-    "boot from reset, the mod's RAM full of garbage"
+    "boot from reset, the mod's RAM full of garbage",
+    "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)"
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: fuzz"
+   "status": "running: waverider_menu"
   },
   {
    "label": "v0.77 \u00b7 steps on both processors",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 STEREO (TEST build) published. v0.77 LIGHTER: ColdFire steps resumed after the two-hour job limit (62 passes kept; the UI fuzz and the dead link left); FLEX timing and MUTE SRC on both processors. Then the SHARC runner and the full gate.",
- "updated": "2026-11-28T15:53:18+00:00"
+ "updated": "2026-11-28T15:59:20+00:00"
 }
