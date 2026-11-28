@@ -2,12 +2,16 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 0,
+   "done": 37,
    "total": 0,
-   "last": [],
+   "last": [
+    "SLICE menus and SLICES keys (ColdFire)",
+    "sample list, browser, playhead (ColdFire)",
+    "MACHINE SEL columns, SYN held (ColdFire)"
+   ],
    "state": "run",
-   "frac": 0.0,
-   "status": "running"
+   "frac": 0.925,
+   "status": "running: machines-boot"
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
@@ -24,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build): FLEX, FLEX playback and FLEX timing passed on both processors; MUTE SRC now. The ColdFire steps resumed after the two-hour job limit (passes kept). Then the SHARC parts and the full gate.",
- "updated": "2026-11-28T04:54:08+00:00"
+ "updated": "2026-11-28T04:57:11+00:00"
 }
