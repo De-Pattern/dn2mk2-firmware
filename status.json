@@ -2,27 +2,26 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
-   "done": 15,
-   "total": 0,
-   "last": [
-    "ColdFire",
-    "ColdFire",
-    "Overbridge's code untouched"
-   ],
-   "state": "run",
-   "frac": 0.375,
-   "status": "running: stroute_R"
-  },
-  {
-   "label": "v0.77 \u00b7 ColdFire steps",
    "done": 0,
    "total": 0,
    "last": [],
    "state": "run",
    "frac": 0.0,
    "status": "running"
+  },
+  {
+   "label": "v0.77 \u00b7 ColdFire steps",
+   "done": 2,
+   "total": 0,
+   "last": [
+    "preflight",
+    "ColdFire code current"
+   ],
+   "state": "run",
+   "frac": 0.05,
+   "status": "running: a step"
   }
  ],
- "note": "v0.76-t1 (TEST build): the stereo route check on both processors now; then FLEX timing, MUTE SRC and the full gate. v0.77 LIGHTER: ColdFire steps resumed after the two-hour job limit (37 passes kept).",
- "updated": "2026-11-28T11:29:16+00:00"
+ "note": "v0.76-t1 (TEST build): the stereo route check passed again (L exact 50/50 blocks, R within rounding). FLEX timing and MUTE SRC now, the last before the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
+ "updated": "2026-11-28T11:30:06+00:00"
 }
