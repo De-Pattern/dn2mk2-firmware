@@ -14,19 +14,15 @@
    "status": "running: boot_check"
   },
   {
-   "label": "v0.76-t1 TEST build \u00b7 SHARC runner",
-   "done": 15,
+   "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
+   "done": 0,
    "total": 0,
-   "last": [
-    "ColdFire",
-    "ColdFire",
-    "Overbridge's code untouched"
-   ],
+   "last": [],
    "state": "run",
-   "frac": 0.375,
-   "status": "running: sharc_waverider_m5"
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "v0.76-t1 (TEST build): the SHARC runner's link and MAIN recorder parts failed on a change to the runner's own model (they fail the same way on the released v0.76); the model is narrowed back to where it was measured and the SHARC runner runs again. The steps on both processors run again after it. ColdFire steps resumed.",
- "updated": "2026-11-28T08:16:13+00:00"
+ "note": "v0.76-t1 (TEST build): every SHARC runner part passed (13 of 13). Now the steps on both processors again (they use the same runner), beside the ColdFire steps. Then the full gate.",
+ "updated": "2026-11-28T08:19:53+00:00"
 }
