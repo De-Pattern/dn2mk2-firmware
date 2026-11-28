@@ -15,18 +15,14 @@
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
-   "done": 17,
+   "done": 0,
    "total": 0,
-   "last": [
-    "Overbridge's code untouched",
-    "FLEX",
-    "FLEX buffers played by a ONESHOT track, on both processors (coupled)"
-   ],
-   "state": "ok",
-   "frac": 1,
-   "status": "finished (partial run: passes recorded)"
+   "last": [],
+   "state": "run",
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "v0.76-t1 (TEST build), rebuilt after the SHARC runner's stress part: its new check on both processors and THRES passed again; FLEX next, beside the ColdFire steps. Then MUTE SRC, the FLEX timing, the SHARC parts and the full gate. What it holds is announced when it is released.",
- "updated": "2026-11-27T22:34:41+00:00"
+ "note": "v0.76-t1 (TEST build): FLEX and FLEX playback passed on both processors; MUTE SRC and FLEX timing now, beside the ColdFire steps. Then the SHARC parts and the full gate.",
+ "updated": "2026-11-28T03:53:31+00:00"
 }
