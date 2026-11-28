@@ -11,22 +11,18 @@
    ],
    "state": "run",
    "frac": 0.95,
-   "status": "running: drive"
+   "status": "running: drive_nest"
   },
   {
-   "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
-   "done": 16,
+   "label": "v0.76-t1 TEST build \u00b7 SHARC runner",
+   "done": 0,
    "total": 0,
-   "last": [
-    "ColdFire",
-    "Overbridge's code untouched",
-    "FLEX"
-   ],
+   "last": [],
    "state": "run",
-   "frac": 0.4,
-   "status": "running: mute"
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "v0.76-t1 (TEST build): FLEX, FLEX playback and FLEX timing passed on both processors; MUTE SRC now. The ColdFire steps resumed after the two-hour job limit (passes kept). Then the SHARC parts and the full gate.",
- "updated": "2026-11-28T05:33:21+00:00"
+ "note": "v0.76-t1 (TEST build): every step on both processors passed (THRES, FLEX, FLEX playback, FLEX timing, MUTE SRC, the stereo route). The SHARC runner now, beside the ColdFire steps. Then the full gate.",
+ "updated": "2026-11-28T05:38:48+00:00"
 }
