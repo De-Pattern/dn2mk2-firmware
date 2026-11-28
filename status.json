@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build): FLEX, FLEX playback and FLEX timing passed on both processors; MUTE SRC now. The ColdFire steps resumed after the two-hour job limit (passes kept). Then the SHARC parts and the full gate.",
- "updated": "2026-11-28T05:03:13+00:00"
+ "updated": "2026-11-28T05:15:16+00:00"
 }
