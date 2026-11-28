@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 40,
+   "done": 41,
    "total": 0,
    "last": [
-    "+DRIVE browser (ColdFire)",
     "+DRIVE keys and long names (ColdFire)",
-    "DIRECT JUMP (ColdFire)"
+    "DIRECT JUMP (ColdFire)",
+    "parameter slides (ColdFire)"
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: slides-build"
+   "status": "running: flexcore"
   }
  ],
  "note": "v0.76-t1 (TEST build): the stereo route check passed again (L exact 50/50 blocks, R within rounding). FLEX timing and MUTE SRC now, the last before the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
- "updated": "2026-11-28T12:27:30+00:00"
+ "updated": "2026-11-28T12:33:32+00:00"
 }
