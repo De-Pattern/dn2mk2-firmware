@@ -2,27 +2,27 @@
  "gates": [
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 62,
-   "total": 0,
-   "last": [
-    "engine + LOAD/SAVE",
-    "boot from reset",
-    "boot from reset, the mod's RAM full of garbage"
-   ],
-   "state": "run",
-   "frac": 0.99,
-   "status": "running: fuzz"
-  },
-  {
-   "label": "v0.77 \u00b7 steps on both processors",
    "done": 0,
    "total": 0,
    "last": [],
    "state": "run",
    "frac": 0.0,
    "status": "running"
+  },
+  {
+   "label": "v0.77 \u00b7 steps on both processors",
+   "done": 15,
+   "total": 0,
+   "last": [
+    "ColdFire",
+    "ColdFire",
+    "Overbridge's code untouched"
+   ],
+   "state": "run",
+   "frac": 0.375,
+   "status": "running: flexlag"
   }
  ],
- "note": "v0.76-t1 STEREO (TEST build) published. v0.77 LIGHTER: THRES, FLEX and FLEX playback passed on both processors; FLEX timing and MUTE SRC resumed after the two-hour job limit; the ColdFire steps on their last (the UI fuzz, the dead link). Then the SHARC runner and the full gate.",
- "updated": "2026-11-28T15:23:50+00:00"
+ "note": "v0.76-t1 STEREO (TEST build) published. v0.77 LIGHTER: ColdFire steps resumed after the two-hour job limit (62 passes kept; the UI fuzz and the dead link left); FLEX timing and MUTE SRC on both processors. Then the SHARC runner and the full gate.",
+ "updated": "2026-11-28T15:26:10+00:00"
 }
