@@ -2,16 +2,16 @@
  "gates": [
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 61,
+   "done": 62,
    "total": 0,
    "last": [
-    "ERASE MOD DATA (ColdFire)",
     "engine + LOAD/SAVE",
-    "boot from reset"
+    "boot from reset",
+    "boot from reset, the mod's RAM full of garbage"
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: boot_check"
+   "status": "running: fuzz"
   },
   {
    "label": "v0.77 \u00b7 steps on both processors",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 STEREO (TEST build): CLEARED TO FLASH and published (patcher, under TEST). v0.77 LIGHTER: ColdFire steps resumed after the two-hour job limit (54 passes kept), its steps on both processors beside them; then the SHARC runner and the full gate.",
- "updated": "2026-11-28T15:01:14+00:00"
+ "updated": "2026-11-28T15:04:17+00:00"
 }
