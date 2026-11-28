@@ -24,9 +24,9 @@
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: inkey_arp_on"
+   "status": "running: inkey_arp_off"
   }
  ],
  "note": "v0.76-t1 (TEST build): the stereo route check passed again (L exact 50/50 blocks, R within rounding). FLEX timing and MUTE SRC now, the last before the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
- "updated": "2026-11-28T12:51:45+00:00"
+ "updated": "2026-11-28T12:57:48+00:00"
 }
