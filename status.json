@@ -1,19 +1,6 @@
 {
  "gates": [
   {
-   "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 64,
-   "total": 0,
-   "last": [
-    "boot from reset",
-    "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)",
-    "sample link, dead link (ColdFire)"
-   ],
-   "state": "ok",
-   "frac": 1,
-   "status": "finished (partial run: passes recorded)"
-  },
-  {
    "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
    "done": 17,
    "total": 0,
@@ -25,8 +12,17 @@
    "state": "run",
    "frac": 0.425,
    "status": "running: flexplay"
+  },
+  {
+   "label": "v0.77 \u00b7 ColdFire steps",
+   "done": 0,
+   "total": 0,
+   "last": [],
+   "state": "run",
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "v0.76-t1 (TEST build): every SHARC runner part passed; THRES passed again on both processors, FLEX now. The ColdFire steps resumed after the two-hour job limit (62 passes kept). Then FLEX timing, MUTE SRC and the full gate.",
- "updated": "2026-11-28T09:29:17+00:00"
+ "note": "v0.76-t1 (TEST build): every ColdFire step and every SHARC runner part passed; the steps on both processors are running again. v0.77 LIGHTER (audio-frame cost 41,288 instructions against stock's 39,924, down from 41,732): its ColdFire steps started beside them.",
+ "updated": "2026-11-28T09:30:49+00:00"
 }
