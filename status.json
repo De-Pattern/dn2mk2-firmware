@@ -11,7 +11,7 @@
    ],
    "state": "run",
    "frac": 0.375,
-   "status": "running: stroute_L"
+   "status": "running: stroute_R"
   },
   {
    "label": "v0.77 \u00b7 ColdFire steps",
@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 (TEST build): THRES, FLEX and FLEX playback passed again on both processors; the last of them resumed after the two-hour job limit. Then FLEX timing, MUTE SRC and the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
- "updated": "2026-11-28T11:00:41+00:00"
+ "updated": "2026-11-28T11:09:43+00:00"
 }
