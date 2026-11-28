@@ -2,31 +2,27 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 ColdFire steps",
-   "done": 46,
+   "done": 47,
    "total": 0,
    "last": [
-    "RECORDER text inside its places, every state and R.LEN value (ColdFire)",
     "KEYBOARD kept through grid recording (ColdFire)",
-    "KEYBOARD HOLD"
+    "KEYBOARD HOLD",
+    "the arp on MIDI tracks (ColdFire)"
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: midiarp_midi_off"
+   "status": "running: inkey_arp_off"
   },
   {
    "label": "v0.76-t1 TEST build \u00b7 SHARC runner",
-   "done": 24,
+   "done": 0,
    "total": 0,
-   "last": [
-    "SHARC runner",
-    "SHARC runner",
-    "SHARC runner"
-   ],
-   "state": "bad",
-   "frac": 1,
-   "status": "stopped: SHARC runner failed (fixing, then a new run)"
+   "last": [],
+   "state": "run",
+   "frac": 0.0,
+   "status": "running"
   }
  ],
- "note": "v0.76-t1 (TEST build): every step on both processors passed (THRES, FLEX, FLEX playback, FLEX timing, MUTE SRC, the stereo route). The SHARC runner now, beside the ColdFire steps. Then the full gate.",
- "updated": "2026-11-28T06:54:26+00:00"
+ "note": "v0.76-t1 (TEST build): the SHARC runner's link and MAIN recorder parts failed on a change to the runner's own model (they fail the same way on the released v0.76); the model is narrowed back to where it was measured and the SHARC runner runs again. The steps on both processors run again after it. ColdFire steps resumed.",
+ "updated": "2026-11-28T07:03:38+00:00"
 }
