@@ -28,5 +28,5 @@
   }
  ],
  "note": "v0.76-t1 STEREO (TEST build) published. v0.77 LIGHTER: ColdFire steps resumed after the two-hour job limit (62 passes kept; the UI fuzz and the dead link left); FLEX timing and MUTE SRC on both processors. Then the SHARC runner and the full gate.",
- "updated": "2026-11-28T15:41:15+00:00"
+ "updated": "2026-11-28T15:53:18+00:00"
 }
