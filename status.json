@@ -15,18 +15,18 @@
   },
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 43,
+   "done": 44,
    "total": 0,
    "last": [
-    "parameter slides (ColdFire)",
     "FLEX on the ColdFire",
-    "RECORDER text inside its places, every state and R.LEN value (ColdFire)"
+    "RECORDER text inside its places, every state and R.LEN value (ColdFire)",
+    "KEYBOARD kept through grid recording (ColdFire)"
    ],
    "state": "run",
    "frac": 0.99,
-   "status": "running: kbrec"
+   "status": "running: kbhold"
   }
  ],
  "note": "v0.76-t1 (TEST build): the stereo route check passed again (L exact 50/50 blocks, R within rounding). FLEX timing and MUTE SRC now, the last before the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
- "updated": "2026-11-28T12:42:37+00:00"
+ "updated": "2026-11-28T12:45:40+00:00"
 }
