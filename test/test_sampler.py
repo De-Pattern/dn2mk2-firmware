@@ -1192,7 +1192,12 @@ def test_stereo_2b_a_stereo_voice_renders_l_and_r_each_as_its_own_mono_sample():
         assert max(abs(x) for x in lm) > 0.01 and max(abs(x) for x in rm) > 0.01, name
         assert bits(lo) == bits(lm), (name, "L")
         assert bits(ro) == bits(rm), (name, "R")
-        assert all(slots), name                                  # the slot held every block
+        # the slot held until the voice's sample ends, then free for good (v0.76-t2: an ended note
+        # kept it); every block after the slot is freed silent on both sides
+        held = [bool(x) for x in slots]
+        k = held.index(False) if False in held else len(held)
+        assert k > 0 and not any(held[k:]), (name, held)
+        assert all(x == 0.0 for x in lo[32 * (k + 1):] + ro[32 * (k + 1):]), (name, "after the slot")
     # a mono sample on the wrapper: one run, as voice() alone, no slot
     mo, _, mslots, _ = run(left, SM.FMT_I16, SM.TYPE_OF["ONESHOT"], 60.0, 127, True)
     mv, *_ = run(left, SM.FMT_I16, SM.TYPE_OF["ONESHOT"], 60.0, 127, False)
