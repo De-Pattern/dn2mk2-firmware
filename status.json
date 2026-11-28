@@ -1,19 +1,6 @@
 {
  "gates": [
   {
-   "label": "v0.76-t1 TEST build \u00b7 full gate",
-   "done": 71,
-   "total": 0,
-   "last": [
-    "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)",
-    "sample link, dead link (ColdFire)",
-    "SHARC runner"
-   ],
-   "state": "ok",
-   "frac": 1,
-   "status": "CLEARED TO FLASH"
-  },
-  {
    "label": "v0.77 \u00b7 ColdFire steps",
    "done": 54,
    "total": 0,
@@ -27,6 +14,6 @@
    "status": "running: fineknob"
   }
  ],
- "note": "v0.76-t1 (TEST build): every step passed on its own; the full gate run now. v0.77 LIGHTER: ColdFire steps beside it.",
- "updated": "2026-11-28T13:21:15+00:00"
+ "note": "v0.76-t1 STEREO (TEST build): CLEARED TO FLASH and published (patcher, under TEST). v0.77 LIGHTER: ColdFire steps now; then its steps on both processors, the SHARC runner and the full gate.",
+ "updated": "2026-11-28T13:25:10+00:00"
 }
