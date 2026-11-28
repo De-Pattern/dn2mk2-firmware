@@ -177,6 +177,16 @@ def as_const(x: float):
     return Const(struct.unpack("<I", struct.pack("<f", x))[0])
 
 
+# G12 applies only in stock's pan stage, where it was measured: there the stores must reach the
+# stereo buffers the sends and the main bus read, as they do on every unit. Applied to every
+# MODIFY without a width (2026-11-28, the v0.76-t1 gate), it moved some twenty other stock sites
+# and two of our L2 routines' addresses that no unit has shown, and the runner's link and MAIN
+# recorder steps then failed exactly alike on the released v0.76 (proven on units): its stock
+# run's voices and its master-mix buffer moved. Every release before was gated, and confirmed on
+# hardware, on the runner as it was there; widening G12 waits for each site's own evidence.
+G12_LO, G12_HI = 0x1C9AE7, 0x1C9B30
+
+
 class Fixups:
     def __init__(self):
         self.counts = collections.Counter()
@@ -221,6 +231,8 @@ class Fixups:
         if t == "7a" and (F(f, "w") or F(f, "l")):
             return None
         s = runner.state
+        if not (G12_LO <= s.pc_sw <= G12_HI):
+            return None                             # (only where it was measured: G12_LO's note)
         if not getattr(s, "assume_nw32", False):
             return None                             # (the runner scales by 1 already)
         bank = 8 if F(f, "g") else 0
