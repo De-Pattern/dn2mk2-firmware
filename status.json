@@ -11,9 +11,9 @@
    ],
    "state": "run",
    "frac": 0.925,
-   "status": "running: machines-boot"
+   "status": "running: machines"
   }
  ],
  "note": "v0.76-t2 (TEST build): ColdFire steps now. v0.77 LIGHTER: held: one step on both processors (a FLEX take on PLAY's first step) did not pass; checking it against v0.76.",
- "updated": "2026-11-28T18:00:16+00:00"
+ "updated": "2026-11-28T18:09:18+00:00"
 }
