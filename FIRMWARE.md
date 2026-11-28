@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| v0.76-t1 (TEST) | 2026-11-28 | TEST build: **true stereo samples** (the second try; v0.54-t1 was pulled). v0.76 otherwise unchanged; v0.76 stays the latest release | `builds/test/v0.76-t1-STEREO/` | yes |
 | v0.76 | 2026-11-26 | **FLEX takes on their step** (they started a sixth of a step late: Dubmaster's 41 ms at 60 BPM, 18 at 120; now within ~2 ms) and **PERFORM macros that glide** (fine offsets moved smoothly, no zipper; D4) | `builds/v0.76-FLOW/` | yes |
 | v0.75 | 2026-11-25 | **Lighter P-I machines** (their block memory in the DSP's fast L1, bit-identical: PI-SD/PI-RS -47 %, PI-CC/RC/HH -36 %) and **FLEX takes of a track follow its LEVEL** (NiKo: they were recorded before it) | `builds/v0.75-PILEVEL/` | yes |
 | v0.74 | 2026-11-25 | **Live recording no longer drags the sequencer** (REC + PLAY with 6-7 keys: each recorded key cleared its step's slide locks in three passes; now one) | `builds/v0.74-LIVEREC/` | yes |
@@ -114,6 +115,51 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.76-t1 — STEREO (TEST build: true stereo samples)
+
+`DN2mod_v0.76-t1_STEREO_OS1.11.syx` (on `builds` under `test/v0.76-t1-STEREO/`)
+sha256 `532b451d5981ed383fe272afb16da78ee4d221b58eeed38ca6ad43ab69ff8dd5`
+Gate: CLEARED TO FLASH, 2026-11-28 (every step, incl. the new stereo route check on both processors and the SHARC runner's stereo step; passes reused only where every input was byte-identical, run step by step under the two-hour job limit). Source: commit `61751a0` (branch `stereo-merge`).
+
+**A test build.** v0.76 FLOW with stereo samples added, nothing else changed. The second try at
+stereo: v0.54-t1 was pulled after testers' reports (a silent stereo track, a click on every
+retrigger, other tracks dropping out, silence after a power cycle).
+
+**What it adds**
+- A stereo file imported with **keep stereo** ticked in the web tool (it shows **ST** in the
+  browser) plays in true stereo on the sample machines: L and R each through the voice's filter,
+  overdrive, envelopes and amp with the same settings, out to their own sides.
+- Up to four stereo voices at once; a fifth plays its mono mix (L + R) / 2.
+- PREVIEW plays a stereo sample in stereo; SLICE finds the slices of a stereo sample.
+
+**Fixed since v0.54-t1**: a stereo track sent a gain level, not its sound, to the main outputs and
+the FX sends. Each side now reaches the main outputs and the sends as it reaches the track
+outputs. The gate's new step `stroute` checks it on both processors: a stereo note's L side is
+bit-exact the same note played from a mono file of its L channel, its R side the one from its R
+channel (within rounding, 4.9e-7), at the track outputs and at the buffer the main bus and the
+sends read (2.6e-7). v0.54-t1 fails that check.
+
+**Tests**
+1. In the web tool tick **keep stereo**, import a stereo file whose sides clearly differ (a
+   hard-panned loop, a tone in one side only). The browser shows **ST**.
+2. Play it on a ONESHOT track on headphones: left comes out left, right comes out right.
+3. An FM Tone track playing beside it the whole time: sounds on every trig, nothing drops out.
+4. Retrigger the stereo sample quickly, then chords of two, three, four notes: no clicks, no side
+   silent, no other track dropping out. **The emulator cannot check this: it hears only the first
+   voice after power-on.**
+5. A fifth stereo voice: plays the mono mix, nothing drops.
+6. Save the project, power cycle, play again: everything sounds, the other tracks too.
+7. PREVIEW a stereo sample in the browser; SLICE it (16 slices).
+8. The FX sends (chorus, delay, reverb) on the stereo track: both sides go in.
+9. The regression check (top of this file).
+
+**Known issues**
+- Comb- and Comb+ play a stereo sample's left side on both sides.
+- The recorder and FLEX record mono.
+- Unverified on hardware: several stereo voices at once, retriggers, the fifth voice, voice
+  stealing (the emulator sounds one voice).
+- Everything listed for v0.76.
 
 ## v0.76 — FLOW (FLEX takes on their step, PERFORM macros that glide)
 
