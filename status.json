@@ -2,31 +2,27 @@
  "gates": [
   {
    "label": "v0.76-t1 TEST build \u00b7 steps on both processors",
-   "done": 18,
+   "done": 0,
    "total": 0,
-   "last": [
-    "THRES on both processors (coupled)",
-    "FLEX",
-    "FLEX buffers played by a ONESHOT track, on both processors (coupled)"
-   ],
+   "last": [],
    "state": "run",
-   "frac": 0.45,
-   "status": "running: stroute_stereo"
+   "frac": 0.0,
+   "status": "running"
   },
   {
    "label": "v0.77 \u00b7 ColdFire steps",
-   "done": 28,
+   "done": 30,
    "total": 0,
    "last": [
-    "stock questions and held keys (ColdFire)",
-    "Monomachine start values (ColdFire)",
-    "GRID allocate slice locks (ColdFire)"
+    "GRID allocate slice locks (ColdFire)",
+    "multi-select delete (ColdFire)",
+    "SELECT UNUSED (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.7,
-   "status": "running: multisel"
+   "frac": 0.75,
+   "status": "running: hooks"
   }
  ],
- "note": "v0.76-t1 (TEST build): every ColdFire step and every SHARC runner part passed; the steps on both processors are running again. v0.77 LIGHTER (audio-frame cost 41,288 instructions against stock's 39,924, down from 41,732): its ColdFire steps started beside them.",
- "updated": "2026-11-28T10:16:18+00:00"
+ "note": "v0.76-t1 (TEST build): THRES, FLEX and FLEX playback passed again on both processors; the last of them resumed after the two-hour job limit. Then FLEX timing, MUTE SRC and the full gate. v0.77 LIGHTER: ColdFire steps beside it.",
+ "updated": "2026-11-28T10:18:20+00:00"
 }
