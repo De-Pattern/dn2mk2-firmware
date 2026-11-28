@@ -2180,7 +2180,7 @@ power-on; the same values, read faster (DDRW from 1 voice to 2).
 
 `DN2mod_v0.35_SWEEP_OS1.11.syx`
 sha256 `2cf0fae42cf8aacb29e483236f55d9a636edc022f0f176b315367d8875a07a4e`
-Gate: CLEARED TO FLASH, 2026-11-01 (34 gates, nothing reused). Source: commit `4d5a499b`. Docs: `docs/user-reports.md` (DELTA-01..15, the scraper's list `docs/feedback/2026-10-31-discord.csv`).
+Gate: CLEARED TO FLASH, 2026-11-01 (34 gates, nothing reused). Source: commit `4d5a499b`. Docs: `docs/user-reports.md` (DELTA-01..15, the scraper's list `2026-10-31-discord.csv`, now in the private bench).
 
 Everything in v0.34, plus:
 

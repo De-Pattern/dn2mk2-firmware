@@ -404,14 +404,14 @@ inharmonic modes).
 - **Undecided (owner, 2026-11-01, "let's sit on it")**: PROJECT RAM shown as one list
   (or renamed POOL) instead of split into INCOMING and RECORDED, leaving those two as
   +DRIVE folders only.
-- From the Discord audit (`docs/feedback/2026-10-30-discord.csv`): pattern direct jump,
+- From the Discord audit (`2026-10-30-discord.csv`, now in the private bench): pattern direct jump,
   Markov song mode, an LFO matrix, trigless trigs, parameter slides, screen streaming,
   MD/MnM preset import, per-track flanger/phaser, capicola stretch, per-project sample
   pools.
 
 ## v0.35: the bug sweep (2026-11-01; the owner: "we cant keep pushing releases with the same bugs present")
 
-The scraper's list (`docs/feedback/2026-10-31-discord.csv`, DELTA-01..15) worked through,
+The scraper's list (`2026-10-31-discord.csv`, now in the private bench, DELTA-01..15) worked through,
 fixed in the tree and gated: DELTA-12 (MACHINE SEL's empty FLTR column after RIGHT from a
 machine low in the list: stock keeps the list's scroll across columns; gate 6r walks it),
 DELTA-04 / M3 (a held key's repeat items restarted the +DRIVE preview; ours now ignore a
