@@ -2,18 +2,18 @@
  "gates": [
   {
    "label": "v0.76-t2 TEST build \u00b7 ColdFire steps",
-   "done": 31,
+   "done": 32,
    "total": 0,
    "last": [
-    "GRID allocate slice locks (ColdFire)",
     "multi-select delete (ColdFire)",
-    "SELECT UNUSED (ColdFire)"
+    "SELECT UNUSED (ColdFire)",
+    "overlays let go (ColdFire)"
    ],
    "state": "run",
-   "frac": 0.775,
-   "status": "running: hooks"
+   "frac": 0.8,
+   "status": "running: recflow"
   }
  ],
  "note": "v0.76-t2 (TEST build): ColdFire steps now. v0.77 LIGHTER: held: one step on both processors (a FLEX take on PLAY's first step) did not pass; checking it against v0.76.",
- "updated": "2026-11-28T17:39:03+00:00"
+ "updated": "2026-11-28T17:42:06+00:00"
 }
